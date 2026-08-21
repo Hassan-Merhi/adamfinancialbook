@@ -1,0 +1,135 @@
+/**
+ * The whole book in types.
+ *
+ * One idea runs through all of it: an entry is a single event, and every
+ * consequence of that event is stored with it as an effect. Balances are never
+ * written down — they are always an opening figure plus the effects on top.
+ * That is what makes a past date reproducible and double-counting impossible.
+ */
+
+export type BusinessId = string;
+export type Id = string;
+
+export interface Business { id: BusinessId; name: string; }
+
+export interface Account {
+  id: Id;
+  name: string;
+  businessId: BusinessId;
+  opening: number;
+}
+
+export interface Project {
+  id: Id;
+  name: string;
+  scope: string;
+  businessId: BusinessId;
+}
+
+/** A receipt from a client, counted once on the day the job pays. */
+export interface ProjectReceipt {
+  id: Id;
+  projectId: Id;
+  /** ISO date, or '' when the date is genuinely unknown. */
+  occurredOn: string;
+  amount: number;
+  /** false while the money is promised but has not reached an account. */
+  inCash: boolean;
+  entryId: Id | null;
+}
+
+/**
+ * Three kinds of person, never mixed:
+ *   receivable — they owe you
+ *   payable    — you owe them (a supplier)
+ *   salary     — payroll: `salary` is owed each period, advances count against it
+ */
+export type PersonKind = 'receivable' | 'payable' | 'salary';
+
+export interface Person {
+  id: Id;
+  name: string;
+  role: string;
+  businessId: BusinessId;
+  kind: PersonKind;
+  /** Opening figure in the person's own terms: an amount owed, either way. */
+  opening: number;
+  /** Payroll only. */
+  salary: number;
+}
+
+/**
+ * A position between two of your own businesses. `amount` is always read as
+ * "`fromBusiness` owes `toBusiness`" — a negative value simply means the debt
+ * runs the other way. The pair is never flipped in storage, so history stays
+ * readable.
+ */
+export interface Loan {
+  id: Id;
+  fromBusiness: BusinessId;
+  toBusiness: BusinessId;
+  opening: number;
+}
+
+export type EntryKind =
+  | 'expense'          // money left an account
+  | 'credit_purchase'  // goods taken, nothing paid: only what you owe changes
+  | 'receipt'          // a project paid you
+  | 'transfer'         // between two of your own accounts
+  | 'person_loan'      // you lent someone money
+  | 'salary'           // paid against what an employee is owed
+  | 'supplier_payment'; // paid down what you owe a supplier
+
+export interface EntryInput {
+  occurredOn: string;         // ISO date
+  kind: EntryKind;
+  amount: number;
+  purpose: string;
+  raw: string;                // exactly what was typed
+  accountId?: Id | null;
+  toAccountId?: Id | null;    // transfers
+  projectId?: Id | null;
+  personId?: Id | null;
+  /** Paid out of one business's account on behalf of another. */
+  forBusiness?: BusinessId | null;
+  /** History being recorded after the fact: updates the past, not today's cash. */
+  historical?: boolean;
+  /** This money was already counted as a project receipt; it is only now arriving. */
+  linkReceiptId?: Id | null;
+}
+
+export type EffectType = 'account' | 'project' | 'person' | 'loan' | 'cost' | 'receipt_banked';
+
+/**
+ * One consequence of one entry. `delta` is signed in the target's own terms:
+ * cash up or down, an amount owed up or down, a loan position moving.
+ */
+export interface Effect {
+  type: EffectType;
+  targetId?: Id;
+  fromBusiness?: BusinessId;
+  toBusiness?: BusinessId;
+  delta: number;
+}
+
+export interface Entry extends EntryInput {
+  id: Id;
+  effects: Effect[];
+  /** Set when an entry has been corrected, so the original stays visible. */
+  correctedFrom: number | null;
+  createdAt: string;
+}
+
+/** Everything the engine needs to interpret a sentence and compute effects. */
+export interface Catalog {
+  businesses: Business[];
+  accounts: Account[];
+  projects: Project[];
+  receipts: ProjectReceipt[];
+  people: Person[];
+  loans: Loan[];
+}
+
+export interface Book extends Catalog {
+  entries: Entry[];
+}

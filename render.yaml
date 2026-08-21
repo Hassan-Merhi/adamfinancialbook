@@ -1,0 +1,25 @@
+# One click on Render: a web service and its database.
+# Point Render at this repo and it reads this file — nothing to configure by hand
+# except APP_TOKEN, which is what keeps the book private until Phase 4 adds login.
+services:
+  - type: web
+    name: financial-book
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: financial-book-db
+          property: connectionString
+      - key: APP_TOKEN
+        generateValue: true      # Render makes one; read it in the dashboard
+      - key: NODE_VERSION
+        value: "22"
+
+databases:
+  - name: financial-book-db
+    plan: basic-256mb
+    postgresMajorVersion: "16"
