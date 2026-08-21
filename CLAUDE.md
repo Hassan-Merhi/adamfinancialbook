@@ -16,10 +16,14 @@ section is not decoration, it is the constraint the whole codebase is built on.
 5. **Corrections replace.** Reverse the old effects, write new ones, keep
    `correctedFrom`.
 
+6. **A reader never saves.** `shared/parse.ts` and `server/read.ts` both return a
+   draft for a person to confirm. Neither writes to the book, and neither may
+   return an id that is not in the catalog.
+
 ## Layout
 
-- `shared/` — types and the engine. Pure functions, no database, no React.
-  Every money rule lives here and every one of them has a test.
+- `shared/` — types, the engine, and the rules reader. Pure functions, no
+  database, no React. Every money rule lives here and every one has a test.
 - `server/` — Postgres schema, the API, loading and saving the book.
 - `client/` — the app. The look is CSS tokens only; changing the palette or the
   fonts must never require touching a screen.

@@ -7,6 +7,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { api, type LoadedBook } from './api';
+import Entry from './Entry';
 import type { EntryKind } from '../../shared/types';
 
 const money = (v: number) => (v < 0 ? '−' : '') + '$' + Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
@@ -35,6 +36,7 @@ export default function App() {
     try { await work(); await reload(); setNote({ text: done }); }
     catch (e) { setNote({ text: (e as Error).message, bad: true }); }
   };
+  const say = (text: string, bad?: boolean) => setNote({ text, bad });
 
   if (!book) {
     return <div className="wrap"><p className="muted">Opening the book…</p>
@@ -67,10 +69,13 @@ export default function App() {
 
       {empty && (
         <div className="note">
-          The book is empty. Open <b>Set it up</b> and add a business, then its accounts —
-          opening balances go in as you create each one.
+          The book is empty. Say <b>create a business called …</b> in the box below, then
+          <b> add account … under … with $…</b> — opening balances go in as you create each one.
+          The forms under <b>Set it up</b> do the same thing if you prefer them.
         </div>
       )}
+
+      {tab === 'book' && <Entry book={book} reload={reload} say={say} />}
 
       {tab === 'setup' ? <Setup book={book} run={run} /> : <TheBook book={book} run={run} />}
     </div>
@@ -86,8 +91,6 @@ function TheBook({ book, run }: { book: LoadedBook; run: (w: () => Promise<unkno
 
   return (
     <>
-      <NewEntry book={book} run={run} />
-
       {book.businesses.map((b) => (
         <div className="card" key={b.id}>
           <h3><span>{b.name}</span><span className="num">{money(book.balances.businesses[b.id] ?? 0)}</span></h3>
@@ -195,7 +198,7 @@ function NewEntry({ book, run }: { book: LoadedBook; run: (w: () => Promise<unkn
 
   return (
     <div className="card">
-      <h3>Log something</h3>
+      <h3>Log something by hand <span className="muted">the box above is usually quicker</span></h3>
       <div className="form">
         <div className="f"><label>Type</label>
           <select value={kind} onChange={(e) => setKind(e.target.value as EntryKind)}>
@@ -361,6 +364,8 @@ function Setup({ book, run }: { book: LoadedBook; run: (w: () => Promise<unknown
             }}>Add</button>
         </div>
       </div>
+
+      {book.accounts.length > 0 && <NewEntry book={book} run={run} />}
 
       {book.businesses.length > 1 && (
         <div className="card">

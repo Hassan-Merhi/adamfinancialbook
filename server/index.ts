@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { newId, query } from './db.js';
 import { correctAmount, ensureLoanPair, loadBook, saveEntry } from './book.js';
+import { readSentence } from './read.js';
 import {
   accountBalance, businessCash, loanBalance, personBalance,
   possibleDuplicateReceipt, projectReceived, statement, totalCash,
@@ -60,6 +61,30 @@ app.get('/api/statement', wrap(async (req, res) => {
     : null;
   if (!target) return res.status(400).json({ error: 'Say which account, person, project or loan.' });
   res.json({ rows: statement(book, target) });
+}));
+
+/* ---------------- reading a sentence ---------------- */
+
+/**
+ * Turns what he typed into a draft. Nothing is saved here — the draft goes back
+ * to the screen, he confirms or corrects it, and only then is it logged.
+ */
+app.post('/api/read', wrap(async (req, res) => {
+  const { text, today } = z.object({
+    text: z.string().min(1).max(500),
+    today: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  }).parse(req.body);
+
+  const book = await loadBook();
+  const { draft, source } = await readSentence(text, book, today ?? new Date().toISOString().slice(0, 10));
+
+  // A receipt the same size as one already recorded: is this new money, or that
+  // money finally arriving? The screen asks rather than deciding.
+  let duplicate = null;
+  if (draft.mode === 'entry' && draft.input.kind === 'receipt' && draft.input.projectId && draft.input.amount) {
+    duplicate = possibleDuplicateReceipt(book, draft.input.projectId, draft.input.amount);
+  }
+  res.json({ draft, source, duplicate });
 }));
 
 /* ---------------- setting the book up ---------------- */

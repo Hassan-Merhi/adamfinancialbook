@@ -16,6 +16,8 @@ services:
           property: connectionString
       - key: APP_TOKEN
         generateValue: true      # Render makes one; read it in the dashboard
+      - key: ANTHROPIC_API_KEY
+        sync: false          # optional: set it to have Claude read the sentences
       - key: NODE_VERSION
         value: "22"
 

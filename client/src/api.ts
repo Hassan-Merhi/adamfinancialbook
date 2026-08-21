@@ -1,5 +1,6 @@
 /** Everything the screens know about the server. */
-import type { Book, Entry, EntryInput } from '../../shared/types';
+import type { Book, Entry, EntryInput, ProjectReceipt } from '../../shared/types';
+import type { Draft } from '../../shared/parse';
 
 export interface Balances {
   totalCash: number;
@@ -28,8 +29,11 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
   return data as T;
 }
 
+export interface Reading { draft: Draft; source: 'claude' | 'rules'; duplicate: ProjectReceipt | null }
+
 export const api = {
   book: () => send<LoadedBook>('/book', 'GET'),
+  read: (text: string, today: string) => send<Reading>('/read', 'POST', { text, today }),
   addBusiness: (name: string) => send('/businesses', 'POST', { name }),
   addAccount: (b: { name: string; businessId: string; opening: number }) => send('/accounts', 'POST', b),
   addProject: (b: { name: string; businessId: string; opening: number; scope?: string }) => send('/projects', 'POST', b),

@@ -25,6 +25,30 @@ That single decision is what makes the book trustworthy:
 - A correction replaces an entry — old effects out, new ones in — instead of
   leaving two versions floating around.
 
+## Saying what happened
+
+You type the way you would say it, and the reading comes back for confirmation
+before anything is kept:
+
+```
+$900 STS chargeuse construction cash
+$250 filming for the bikes from construction cash
+$25000 withdrawn from Soficom into construction cash
+i bought 1 ton of steel from Dani
+$50000 collected from Kin Severe
+add supplier Somika Plumbing under Construction
+```
+
+The same box sets the book up — a business, an account with its opening balance,
+a project, a payroll worker, a supplier — and whatever it creates is part of the
+vocabulary immediately.
+
+Two readers, one shape. `shared/parse.ts` works with no key, no network and no
+cost. With `ANTHROPIC_API_KEY` set, `server/read.ts` asks Claude instead, giving
+it the book's own vocabulary; it falls back to the rules reader if anything goes
+wrong. Neither one saves: both return a draft, and every id they return is
+checked against the catalog before it is shown.
+
 ## Rules the code enforces
 
 | Rule | Where |
@@ -35,6 +59,8 @@ That single decision is what makes the book trustworthy:
 | A receipt already recorded, only now arriving, moves cash and nothing else | `possibleDuplicateReceipt`, `receipt_banked` |
 | A historical line updates the past and leaves today's cash alone | `historical` on an entry |
 | A person's loan, their salary and their invoices stay in three separate columns | `PersonKind` |
+| An account is never assumed silently — a guessed one is flagged on the card | `parse.ts` → `guessed` |
+| A count is not a price: "1 ton of bricks" asks for the amount | `parse.ts` → `readAmount` |
 
 Every one of these has a test in `shared/engine.test.ts`.
 
@@ -63,8 +89,8 @@ dashboard — with it set, every API call must send an `x-book-token` header.
 
 | Phase | What it adds |
 |---|---|
-| **1 — Foundation** *(this)* | Database, the entry-and-effects model, opening balances, plain forms over a real book |
-| 2 — Entry by sentence | You type "$900 STS chargeuse construction cash"; it reads it back for confirmation before saving |
+| 1 — Foundation ✅ | Database, the entry-and-effects model, opening balances, plain forms over a real book |
+| **2 — Entry by sentence ✅** *(this)* | You type it the way you say it; the reading comes back for confirmation, with every consequence shown, before it is saved |
 | 3 — The screens | Accounts and loans on one page, statements with filters, the day report that walks backwards and forwards |
 | 4 — Live and on your phone | Login, installed to the home screen, works with no signal, the day report delivered at your cut-off time |
 | 5 — Hardening | Audit trail, backups, spreadsheet export, a second user who enters while you approve |

@@ -300,3 +300,82 @@ export function correctEntry(entry: Entry, amount: number, catalog: Catalog): En
 
 export function round(n: number): number { return Math.round(n * 100) / 100; }
 function nearly(a: number, b: number): boolean { return Math.abs(a - b) < 0.005; }
+
+/* ------------------------------------------------------------------ *
+ * Describing an entry before it is saved
+ * ------------------------------------------------------------------ */
+
+export interface EffectLine {
+  label: string;
+  /** How much this target moves. Null for a line that is only a note. */
+  delta: number | null;
+  /** Where it lands. Null when there is no running figure to show. */
+  after: number | null;
+  /** True when minus means "you owe it" — people and loan positions. */
+  signed: boolean;
+}
+
+/**
+ * The same event, told from every angle it touches, with the figure each one
+ * lands on. This is what the confirmation card shows before anything is saved.
+ */
+export function describeEffects(effects: Effect[], book: Book): EffectLine[] {
+  return effects.map((e): EffectLine => {
+    if (e.type === 'account') {
+      const account = book.accounts.find((a) => a.id === e.targetId);
+      return {
+        label: account?.name ?? 'Account',
+        delta: e.delta,
+        after: round(accountBalance(book, e.targetId!) + e.delta),
+        signed: false,
+      };
+    }
+    if (e.type === 'project') {
+      const project = book.projects.find((p) => p.id === e.targetId);
+      return {
+        label: `${project?.name ?? 'Project'} — receipts`,
+        delta: e.delta,
+        after: round(projectReceived(book, e.targetId!) + e.delta),
+        signed: false,
+      };
+    }
+    if (e.type === 'cost') {
+      const project = book.projects.find((p) => p.id === e.targetId);
+      return { label: `${project?.name ?? 'Project'} — spent on the job`, delta: e.delta, after: null, signed: false };
+    }
+    if (e.type === 'receipt_banked') {
+      const receipt = book.receipts.find((r) => r.id === e.targetId);
+      const project = book.projects.find((p) => p.id === receipt?.projectId);
+      return {
+        label: `${project?.name ?? 'Project'} — the ${receipt?.occurredOn || 'earlier'} receipt reaching cash, not new money`,
+        delta: null, after: null, signed: false,
+      };
+    }
+    if (e.type === 'person') {
+      const person = book.people.find((p) => p.id === e.targetId);
+      const delta = person?.kind === 'payable' ? -e.delta : e.delta;
+      const what = person?.kind === 'receivable' ? 'they owe you'
+        : person?.kind === 'payable' ? 'you owe them' : 'salary owed';
+      return {
+        label: `${person?.name ?? 'Person'} — ${what}`,
+        delta,
+        after: round(personBalance(book, e.targetId!) + delta),
+        signed: true,
+      };
+    }
+    // loan
+    const loan = book.loans.find((l) =>
+      (l.fromBusiness === e.fromBusiness && l.toBusiness === e.toBusiness) ||
+      (l.fromBusiness === e.toBusiness && l.toBusiness === e.fromBusiness));
+    const current = loan ? (loan.fromBusiness === e.fromBusiness ? loanBalance(book, loan) : -loanBalance(book, loan)) : 0;
+    const after = round(current + e.delta);
+    const from = book.businesses.find((b) => b.id === e.fromBusiness)?.name ?? '?';
+    const to = book.businesses.find((b) => b.id === e.toBusiness)?.name ?? '?';
+    return {
+      label: after >= 0 ? `${from} owes ${to}` : `${to} owes ${from}`,
+      delta: e.delta,
+      after: Math.abs(after),
+      signed: false,
+    };
+  });
+}
