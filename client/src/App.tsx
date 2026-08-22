@@ -16,11 +16,12 @@ import People from './views/People';
 import Report from './views/Report';
 import Setup from './views/Setup';
 import History from './views/History';
+import Access from './views/Access';
 import Statement, { type Focus } from './views/Statement';
 import { money } from './ui';
 import './styles.css';
 
-type View = 'today' | 'money' | 'projects' | 'people' | 'report' | 'history' | 'setup';
+type View = 'today' | 'money' | 'projects' | 'people' | 'report' | 'history' | 'access' | 'setup';
 
 /** The long label is for the rail; the short one and the icon are for the phone. */
 const NAV: { id: View; label: string; short: string; icon: string }[] = [
@@ -38,6 +39,8 @@ const NAV: { id: View; label: string; short: string; icon: string }[] = [
     icon: 'M12 7v5l3 2M3.5 12a8.5 8.5 0 1 0 2.2-5.7M3 4v4h4' },
   { id: 'setup', label: 'Set it up', short: 'Setup',
     icon: 'M4 7h16M4 12h16M4 17h16M9 5v4M15 10v4M7 15v4' },
+  { id: 'access', label: 'Access', short: 'Access',
+    icon: 'M15.5 5a4.5 4.5 0 1 0-2.2 3.9L18 13.4V17h3.5v-3.5l-6-6A4.5 4.5 0 0 0 15.5 5zM11 5.6a1.4 1.4 0 1 1-2.8 0 1.4 1.4 0 0 1 2.8 0z' },
 ];
 
 const LOOKS = [['assistant', 'Assistant'], ['ledger', 'Ledger']] as const;
@@ -200,7 +203,7 @@ export default function App() {
           <div className="wrap">
             {note && <div className={`note ${note.bad ? 'err' : 'ok'}`}>{note.text}</div>}
 
-            {empty && (
+            {empty && view === 'today' && !focus && (
               <div className="note">
                 The book is empty. Say <b>create a business called …</b> in the box, then
                 <b> add account … under … with $…</b> — opening balances go in as you create each one.
@@ -215,6 +218,7 @@ export default function App() {
               : view === 'people' ? <People book={book} open={open} />
               : view === 'report' ? <Report book={book} run={run} />
               : view === 'history' ? <History book={book} />
+              : view === 'access' ? <Access me={me.user!} say={say} />
               : <Setup book={book} run={run} />}
 
             {/* the same two switches as the toggles, for a screen with no room for them */}

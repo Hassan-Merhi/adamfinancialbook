@@ -44,6 +44,14 @@ function safeParse(text: string) {
 
 export interface Me { user: { id: string; email: string; role: 'owner' | 'entry' } | null; needsFirstOwner: boolean }
 
+export interface Keyholder {
+  id: string;
+  email: string;
+  role: 'owner' | 'entry';
+  createdAt: string;
+  lastSeen: string | null;
+}
+
 export interface Reading { draft: Draft; source: 'claude' | 'rules'; duplicate: ProjectReceipt | null }
 
 export const api = {
@@ -66,4 +74,10 @@ export const api = {
   correct: (id: string, amount: number) => send(`/entries/${id}`, 'PATCH', { amount }),
   voidEntry: (id: string, reason: string) => send(`/entries/${id}/void`, 'POST', { reason }),
   history: () => send<{ lines: AuditLine[] }>('/history', 'GET'),
+  users: () => send<{ users: Keyholder[]; suggestion: string }>('/users', 'GET'),
+  addUser: (b: { email: string; password: string; role: string }) => send('/users', 'POST', b),
+  resetPassword: (id: string, password: string) => send(`/users/${id}/password`, 'POST', { password }),
+  setRole: (id: string, role: string) => send(`/users/${id}/role`, 'POST', { role }),
+  removeUser: (id: string) => send(`/users/${id}`, 'DELETE'),
+  changePassword: (current: string, next: string) => send('/password', 'POST', { current, next }),
 };

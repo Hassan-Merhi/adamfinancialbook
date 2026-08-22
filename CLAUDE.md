@@ -34,6 +34,12 @@ section is not decoration, it is the constraint the whole codebase is built on.
     history calls `record(req, …)`. A failed audit write must never fail the
     thing the user asked for.
 
+11. **A password change signs out everywhere else.** Every session carries the
+    user's `token_version`; changing a password moves it, which kills every
+    cookie issued before. Never issue a session without the current version.
+12. **The book always has an owner.** The last owner cannot be demoted or
+    removed, and nobody can remove themselves.
+
 ## Layout
 
 - `shared/` — types, the engine, and the rules reader. Pure functions, no

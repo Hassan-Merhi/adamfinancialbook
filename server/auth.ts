@@ -1,87 +1,99 @@
 /**
- * Who may open the book.
+ * Who may open the book, and what they may do once inside.
  *
- * A password is never stored, only a scrypt hash of it. A signed cookie carries
- * the session — no session table, nothing to clean up — and it is signed with
- * SESSION_SECRET, so a cookie cannot be forged or edited.
+ * Passwords and cookies live in session.ts; this is the part that knows about
+ * people.
  */
-import { randomBytes, createHmac, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
-import { promisify } from 'node:util';
 import type { RequestHandler } from 'express';
 import { newId, query } from './db.js';
-
-const scrypt = promisify(scryptCb) as (secret: string, salt: Buffer, len: number) => Promise<Buffer>;
-
-const SECRET = process.env.SESSION_SECRET ?? '';
-const DAYS = 30;
+import { checkPassword, hashPassword, readCookie, readSession } from './session.js';
 
 export type Role = 'owner' | 'entry';
-export interface User { id: string; email: string; role: Role; }
+export interface User { id: string; email: string; role: Role }
 
-/* ---------------- passwords ---------------- */
-
-export async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16);
-  const key = await scrypt(password, salt, 64);
-  return `scrypt$${salt.toString('base64')}$${key.toString('base64')}`;
+export interface UserRow extends User {
+  passwordHash: string;
+  tokenVersion: number;
+  createdAt: string;
 }
 
-export async function checkPassword(password: string, stored: string): Promise<boolean> {
-  const [scheme, saltB64, keyB64] = stored.split('$');
-  if (scheme !== 'scrypt' || !saltB64 || !keyB64) return false;
-  const key = await scrypt(password, Buffer.from(saltB64, 'base64'), 64);
-  const expected = Buffer.from(keyB64, 'base64');
-  return key.length === expected.length && timingSafeEqual(key, expected);
-}
-
-/* ---------------- the cookie ---------------- */
-
-export function signSession(userId: string): string {
-  const expires = Date.now() + DAYS * 86_400_000;
-  const body = `${userId}.${expires}`;
-  return `${body}.${sign(body)}`;
-}
-
-export function readSession(cookie: string | undefined): string | null {
-  if (!cookie) return null;
-  const parts = cookie.split('.');
-  if (parts.length !== 3) return null;
-  const [userId, expires, mac] = parts;
-  const expected = sign(`${userId}.${expires}`);
-  if (mac.length !== expected.length) return null;
-  if (!timingSafeEqual(Buffer.from(mac), Buffer.from(expected))) return null;
-  if (Number(expires) < Date.now()) return null;
-  return userId;
-}
-
-function sign(body: string): string {
-  return createHmac('sha256', SECRET).update(body).digest('base64url');
-}
-
-export function cookieHeader(value: string, maxAgeSeconds: number): string {
-  const secure = process.env.NODE_ENV === 'production' ? ' Secure;' : '';
-  return `book_session=${value}; Path=/; HttpOnly;${secure} SameSite=Lax; Max-Age=${maxAgeSeconds}`;
-}
-
-/* ---------------- users ---------------- */
+/* ---------------- people ---------------- */
 
 export async function createUser(email: string, password: string, role: Role): Promise<User> {
   const id = newId('usr');
   await query('INSERT INTO users (id, email, password_hash, role) VALUES ($1,$2,$3,$4)',
-    [id, email.toLowerCase().trim(), await hashPassword(password), role]);
-  return { id, email, role };
+    [id, tidyEmail(email), await hashPassword(password), role]);
+  return { id, email: tidyEmail(email), role };
 }
 
-export async function findUser(email: string) {
-  const rows = await query<{ id: string; email: string; password_hash: string; role: Role }>(
-    'SELECT id, email, password_hash, role FROM users WHERE email = $1', [email.toLowerCase().trim()]);
-  return rows[0] ?? null;
+export async function findUser(email: string): Promise<UserRow | null> {
+  const rows = await query<Record<string, string | number>>(
+    `SELECT id, email, password_hash, role, token_version, created_at
+     FROM users WHERE email = $1`, [tidyEmail(email)]);
+  return rows[0] ? asUser(rows[0]) : null;
+}
+
+export async function listUsers() {
+  // when each of them was last let in, so a name nobody uses is easy to spot
+  return query<{ id: string; email: string; role: Role; created_at: Date; last_seen: Date | null }>(
+    `SELECT u.id, u.email, u.role, u.created_at,
+            (SELECT max(a.at) FROM audit a WHERE a.action = 'signed in' AND a.actor = u.id) AS last_seen
+     FROM users u ORDER BY u.created_at`);
 }
 
 export async function userCount(): Promise<number> {
-  const rows = await query<{ n: string }>('SELECT count(*)::int AS n FROM users');
+  const rows = await query<{ n: number }>('SELECT count(*)::int AS n FROM users');
   return Number(rows[0]?.n ?? 0);
 }
+
+export async function ownerCount(): Promise<number> {
+  const rows = await query<{ n: number }>(`SELECT count(*)::int AS n FROM users WHERE role = 'owner'`);
+  return Number(rows[0]?.n ?? 0);
+}
+
+/**
+ * Changing a password moves the token version with it, so every session opened
+ * with the old password — on any phone, in any browser — stops working.
+ */
+export async function setPassword(userId: string, password: string): Promise<number> {
+  const rows = await query<{ token_version: number }>(
+    `UPDATE users SET password_hash = $2, token_version = token_version + 1
+     WHERE id = $1 RETURNING token_version`, [userId, await hashPassword(password)]);
+  if (!rows[0]) throw Object.assign(new Error('No such person'), { status: 404 });
+  return rows[0].token_version;
+}
+
+export async function setRole(userId: string, role: Role): Promise<void> {
+  await query('UPDATE users SET role = $2 WHERE id = $1', [userId, role]);
+}
+
+export async function removeUser(userId: string): Promise<void> {
+  await query('DELETE FROM users WHERE id = $1', [userId]);
+}
+
+export async function getUser(userId: string): Promise<UserRow | null> {
+  const rows = await query<Record<string, string | number>>(
+    `SELECT id, email, password_hash, role, token_version, created_at FROM users WHERE id = $1`, [userId]);
+  return rows[0] ? asUser(rows[0]) : null;
+}
+
+export async function verifyPassword(userId: string, password: string): Promise<boolean> {
+  const user = await getUser(userId);
+  return !!user && checkPassword(password, user.passwordHash);
+}
+
+function asUser(row: Record<string, unknown>): UserRow {
+  return {
+    id: String(row.id),
+    email: String(row.email),
+    role: row.role as Role,
+    passwordHash: String(row.password_hash),
+    tokenVersion: Number(row.token_version ?? 0),
+    createdAt: new Date(row.created_at as string).toISOString(),
+  };
+}
+
+function tidyEmail(email: string): string { return email.trim().toLowerCase(); }
 
 /* ---------------- the gate ---------------- */
 
@@ -94,18 +106,16 @@ declare global {
 
 const OPEN = new Set(['/health', '/login', '/first-owner', '/me']);
 
-/**
- * Everything under /api needs a session, except signing in and asking who you
- * are. Without SESSION_SECRET set the server refuses to start, so a book can
- * never end up live with the door open.
- */
 export const requireLogin: RequestHandler = async (req, res, next) => {
   // Always work out who is asking, even on the open paths: /me has to be able
   // to answer "you are still signed in" after a page reload.
-  const userId = readSession(readCookie(req.headers.cookie, 'book_session'));
-  if (userId) {
-    const rows = await query<User>('SELECT id, email, role FROM users WHERE id = $1', [userId]);
-    if (rows[0]) req.user = rows[0];
+  const session = readSession(readCookie(req.headers.cookie, 'book_session'));
+  if (session) {
+    const user = await getUser(session.userId);
+    // a session from before a password change is no longer a session
+    if (user && user.tokenVersion === session.version) {
+      req.user = { id: user.id, email: user.email, role: user.role };
+    }
   }
   if (OPEN.has(req.path)) return next();
   if (!req.user) return res.status(401).json({ error: 'Sign in to open the book.' });
@@ -118,11 +128,4 @@ export const ownerOnly: RequestHandler = (req, res, next) => {
   res.status(403).json({ error: 'Only you can change that — ask the owner.' });
 };
 
-export function readCookie(header: string | undefined, name: string): string | undefined {
-  if (!header) return undefined;
-  for (const part of header.split(';')) {
-    const [k, ...v] = part.trim().split('=');
-    if (k === name) return v.join('=');
-  }
-  return undefined;
-}
+export { checkPassword, readCookie } from './session.js';

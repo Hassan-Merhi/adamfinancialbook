@@ -132,3 +132,6 @@ CREATE TABLE IF NOT EXISTS audit (
 );
 
 CREATE INDEX IF NOT EXISTS audit_at_idx ON audit (at DESC);
+
+-- Moves whenever a password changes, which stops every session issued before it.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INT NOT NULL DEFAULT 0;

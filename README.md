@@ -99,17 +99,28 @@ Every one of these has a test in `shared/engine.test.ts`.
 
 ## Who can open it
 
-Nothing behind `/api` opens without a session. The first time you load an empty
-book it asks you to choose the email and password you will use; after that the
-door is closed and new people are added from the command line:
+Nothing behind `/api` opens without a session, and nobody can let themselves in.
+The first time you load an empty book it asks you to choose the email and
+password you will use; after that the door is closed for good.
 
-```bash
-npm run user:add -- someone@example.com 'their password' entry
-```
+Everything else happens on the **Access** screen:
+
+- **Your password** — change it whenever you like. Every other session you had
+  open, on any device, is signed out the moment you do.
+- **Who can open the book** — everyone with a key, when each of them last used
+  it, and what they may do. Open a row to set them a new password, change what
+  they may do, or take their access away, which signs them out at once.
+- **Give someone access** — an email, a role and a first password (there is a
+  Suggest button for one that can be read down the phone). The password is shown
+  once, for you to pass on; they change it themselves on the same screen.
 
 Two roles. **owner** does everything. **entry** can only log entries and read
-them back — no setting the book up, no corrections — so someone can type while
-you approve.
+them back — no setting the book up, no corrections, no access screen beyond
+their own password — so someone can type while you approve.
+
+The book can never be left without an owner: the last one cannot be demoted or
+removed, and nobody can remove themselves. `npm run user:add` still works from
+the command line if you are ever locked out.
 
 ## On your phone
 
