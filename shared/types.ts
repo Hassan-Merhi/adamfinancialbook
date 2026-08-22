@@ -96,6 +96,12 @@ export interface EntryInput {
   historical?: boolean;
   /** This money was already counted as a project receipt; it is only now arriving. */
   linkReceiptId?: Id | null;
+  /**
+   * A reference the app made before sending. If the same entry is sent twice —
+   * two tabs, a retry, an outbox flushed by two events at once — the second one
+   * is recognised and ignored rather than logged again.
+   */
+  clientRef?: string | null;
 }
 
 export type EffectType = 'account' | 'project' | 'person' | 'loan' | 'cost' | 'receipt_banked';

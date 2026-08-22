@@ -14,18 +14,22 @@
     "start": "tsx server/index.ts",
     "db:setup": "tsx server/setup-db.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "user:add": "tsx server/add-user.ts",
+    "report:send": "tsx server/send-report.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "nodemailer": "^9.0.5",
     "pg": "^8.16.3",
     "zod": "^4.1.12"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
     "@types/node": "^24.7.0",
+    "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.15.5",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.1",

@@ -80,14 +80,51 @@ One codebase serves the desktop and the phone.
 | A person's loan, their salary and their invoices stay in three separate columns | `PersonKind` |
 | An account is never assumed silently — a guessed one is flagged on the card | `parse.ts` → `guessed` |
 | A count is not a price: "1 ton of bricks" asks for the amount | `parse.ts` → `readAmount` |
+| The same entry cannot land twice, however many times it is sent | `clientRef` + `entries_client_ref_idx` |
 
 Every one of these has a test in `shared/engine.test.ts`.
+
+## Who can open it
+
+Nothing behind `/api` opens without a session. The first time you load an empty
+book it asks you to choose the email and password you will use; after that the
+door is closed and new people are added from the command line:
+
+```bash
+npm run user:add -- someone@example.com 'their password' entry
+```
+
+Two roles. **owner** does everything. **entry** can only log entries and read
+them back — no setting the book up, no corrections — so someone can type while
+you approve.
+
+## On your phone
+
+Open it in Safari or Chrome and add it to the home screen: it installs as an
+app, opens full screen, and works with no signal.
+
+With no network it opens on the figures from the last time it loaded, says so
+plainly, and reads your sentences locally instead of asking the server. Anything
+you log waits in an outbox and is sent, oldest first, the moment there is a
+network. Every entry carries a reference the app made, so the same one can never
+land twice — not from a retry, not from two tabs, not from the network coming
+back twice at once.
+
+Setting the book up and correcting an entry are not queued: they need the server
+there and then, and say so rather than pretending.
+
+## The day report, delivered
+
+`npm run report:send` writes the day in plain words and emails it. With no
+`SMTP_URL` / `REPORT_TO` set it prints the report instead, so the schedule can be
+proved before any account is connected. `render.yaml` runs it daily at your
+cut-off time (17:00 UTC = 19:00 in Lubumbashi).
 
 ## Running it
 
 ```bash
 npm install
-cp .env.example .env      # then set DATABASE_URL
+cp .env.example .env      # then set DATABASE_URL and SESSION_SECRET
 npm run db:setup          # creates the tables (safe to re-run)
 npm run dev               # API on :5000, app on :5173
 ```
@@ -100,9 +137,14 @@ npm run build
 
 ## Deploying
 
-`render.yaml` describes the web service and its database. Point Render at this
-repo, let it read the file, then copy the generated `APP_TOKEN` out of the
-dashboard — with it set, every API call must send an `x-book-token` header.
+`render.yaml` describes the web service, its database, and the nightly report
+job. Point Render at this repo and let it read the file — `SESSION_SECRET` is
+generated for you. Set `REPORT_TO` and `SMTP_URL` when you want the report to
+arrive rather than just print, and `ANTHROPIC_API_KEY` if you want Claude to read
+the sentences.
+
+Then open the site and choose your email and password: the first owner is
+created once, on an empty book.
 
 ## Where this is going
 
@@ -110,8 +152,8 @@ dashboard — with it set, every API call must send an `x-book-token` header.
 |---|---|
 | 1 — Foundation ✅ | Database, the entry-and-effects model, opening balances, plain forms over a real book |
 | 2 — Entry by sentence ✅ | You type it the way you say it; the reading comes back for confirmation, with every consequence shown, before it is saved |
-| **3 — The screens ✅** *(this)* | Accounts and loans on one page, statements with filters, the day report that walks backwards and forwards, on desktop and phone |
-| 4 — Live and on your phone | Login, installed to the home screen, works with no signal, the day report delivered at your cut-off time |
+| 3 — The screens ✅ | Accounts and loans on one page, statements with filters, the day report that walks backwards and forwards, on desktop and phone |
+| **4 — Live and on your phone ✅** *(this)* | Login with two roles, installed to the home screen, works with no signal, the day report delivered at your cut-off time |
 | 5 — Hardening | Audit trail, backups, spreadsheet export, a second user who enters while you approve |
 
 ## Layout

@@ -159,3 +159,14 @@ tbody tr:hover { background:var(--sunk); }
   .dhead .bal { text-align:left; }
   .entry input { font-size:16px; }   /* keeps iOS from zooming in */
 }
+
+/* the door */
+.door { max-width:380px; margin:0 auto; padding:12vh 20px; }
+.door .card { margin:0; }
+.door .form { gap:14px; }
+.railfoot { margin-top:auto; padding:12px 11px 0; border-top:1px solid var(--line); display:flex; flex-direction:column; gap:4px; align-items:flex-start; }
+.railfoot .muted { font-size:11.5px; word-break:break-all; }
+@media (max-width: 760px) {
+  .railfoot { margin-top:0; padding:0 8px; border-top:0; border-left:1px solid var(--line); }
+  .railfoot .muted { display:none; }
+}

@@ -14,10 +14,32 @@ services:
         fromDatabase:
           name: financial-book-db
           property: connectionString
-      - key: APP_TOKEN
-        generateValue: true      # Render makes one; read it in the dashboard
+      - key: SESSION_SECRET
+        generateValue: true      # signs the login cookie; Render makes one
       - key: ANTHROPIC_API_KEY
         sync: false          # optional: set it to have Claude read the sentences
+      - key: NODE_VERSION
+        value: "22"
+
+  # The day report, at your cut-off time. 19:00 in Lubumbashi (UTC+2) is 17:00 UTC.
+  - type: cron
+    name: financial-book-day-report
+    runtime: node
+    plan: starter
+    schedule: "0 17 * * *"
+    buildCommand: npm ci
+    startCommand: npm run report:send
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: financial-book-db
+          property: connectionString
+      - key: REPORT_TO
+        sync: false          # where the report should land
+      - key: SMTP_URL
+        sync: false          # e.g. smtps://user:pass@smtp.gmail.com:465
+      - key: SESSION_SECRET
+        sync: false
       - key: NODE_VERSION
         value: "22"
 

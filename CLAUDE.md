@@ -20,6 +20,13 @@ section is not decoration, it is the constraint the whole codebase is built on.
    draft for a person to confirm. Neither writes to the book, and neither may
    return an id that is not in the catalog.
 
+7. **Nothing behind `/api` is open.** Every route needs a session; the ones that
+   reshape the book or edit history need the `owner` role. A state-changing call
+   must also carry `x-book: 1`, which a cross-site form cannot send.
+8. **Only entries are queued offline.** Setting the book up and correcting an
+   entry need the server there and then. Anything queued carries a `clientRef`
+   so it cannot be logged twice.
+
 ## Layout
 
 - `shared/` — types, the engine, and the rules reader. Pure functions, no

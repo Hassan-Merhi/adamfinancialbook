@@ -70,8 +70,12 @@ CREATE TABLE IF NOT EXISTS entries (
   historical      BOOLEAN NOT NULL DEFAULT false,
   link_receipt_id TEXT REFERENCES project_receipts(id),
   corrected_from  NUMERIC(14,2),
+  client_ref      TEXT UNIQUE,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS client_ref TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS entries_client_ref_idx ON entries (client_ref);
 
 -- Every consequence of an entry, written with it and rewritten on a correction.
 CREATE TABLE IF NOT EXISTS effects (
@@ -98,4 +102,14 @@ CREATE TABLE IF NOT EXISTS reminders (
   note        TEXT NOT NULL DEFAULT '',
   settled     BOOLEAN NOT NULL DEFAULT false,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Who may open the book. 'owner' can do everything; 'entry' can only add
+-- entries and read them back, so someone can type while you approve.
+CREATE TABLE IF NOT EXISTS users (
+  id            TEXT PRIMARY KEY,
+  email         TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role          TEXT NOT NULL CHECK (role IN ('owner','entry')),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );

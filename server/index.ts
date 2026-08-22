@@ -7,6 +7,11 @@ import { newId, query } from './db.js';
 import { correctAmount, ensureLoanPair, loadBook, saveEntry } from './book.js';
 import { readSentence } from './read.js';
 import {
+  checkPassword, cookieHeader, createUser, findUser, ownerOnly,
+  requireLogin, signSession, userCount,
+} from './auth.js';
+import { dayReport } from './report.js';
+import {
   accountBalance, businessCash, loanBalance, personBalance,
   possibleDuplicateReceipt, projectReceived, statement, totalCash,
 } from '../shared/engine.js';
@@ -14,20 +19,55 @@ import {
 const app = express();
 app.use(express.json());
 
-/**
- * Phase 1 keeps the door shut with a shared token rather than accounts —
- * proper login, and a second user who can enter but not approve, is Phase 4.
- * With no token set the API is open, which is fine on your own machine.
- */
-const TOKEN = process.env.APP_TOKEN;
+// Nothing behind /api opens without a session.
+if (!process.env.SESSION_SECRET) {
+  throw new Error('SESSION_SECRET is not set — the book would be open to anyone. Set it in .env.');
+}
+app.use('/api', requireLogin);
+
+// Browsers send cookies on cross-site form posts too, so a state-changing call
+// must also carry a header a form cannot set.
 app.use('/api', (req, res, next) => {
-  if (!TOKEN || req.path === '/health') return next();
-  if (req.get('x-book-token') === TOKEN) return next();
-  res.status(401).json({ error: 'Not your book.' });
+  if (req.method === 'GET' || req.path === '/login' || req.path === '/first-owner') return next();
+  if (req.get('x-book') === '1') return next();
+  res.status(403).json({ error: 'Refused: that request did not come from the app.' });
 });
 
 const wrap = (fn: express.RequestHandler): express.RequestHandler =>
   (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+/* ---------------- who is holding the book ---------------- */
+
+app.get('/api/me', wrap(async (req, res) => {
+  res.json({ user: req.user ?? null, needsFirstOwner: (await userCount()) === 0 });
+}));
+
+app.post('/api/login', wrap(async (req, res) => {
+  const { email, password } = z.object({ email: z.string(), password: z.string() }).parse(req.body);
+  const user = await findUser(email);
+  // the same answer either way, so a wrong email cannot be told from a wrong password
+  if (!user || !(await checkPassword(password, user.password_hash))) {
+    return res.status(401).json({ error: 'That email and password do not match.' });
+  }
+  res.setHeader('Set-Cookie', cookieHeader(signSession(user.id), 30 * 86_400));
+  res.json({ user: { id: user.id, email: user.email, role: user.role } });
+}));
+
+app.post('/api/logout', wrap(async (_req, res) => {
+  res.setHeader('Set-Cookie', cookieHeader('', 0));
+  res.json({ ok: true });
+}));
+
+/** The very first owner, once, on an empty book. After that it is closed. */
+app.post('/api/first-owner', wrap(async (req, res) => {
+  if ((await userCount()) > 0) return res.status(403).json({ error: 'The book already has an owner.' });
+  const { email, password } = z.object({
+    email: z.string().email(), password: z.string().min(8),
+  }).parse(req.body);
+  const user = await createUser(email, password, 'owner');
+  res.setHeader('Set-Cookie', cookieHeader(signSession(user.id), 30 * 86_400));
+  res.status(201).json({ user });
+}));
 
 app.get('/api/health', wrap(async (_req, res) => {
   await query('SELECT 1');
@@ -92,7 +132,7 @@ app.post('/api/read', wrap(async (req, res) => {
 const nameOnly = z.object({ name: z.string().min(1).max(80) });
 const under = nameOnly.extend({ businessId: z.string().min(1), opening: z.number().default(0) });
 
-app.post('/api/businesses', wrap(async (req, res) => {
+app.post('/api/businesses', ownerOnly, wrap(async (req, res) => {
   const { name } = nameOnly.parse(req.body);
   const id = newId('biz');
   await query('INSERT INTO businesses (id, name) VALUES ($1,$2)', [id, name]);
@@ -102,7 +142,7 @@ app.post('/api/businesses', wrap(async (req, res) => {
   res.status(201).json({ id, name });
 }));
 
-app.post('/api/accounts', wrap(async (req, res) => {
+app.post('/api/accounts', ownerOnly, wrap(async (req, res) => {
   const { name, businessId, opening } = under.parse(req.body);
   const id = newId('acc');
   await query('INSERT INTO accounts (id, name, business_id, opening) VALUES ($1,$2,$3,$4)',
@@ -110,7 +150,7 @@ app.post('/api/accounts', wrap(async (req, res) => {
   res.status(201).json({ id, name, businessId, opening });
 }));
 
-app.post('/api/projects', wrap(async (req, res) => {
+app.post('/api/projects', ownerOnly, wrap(async (req, res) => {
   const body = under.extend({ scope: z.string().default('') }).parse(req.body);
   const id = newId('prj');
   await query('INSERT INTO projects (id, name, scope, business_id) VALUES ($1,$2,$3,$4)',
@@ -123,7 +163,7 @@ app.post('/api/projects', wrap(async (req, res) => {
   res.status(201).json({ id, ...body });
 }));
 
-app.post('/api/people', wrap(async (req, res) => {
+app.post('/api/people', ownerOnly, wrap(async (req, res) => {
   const body = under.extend({
     kind: z.enum(['receivable', 'payable', 'salary']),
     role: z.string().default(''),
@@ -137,7 +177,7 @@ app.post('/api/people', wrap(async (req, res) => {
 }));
 
 /** The opening position between two businesses, as of the cut-off. */
-app.put('/api/loans', wrap(async (req, res) => {
+app.put('/api/loans', ownerOnly, wrap(async (req, res) => {
   const body = z.object({
     fromBusiness: z.string(), toBusiness: z.string(), opening: z.number(),
   }).parse(req.body);
@@ -150,7 +190,7 @@ app.put('/api/loans', wrap(async (req, res) => {
 }));
 
 /** A promise to pay, kept beside the book so it is not forgotten — never a movement. */
-app.post('/api/reminders', wrap(async (req, res) => {
+app.post('/api/reminders', ownerOnly, wrap(async (req, res) => {
   const body = z.object({
     what: z.string().min(1).max(120),
     amount: z.number().default(0),
@@ -163,7 +203,7 @@ app.post('/api/reminders', wrap(async (req, res) => {
   res.status(201).json({ id, ...body });
 }));
 
-app.delete('/api/reminders/:id', wrap(async (req, res) => {
+app.delete('/api/reminders/:id', ownerOnly, wrap(async (req, res) => {
   await query('UPDATE reminders SET settled = true WHERE id = $1', [String(req.params.id)]);
   res.json({ ok: true });
 }));
@@ -183,6 +223,7 @@ const entryInput = z.object({
   forBusiness: z.string().nullish(),
   historical: z.boolean().default(false),
   linkReceiptId: z.string().nullish(),
+  clientRef: z.string().max(80).nullish(),
 });
 
 app.post('/api/entries', wrap(async (req, res) => {
@@ -223,10 +264,17 @@ app.get('/api/receipt-check', wrap(async (req, res) => {
   res.json({ match: possibleDuplicateReceipt(book, projectId, Number(amount)) });
 }));
 
-app.patch('/api/entries/:id', wrap(async (req, res) => {
+app.patch('/api/entries/:id', ownerOnly, wrap(async (req, res) => {
   const { amount } = z.object({ amount: z.number().positive() }).parse(req.body);
   await correctAmount(String(req.params.id), amount, await loadBook());
   res.json({ ok: true });
+}));
+
+/** The day report as plain text — the same words that arrive on your phone. */
+app.get('/api/report', wrap(async (req, res) => {
+  const on = typeof req.query.on === 'string' ? req.query.on : new Date().toISOString().slice(0, 10);
+  const book = await loadBook();
+  res.type('text/plain').send(dayReport(book, on));
 }));
 
 /* ---------------- serving the app ---------------- */

@@ -50,7 +50,7 @@ export async function loadBook(): Promise<Book> {
       id: t.id, occurredOn: iso(t.occurred_on), kind: t.kind, amount: t.amount,
       purpose: t.purpose, raw: t.raw, accountId: t.account_id, toAccountId: t.to_account_id,
       projectId: t.project_id, personId: t.person_id, forBusiness: t.for_business,
-      historical: t.historical, linkReceiptId: t.link_receipt_id,
+      historical: t.historical, linkReceiptId: t.link_receipt_id, clientRef: t.client_ref,
       effects: byEntry.get(t.id) ?? [], correctedFrom: t.corrected_from,
       createdAt: new Date(t.created_at).toISOString(),
     })),
@@ -68,6 +68,11 @@ function iso(d: Date | string | null): string {
  * and is only now arriving marks that row as reaching cash instead.
  */
 export async function saveEntry(input: EntryInput, book: Book): Promise<Entry> {
+  // Sent twice? Hand back the one already in the book rather than logging it again.
+  if (input.clientRef) {
+    const seen = book.entries.find((e) => e.clientRef === input.clientRef);
+    if (seen) return seen;
+  }
   const id = newId('ent');
   const effects = withLoanEffects(input, book);
   const client = await pool.connect();
@@ -75,12 +80,12 @@ export async function saveEntry(input: EntryInput, book: Book): Promise<Entry> {
     await client.query('BEGIN');
     await client.query(
       `INSERT INTO entries (id, occurred_on, kind, amount, purpose, raw, account_id, to_account_id,
-                            project_id, person_id, for_business, historical, link_receipt_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+                            project_id, person_id, for_business, historical, link_receipt_id, client_ref)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [id, input.occurredOn, input.kind, input.amount, input.purpose, input.raw,
        input.accountId ?? null, input.toAccountId ?? null, input.projectId ?? null,
        input.personId ?? null, input.forBusiness ?? null, input.historical ?? false,
-       input.linkReceiptId ?? null]);
+       input.linkReceiptId ?? null, input.clientRef ?? null]);
 
     await writeEffects(client, id, effects);
 
@@ -97,6 +102,12 @@ export async function saveEntry(input: EntryInput, book: Book): Promise<Entry> {
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');
+    // The same entry arriving twice at once: the unique reference stopped it.
+    if ((err as { code?: string }).code === '23505' && input.clientRef) {
+      const fresh = await loadBook();
+      const seen = fresh.entries.find((e) => e.clientRef === input.clientRef);
+      if (seen) return seen;
+    }
     throw err;
   } finally {
     client.release();

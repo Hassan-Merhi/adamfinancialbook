@@ -7,8 +7,10 @@
  */
 import { useState } from 'react';
 import { api, type LoadedBook, type Reading } from './api';
+import { looksOffline, outbox } from './offline';
 import { describeEffects, withLoanEffects } from '../../shared/engine';
 import type { Draft, SetupDraft } from '../../shared/parse';
+import { read as readHere } from '../../shared/parse';
 import type { EntryInput, EntryKind, ProjectReceipt } from '../../shared/types';
 
 const money = (v: number) => (v < 0 ? '−' : '') + '$' + Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
@@ -38,10 +40,11 @@ const EXAMPLES = [
   'add supplier Dani under Construction',
 ];
 
-export default function Entry({ book, reload, say }: {
+export default function Entry({ book, reload, say, onQueued }: {
   book: LoadedBook;
   reload: () => Promise<unknown>;
   say: (text: string, bad?: boolean) => void;
+  onQueued?: () => void;
 }) {
   const [text, setText] = useState('');
   const [reading, setReading] = useState<Reading | null>(null);
@@ -53,7 +56,13 @@ export default function Entry({ book, reload, say }: {
     try {
       setReading(await api.read(text.trim(), new Date().toISOString().slice(0, 10)));
       setText('');
-    } catch (e) { say((e as Error).message, true); }
+    } catch (e) {
+      // With no signal the reader is out of reach, so read it here instead.
+      if (looksOffline(e)) {
+        setReading({ draft: readHere(text.trim(), book, new Date().toISOString().slice(0, 10)), source: 'rules', duplicate: null });
+        setText('');
+      } else say((e as Error).message, true);
+    }
     finally { setBusy(false); }
   };
 
@@ -94,6 +103,7 @@ export default function Entry({ book, reload, say }: {
             done={async (line) => { setReading(null); await reload(); say(line); }}
             cancel={() => setReading(null)}
             fail={(m) => say(m, true)}
+            onQueued={onQueued}
           />)}
     </>
   );
@@ -101,7 +111,7 @@ export default function Entry({ book, reload, say }: {
 
 /* ------------------------------------------------------------------ */
 
-function EntryCard({ draft, duplicate, source, book, done, cancel, fail }: {
+function EntryCard({ draft, duplicate, source, book, done, cancel, fail, onQueued }: {
   draft: Extract<Draft, { mode: 'entry' }>;
   duplicate: ProjectReceipt | null;
   source: 'claude' | 'rules';
@@ -109,13 +119,18 @@ function EntryCard({ draft, duplicate, source, book, done, cancel, fail }: {
   done: (line: string) => void;
   cancel: () => void;
   fail: (m: string) => void;
+  onQueued?: () => void;
 }) {
   const [input, setInput] = useState<EntryInput>(draft.input);
   const [linked, setLinked] = useState(!!duplicate);
   const [busy, setBusy] = useState(false);
   const set = (patch: Partial<EntryInput>) => setInput({ ...input, ...patch });
 
-  const withLink: EntryInput = { ...input, linkReceiptId: linked && duplicate ? duplicate.id : null };
+  const withLink: EntryInput = {
+    ...input,
+    linkReceiptId: linked && duplicate ? duplicate.id : null,
+    clientRef: input.clientRef ?? `e_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+  };
   const lines = input.amount > 0 ? describeEffects(withLoanEffects(withLink, book), book) : [];
 
   const needsPerson = input.kind === 'credit_purchase' && !input.personId;
@@ -129,7 +144,14 @@ function EntryCard({ draft, duplicate, source, book, done, cancel, fail }: {
       await api.addEntry(withLink);
       const account = book.accounts.find((a) => a.id === input.accountId);
       done(`Logged — ${money(input.amount)} ${input.purpose}${account ? `, ${account.name}` : ''}.`);
-    } catch (e) { fail((e as Error).message); }
+    } catch (e) {
+      if (looksOffline(e)) {
+        // No signal: keep it, in order, and send it when there is one.
+        outbox.add(withLink);
+        onQueued?.();
+        done(`Kept — ${money(input.amount)} ${input.purpose}. It will be sent when you are back on a network.`);
+      } else fail((e as Error).message);
+    }
     finally { setBusy(false); }
   };
 

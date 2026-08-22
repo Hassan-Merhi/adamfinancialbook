@@ -12,26 +12,39 @@ export interface Balances {
 }
 export type LoadedBook = Book & { balances: Balances };
 
-function headers(): HeadersInit {
-  const h: HeadersInit = { 'content-type': 'application/json' };
-  try {
-    const token = localStorage.getItem('bookToken');
-    if (token) (h as Record<string, string>)['x-book-token'] = token;
-  } catch { /* private mode: carry on without one */ }
-  return h;
+/** Thrown when the session is gone, so the app can show the door rather than an error. */
+export class NotSignedIn extends Error {
+  constructor() { super('Sign in to open the book.'); }
 }
 
 async function send<T>(path: string, method: string, body?: unknown): Promise<T> {
-  const res = await fetch(`/api${path}`, { method, headers: headers(), body: body ? JSON.stringify(body) : undefined });
+  const res = await fetch(`/api${path}`, {
+    method,
+    // the cookie is the session; the header is what a cross-site form cannot send
+    headers: { 'content-type': 'application/json', 'x-book': '1' },
+    credentials: 'same-origin',
+    body: body ? JSON.stringify(body) : undefined,
+  });
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  const data = text ? safeParse(text) : null;
+  if (res.status === 401) throw new NotSignedIn();
   if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
   return data as T;
 }
 
+function safeParse(text: string) {
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+export interface Me { user: { id: string; email: string; role: 'owner' | 'entry' } | null; needsFirstOwner: boolean }
+
 export interface Reading { draft: Draft; source: 'claude' | 'rules'; duplicate: ProjectReceipt | null }
 
 export const api = {
+  me: () => send<Me>('/me', 'GET'),
+  login: (email: string, password: string) => send<Me>('/login', 'POST', { email, password }),
+  firstOwner: (email: string, password: string) => send<Me>('/first-owner', 'POST', { email, password }),
+  logout: () => send('/logout', 'POST'),
   book: () => send<LoadedBook>('/book', 'GET'),
   read: (text: string, today: string) => send<Reading>('/read', 'POST', { text, today }),
   addBusiness: (name: string) => send('/businesses', 'POST', { name }),
