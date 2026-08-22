@@ -51,6 +51,7 @@ export async function loadBook(): Promise<Book> {
       purpose: t.purpose, raw: t.raw, accountId: t.account_id, toAccountId: t.to_account_id,
       projectId: t.project_id, personId: t.person_id, forBusiness: t.for_business,
       historical: t.historical, linkReceiptId: t.link_receipt_id, clientRef: t.client_ref,
+      voided: t.voided ?? false, voidReason: t.void_reason ?? null, createdBy: t.created_by ?? null,
       effects: byEntry.get(t.id) ?? [], correctedFrom: t.corrected_from,
       createdAt: new Date(t.created_at).toISOString(),
     })),
@@ -67,7 +68,7 @@ function iso(d: Date | string | null): string {
  * new to the book also writes the receipt row; one that was already recorded
  * and is only now arriving marks that row as reaching cash instead.
  */
-export async function saveEntry(input: EntryInput, book: Book): Promise<Entry> {
+export async function saveEntry(input: EntryInput, book: Book, createdBy?: string | null): Promise<Entry> {
   // Sent twice? Hand back the one already in the book rather than logging it again.
   if (input.clientRef) {
     const seen = book.entries.find((e) => e.clientRef === input.clientRef);
@@ -80,12 +81,12 @@ export async function saveEntry(input: EntryInput, book: Book): Promise<Entry> {
     await client.query('BEGIN');
     await client.query(
       `INSERT INTO entries (id, occurred_on, kind, amount, purpose, raw, account_id, to_account_id,
-                            project_id, person_id, for_business, historical, link_receipt_id, client_ref)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+                            project_id, person_id, for_business, historical, link_receipt_id, client_ref, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
       [id, input.occurredOn, input.kind, input.amount, input.purpose, input.raw,
        input.accountId ?? null, input.toAccountId ?? null, input.projectId ?? null,
        input.personId ?? null, input.forBusiness ?? null, input.historical ?? false,
-       input.linkReceiptId ?? null, input.clientRef ?? null]);
+       input.linkReceiptId ?? null, input.clientRef ?? null, createdBy ?? null]);
 
     await writeEffects(client, id, effects);
 
@@ -151,6 +152,27 @@ async function writeEffects(client: PoolClient, entryId: string, effects: Effect
       `INSERT INTO effects (entry_id, type, target_id, from_business, to_business, delta)
        VALUES ($1,$2,$3,$4,$5,$6)`,
       [entryId, eff.type, eff.targetId ?? null, eff.fromBusiness ?? null, eff.toBusiness ?? null, eff.delta]);
+  }
+}
+
+/**
+ * A wrong entry is voided, not deleted: it stops counting, keeps its place in
+ * the record, and says why. A receipt it created goes with it.
+ */
+export async function voidEntry(entryId: string, reason: string): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const done = await client.query(
+      'UPDATE entries SET voided = true, void_reason = $2 WHERE id = $1 AND voided = false', [entryId, reason]);
+    if (done.rowCount === 0) throw Object.assign(new Error('No such entry, or it is already void'), { status: 404 });
+    await client.query('DELETE FROM project_receipts WHERE entry_id = $1', [entryId]);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
   }
 }
 

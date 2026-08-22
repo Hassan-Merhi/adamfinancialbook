@@ -81,6 +81,8 @@ One codebase serves the desktop and the phone.
 | An account is never assumed silently — a guessed one is flagged on the card | `parse.ts` → `guessed` |
 | A count is not a price: "1 ton of bricks" asks for the amount | `parse.ts` → `readAmount` |
 | The same entry cannot land twice, however many times it is sent | `clientRef` + `entries_client_ref_idx` |
+| An entry is voided, never deleted — it stops counting and says why | `voidEntry`, `ordered()` |
+| Every change to the book leaves a line saying who and when | `server/audit.ts` |
 
 Every one of these has a test in `shared/engine.test.ts`.
 
@@ -112,6 +114,25 @@ back twice at once.
 
 Setting the book up and correcting an entry are not queued: they need the server
 there and then, and say so rather than pretending.
+
+## When something goes wrong
+
+An entry is never deleted. A wrong one is **voided**: it stops counting the
+moment you void it, keeps its place, and carries the reason you gave. Correcting
+an amount still replaces the entry and keeps the original figure visible.
+
+**History** shows every change to the book — who did it, when, and what it was —
+written beside the book and never edited. Sign-ins and refused sign-ins are on it
+too.
+
+## Taking it with you
+
+- **Entries as a spreadsheet** — a CSV with names rather than ids, safe to open
+  anywhere: a comma or a quote stays inside its cell, and a purpose beginning
+  with `=` cannot act as a formula.
+- **Whole book, as a backup** — every table, exactly as stored, so the book can
+  be rebuilt from it. `npm run backup` writes the same file from the command
+  line, and Render keeps its own database backups besides.
 
 ## The day report, delivered
 
@@ -153,8 +174,11 @@ created once, on an empty book.
 | 1 — Foundation ✅ | Database, the entry-and-effects model, opening balances, plain forms over a real book |
 | 2 — Entry by sentence ✅ | You type it the way you say it; the reading comes back for confirmation, with every consequence shown, before it is saved |
 | 3 — The screens ✅ | Accounts and loans on one page, statements with filters, the day report that walks backwards and forwards, on desktop and phone |
-| **4 — Live and on your phone ✅** *(this)* | Login with two roles, installed to the home screen, works with no signal, the day report delivered at your cut-off time |
-| 5 — Hardening | Audit trail, backups, spreadsheet export, a second user who enters while you approve |
+| 4 — Live and on your phone ✅ | Login with two roles, installed to the home screen, works with no signal, the day report delivered at your cut-off time |
+| **5 — Hardening ✅** *(this)* | Voiding rather than deleting, a full audit trail, spreadsheet export and backups, a door that resists guessing |
+
+All five are built. What remains is the part only you can do: use it for a
+fortnight and tell me what gets in the way.
 
 ## Layout
 

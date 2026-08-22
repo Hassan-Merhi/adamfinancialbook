@@ -100,9 +100,13 @@ function businessOfAccount(catalog: Catalog, accountId: string) {
  * Balances: opening figure + every effect up to a date
  * ------------------------------------------------------------------ */
 
-/** Entries in the order they happened; ties broken by when they were written. */
+/**
+ * Entries in the order they happened; ties broken by when they were written.
+ * A voided entry keeps its place in the record but counts for nothing, so it is
+ * left out of every figure the book reports.
+ */
 export function ordered(entries: Entry[]): Entry[] {
-  return [...entries].sort((a, b) =>
+  return entries.filter((e) => !e.voided).sort((a, b) =>
     a.occurredOn < b.occurredOn ? -1
     : a.occurredOn > b.occurredOn ? 1
     : a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0);
@@ -114,7 +118,7 @@ function upTo(entries: Entry[], date?: string): Entry[] {
 
 function sumEffects(entries: Entry[], date: string | undefined, pick: (e: Effect) => number): number {
   let total = 0;
-  for (const entry of upTo(entries, date)) for (const eff of entry.effects) total += pick(eff);
+  for (const entry of upTo(ordered(entries), date)) for (const eff of entry.effects) total += pick(eff);
   return round(total);
 }
 
@@ -183,7 +187,7 @@ export function projectSpent(book: Book, projectId: string, date?: string): numb
 /** Receipts recorded but not yet arrived in any account. */
 export function receiptsNotInCash(book: Book, projectId: string): ProjectReceipt[] {
   const banked = new Set(
-    book.entries.flatMap((t) => t.effects)
+    ordered(book.entries).flatMap((t) => t.effects)
       .filter((e) => e.type === 'receipt_banked')
       .map((e) => e.targetId));
   return book.receipts.filter((r) => r.projectId === projectId && !r.inCash && !banked.has(r.id));

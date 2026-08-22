@@ -123,7 +123,21 @@ export interface Entry extends EntryInput {
   effects: Effect[];
   /** Set when an entry has been corrected, so the original stays visible. */
   correctedFrom: number | null;
+  /** A wrong entry is voided rather than deleted: it stops counting and says why. */
+  voided?: boolean;
+  voidReason?: string | null;
   createdAt: string;
+  createdBy?: string | null;
+}
+
+/** Who did what, and when. Written beside the book and never edited. */
+export interface AuditLine {
+  id: string;
+  at: string;
+  actorEmail: string | null;
+  action: string;
+  subject: string | null;
+  detail: Record<string, unknown>;
 }
 
 /**

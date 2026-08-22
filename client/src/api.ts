@@ -1,5 +1,5 @@
 /** Everything the screens know about the server. */
-import type { Book, Entry, EntryInput, ProjectReceipt } from '../../shared/types';
+import type { AuditLine, Book, Entry, EntryInput, ProjectReceipt } from '../../shared/types';
 import type { Draft } from '../../shared/parse';
 
 export interface Balances {
@@ -58,4 +58,6 @@ export const api = {
     send('/reminders', 'POST', b),
   clearReminder: (id: string) => send(`/reminders/${id}`, 'DELETE'),
   correct: (id: string, amount: number) => send(`/entries/${id}`, 'PATCH', { amount }),
+  voidEntry: (id: string, reason: string) => send(`/entries/${id}/void`, 'POST', { reason }),
+  history: () => send<{ lines: AuditLine[] }>('/history', 'GET'),
 };

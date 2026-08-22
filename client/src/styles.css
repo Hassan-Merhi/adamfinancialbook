@@ -170,3 +170,6 @@ tbody tr:hover { background:var(--sunk); }
   .railfoot { margin-top:0; padding:0 8px; border-top:0; border-left:1px solid var(--line); }
   .railfoot .muted { display:none; }
 }
+.nowrap { white-space:nowrap; }
+.nowrap .btn + .btn { margin-left:6px; }
+a.btn { display:inline-block; text-decoration:none; }

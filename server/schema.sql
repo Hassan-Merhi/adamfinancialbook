@@ -113,3 +113,22 @@ CREATE TABLE IF NOT EXISTS users (
   role          TEXT NOT NULL CHECK (role IN ('owner','entry')),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- An entry is never deleted. A wrong one is voided: it stops counting, keeps
+-- its place, and says why.
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS voided      BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS void_reason TEXT;
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS created_by  TEXT;
+
+-- Who did what, and when. Written beside the book, never edited.
+CREATE TABLE IF NOT EXISTS audit (
+  id          BIGSERIAL PRIMARY KEY,
+  at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  actor       TEXT,
+  actor_email TEXT,
+  action      TEXT NOT NULL,
+  subject     TEXT,
+  detail      JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS audit_at_idx ON audit (at DESC);

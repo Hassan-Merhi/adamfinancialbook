@@ -3,8 +3,10 @@ import express from 'express';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { newId, query } from './db.js';
-import { correctAmount, ensureLoanPair, loadBook, saveEntry } from './book.js';
+import { newId, pool, query } from './db.js';
+import { correctAmount, ensureLoanPair, loadBook, saveEntry, voidEntry } from './book.js';
+import { history, record } from './audit.js';
+import { backup, entriesCsv } from './export.js';
 import { readSentence } from './read.js';
 import {
   checkPassword, cookieHeader, createUser, findUser, ownerOnly,
@@ -17,7 +19,19 @@ import {
 } from '../shared/engine.js';
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '256kb' }));
+app.disable('x-powered-by');
+
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Permissions-Policy', 'geolocation=(), camera=(), microphone=()');
+  res.setHeader('Content-Security-Policy',
+    "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+    "font-src 'self' https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'");
+  next();
+});
 
 // Nothing behind /api opens without a session.
 if (!process.env.SESSION_SECRET) {
@@ -42,14 +56,41 @@ app.get('/api/me', wrap(async (req, res) => {
   res.json({ user: req.user ?? null, needsFirstOwner: (await userCount()) === 0 });
 }));
 
+/** A handful of wrong guesses and the door stops answering for a while. */
+const attempts = new Map<string, { count: number; until: number }>();
+const MAX_TRIES = 8;
+const LOCK_MS = 15 * 60_000;
+
+function tooManyTries(key: string): boolean {
+  const found = attempts.get(key);
+  if (!found) return false;
+  if (Date.now() > found.until) { attempts.delete(key); return false; }
+  return found.count >= MAX_TRIES;
+}
+
+function noteFailure(key: string): void {
+  const found = attempts.get(key);
+  const count = found && Date.now() <= found.until ? found.count + 1 : 1;
+  attempts.set(key, { count, until: Date.now() + LOCK_MS });
+}
+
 app.post('/api/login', wrap(async (req, res) => {
   const { email, password } = z.object({ email: z.string(), password: z.string() }).parse(req.body);
+  const key = `${req.ip}|${email.toLowerCase().trim()}`;
+  if (tooManyTries(key)) {
+    return res.status(429).json({ error: 'Too many tries. Wait fifteen minutes and try again.' });
+  }
   const user = await findUser(email);
   // the same answer either way, so a wrong email cannot be told from a wrong password
   if (!user || !(await checkPassword(password, user.password_hash))) {
+    noteFailure(key);
+    await record(req, 'sign-in refused', email, { ip: req.ip });
     return res.status(401).json({ error: 'That email and password do not match.' });
   }
+  attempts.delete(key);
   res.setHeader('Set-Cookie', cookieHeader(signSession(user.id), 30 * 86_400));
+  req.user = { id: user.id, email: user.email, role: user.role };
+  await record(req, 'signed in', user.email);
   res.json({ user: { id: user.id, email: user.email, role: user.role } });
 }));
 
@@ -66,6 +107,8 @@ app.post('/api/first-owner', wrap(async (req, res) => {
   }).parse(req.body);
   const user = await createUser(email, password, 'owner');
   res.setHeader('Set-Cookie', cookieHeader(signSession(user.id), 30 * 86_400));
+  req.user = user;
+  await record(req, 'book opened', user.email);
   res.status(201).json({ user });
 }));
 
@@ -139,6 +182,7 @@ app.post('/api/businesses', ownerOnly, wrap(async (req, res) => {
   // every pair of businesses can end up owing each other; open the positions now
   const others = await query<{ id: string }>('SELECT id FROM businesses WHERE id <> $1', [id]);
   for (const other of others) await ensureLoanPair(id, other.id);
+  await record(req, 'business created', id, { name });
   res.status(201).json({ id, name });
 }));
 
@@ -147,6 +191,7 @@ app.post('/api/accounts', ownerOnly, wrap(async (req, res) => {
   const id = newId('acc');
   await query('INSERT INTO accounts (id, name, business_id, opening) VALUES ($1,$2,$3,$4)',
     [id, name, businessId, opening]);
+  await record(req, 'account created', id, { name, opening });
   res.status(201).json({ id, name, businessId, opening });
 }));
 
@@ -160,6 +205,7 @@ app.post('/api/projects', ownerOnly, wrap(async (req, res) => {
     await query(`INSERT INTO project_receipts (id, project_id, occurred_on, amount, in_cash, entry_id)
                  VALUES ($1,$2,NULL,$3,true,NULL)`, [newId('rcp'), id, body.opening]);
   }
+  await record(req, 'project created', id, { name: body.name, opening: body.opening });
   res.status(201).json({ id, ...body });
 }));
 
@@ -173,6 +219,7 @@ app.post('/api/people', ownerOnly, wrap(async (req, res) => {
   await query(`INSERT INTO people (id, name, role, business_id, kind, opening, salary)
                VALUES ($1,$2,$3,$4,$5,$6,$7)`,
     [id, body.name, body.role, body.businessId, body.kind, body.opening, body.salary]);
+  await record(req, 'person created', id, { name: body.name, kind: body.kind, opening: body.opening, salary: body.salary });
   res.status(201).json({ id, ...body });
 }));
 
@@ -186,6 +233,7 @@ app.put('/api/loans', ownerOnly, wrap(async (req, res) => {
     `UPDATE loans SET opening = CASE WHEN from_business = $1 THEN $3::numeric ELSE -($3::numeric) END
      WHERE (from_business = $1 AND to_business = $2) OR (from_business = $2 AND to_business = $1)`,
     [body.fromBusiness, body.toBusiness, body.opening]);
+  await record(req, 'opening position set', null, body);
   res.json({ ok: true });
 }));
 
@@ -250,7 +298,9 @@ app.post('/api/entries', wrap(async (req, res) => {
     if (from && to && from !== to) await ensureLoanPair(from, to);
   }
 
-  const entry = await saveEntry(input, await loadBook());
+  const entry = await saveEntry(input, await loadBook(), req.user?.id);
+  await record(req, 'entry logged', entry.id,
+    { amount: entry.amount, kind: entry.kind, purpose: entry.purpose, on: entry.occurredOn });
   res.status(201).json(entry);
 }));
 
@@ -266,8 +316,42 @@ app.get('/api/receipt-check', wrap(async (req, res) => {
 
 app.patch('/api/entries/:id', ownerOnly, wrap(async (req, res) => {
   const { amount } = z.object({ amount: z.number().positive() }).parse(req.body);
-  await correctAmount(String(req.params.id), amount, await loadBook());
+  const id = String(req.params.id);
+  const book = await loadBook();
+  const before = book.entries.find((e) => e.id === id);
+  await correctAmount(id, amount, book);
+  await record(req, 'entry corrected', id, { from: before?.amount, to: amount, purpose: before?.purpose });
   res.json({ ok: true });
+}));
+
+/** A wrong entry stops counting but stays on the record, with its reason. */
+app.post('/api/entries/:id/void', ownerOnly, wrap(async (req, res) => {
+  const { reason } = z.object({ reason: z.string().min(1).max(200) }).parse(req.body);
+  const id = String(req.params.id);
+  const before = (await loadBook()).entries.find((e) => e.id === id);
+  await voidEntry(id, reason);
+  await record(req, 'entry voided', id, { reason, amount: before?.amount, purpose: before?.purpose });
+  res.json({ ok: true });
+}));
+
+/* ---------------- getting it out, and keeping it ---------------- */
+
+app.get('/api/history', ownerOnly, wrap(async (_req, res) => {
+  res.json({ lines: await history(300) });
+}));
+
+app.get('/api/export/entries.csv', ownerOnly, wrap(async (req, res) => {
+  const book = await loadBook();
+  await record(req, 'entries exported', null, { entries: book.entries.length });
+  res.type('text/csv').attachment(`book-entries-${new Date().toISOString().slice(0, 10)}.csv`);
+  res.send(entriesCsv(book));
+}));
+
+app.get('/api/backup.json', ownerOnly, wrap(async (req, res) => {
+  const book = await loadBook();
+  await record(req, 'backup taken');
+  res.type('application/json').attachment(`book-backup-${new Date().toISOString().slice(0, 10)}.json`);
+  res.send(backup(book));
 }));
 
 /** The day report as plain text — the same words that arrive on your phone. */
@@ -290,4 +374,15 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 });
 
 const port = Number(process.env.PORT ?? 5000);
-app.listen(port, () => console.log(`Book API on http://localhost:${port}`));
+const server = app.listen(port, () => console.log(`Book API on http://localhost:${port}`));
+
+// Finish what is in flight before the process goes away, so no entry is lost
+// mid-write when Render restarts or redeploys.
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(signal, () => {
+    server.close(() => {
+      pool.end().finally(() => process.exit(0));
+    });
+    setTimeout(() => process.exit(0), 10_000).unref();
+  });
+}

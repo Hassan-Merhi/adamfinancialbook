@@ -104,7 +104,7 @@ export default function Statement({ book, focus, back, run }: {
                     <td className="small muted">{KINDS[r.entry.kind]}</td>
                     <td className={`r num ${tone(r.delta)}`}>{r.delta ? signed(r.delta) : '—'}</td>
                     <td className="r num">{money(r.running)}</td>
-                    <td className="r">
+                    <td className="r nowrap">
                       <button className="btn ghost small" onClick={() => {
                         const next = prompt(`Correct the amount for "${r.entry.purpose}"`, String(r.entry.amount));
                         const amount = Number(next);
@@ -112,6 +112,10 @@ export default function Statement({ book, focus, back, run }: {
                           run(() => api.correct(r.entry.id, amount), 'Corrected.');
                         }
                       }}>Correct</button>
+                      <button className="btn ghost small" onClick={() => {
+                        const reason = prompt(`Void "${r.entry.purpose}"? It will stop counting but stay on the record.\n\nWhy:`);
+                        if (reason?.trim()) run(() => api.voidEntry(r.entry.id, reason.trim()), 'Voided — it counts for nothing now.');
+                      }}>Void</button>
                     </td>
                   </tr>
                 ))}

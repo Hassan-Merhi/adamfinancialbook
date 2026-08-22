@@ -27,6 +27,13 @@ section is not decoration, it is the constraint the whole codebase is built on.
    entry need the server there and then. Anything queued carries a `clientRef`
    so it cannot be logged twice.
 
+9. **Nothing is deleted.** A wrong entry is voided: `voided = true`, the reason
+   kept, and `ordered()` leaves it out of every figure. Never write a DELETE
+   against entries or effects except when rewriting one entry's own effects.
+10. **Every change leaves a line.** Anything that shapes the book or edits
+    history calls `record(req, …)`. A failed audit write must never fail the
+    thing the user asked for.
+
 ## Layout
 
 - `shared/` — types, the engine, and the rules reader. Pure functions, no

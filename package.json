@@ -16,7 +16,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "user:add": "tsx server/add-user.ts",
-    "report:send": "tsx server/send-report.ts"
+    "report:send": "tsx server/send-report.ts",
+    "backup": "tsx server/backup.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",

@@ -15,11 +15,12 @@ import Projects from './views/Projects';
 import People from './views/People';
 import Report from './views/Report';
 import Setup from './views/Setup';
+import History from './views/History';
 import Statement, { type Focus } from './views/Statement';
 import { money } from './ui';
 import './styles.css';
 
-type View = 'today' | 'money' | 'projects' | 'people' | 'report' | 'setup';
+type View = 'today' | 'money' | 'projects' | 'people' | 'report' | 'history' | 'setup';
 
 const NAV: { id: View; label: string }[] = [
   { id: 'today', label: 'Today' },
@@ -27,6 +28,7 @@ const NAV: { id: View; label: string }[] = [
   { id: 'projects', label: 'Projects' },
   { id: 'people', label: 'People' },
   { id: 'report', label: 'Day report' },
+  { id: 'history', label: 'History' },
   { id: 'setup', label: 'Set it up' },
 ];
 
@@ -125,7 +127,7 @@ export default function App() {
           <b>Financial Book</b>
           <span>{money(book.balances.totalCash)} on hand</span>
         </div>
-        {NAV.filter((n) => me.user!.role === 'owner' || n.id !== 'setup').map((n) => (
+        {NAV.filter((n) => me.user!.role === 'owner' || (n.id !== 'setup' && n.id !== 'history')).map((n) => (
           <button key={n.id} className="navbtn" aria-current={!focus && view === n.id}
             onClick={() => go(n.id)}>{n.label}</button>
         ))}
@@ -167,6 +169,7 @@ export default function App() {
             : view === 'projects' ? <Projects book={book} open={open} />
             : view === 'people' ? <People book={book} open={open} />
             : view === 'report' ? <Report book={book} run={run} />
+            : view === 'history' ? <History book={book} />
             : <Setup book={book} run={run} />}
         </div>
       </main>
