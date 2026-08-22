@@ -174,9 +174,9 @@ npm run build
 
 ## Deploying
 
-`render.yaml` describes the web service, its database, and the nightly report
-job. Point Render at this repo and let it read the file — `SESSION_SECRET` is
-generated for you. Set `REPORT_TO` and `SMTP_URL` when you want the report to
+On Render: **New → Blueprint → pick this repo → Apply**. It reads `render.yaml`
+and creates all three pieces — the app, a Postgres 16 database, and the nightly
+report job — already wired together. `SESSION_SECRET` is generated for you. Set `REPORT_TO` and `SMTP_URL` when you want the report to
 arrive rather than just print, and `ANTHROPIC_API_KEY` if you want Claude to read
 the sentences.
 

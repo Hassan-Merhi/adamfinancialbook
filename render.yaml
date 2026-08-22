@@ -1,6 +1,12 @@
-# One click on Render: a web service and its database.
-# Point Render at this repo and it reads this file — nothing to configure by hand
-# except APP_TOKEN, which is what keeps the book private until Phase 4 adds login.
+# One Blueprint: the app, its database, and the nightly report.
+#
+# On Render: New → Blueprint → pick this repo → Apply. It creates all three and
+# wires them together. SESSION_SECRET is generated for you; the only values you
+# ever type are the optional ones marked sync: false below.
+#
+# Free instead of paid: set the web service to `plan: free`, the database to
+# `plan: free`, and delete the cron service (Render has no free cron). A free
+# database is deleted after 30 days, so move to paid before you rely on it.
 services:
   - type: web
     name: financial-book
@@ -38,8 +44,6 @@ services:
         sync: false          # where the report should land
       - key: SMTP_URL
         sync: false          # e.g. smtps://user:pass@smtp.gmail.com:465
-      - key: SESSION_SECRET
-        sync: false
       - key: NODE_VERSION
         value: "22"
 
