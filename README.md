@@ -194,10 +194,15 @@ Pick the **Frankfurt** region on Render too. The app talks to the database on
 every request, and a book whose database is on another continent feels slow for
 no reason.
 
-The connection is encrypted and the certificate is verified. If the server turns
+The connection is encrypted and the certificate is verified. If the socket turns
 out not to be speaking TLS, the app refuses to start rather than sending your
 figures across the internet in the clear. `PGSSL=off` is for a Postgres on your
 own machine.
+
+Neon's pooled endpoint terminates TLS at the pooler, so the server's own
+`pg_stat_ssl` reads false there even though the connection from here is
+encrypted. The check looks at this process's socket instead, which is the honest
+answer for the hop that crosses the internet.
 
 ## Deploying
 

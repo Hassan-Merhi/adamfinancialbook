@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { TLSSocket } from 'node:tls';
 import pg from 'pg';
 
 // NUMERIC comes back as a string by default; this book only holds money at a
@@ -33,17 +34,28 @@ export const pool = new pg.Pool({
 pool.on('error', (err) => console.error('Database connection dropped:', err.message));
 
 /**
- * Asking for TLS is not the same as getting it: told the server has none,
- * node-postgres will carry on in the clear. So we ask the server whether this
- * connection is actually encrypted, and refuse to run if it is not.
+ * Asking for TLS is not the same as getting it, so we look at our own socket.
+ *
+ * Not `pg_stat_ssl`: that is the server's view of its own backend, and behind a
+ * pooler like Neon's it reads false even though the connection from here is
+ * encrypted. The socket in this process is the honest answer for the hop that
+ * actually crosses the internet.
  */
 if (tls !== 'off') {
-  const { rows } = await pool.query('SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()');
-  if (rows.length && rows[0].ssl === false) {
+  const client = await pool.connect();
+  const socket = (client as unknown as { connection?: { stream?: unknown } }).connection?.stream;
+  client.release();
+
+  if (socket && !(socket instanceof TLSSocket)) {
     await pool.end();
     throw new Error(
       'The database connection is not encrypted. The book will not talk to a database in the clear — '
       + 'check the connection string, or set PGSSL=off if this is a Postgres on your own machine.');
+  }
+  if (!socket) {
+    // The shape of the driver changed under us: say so rather than either
+    // blocking a good deploy or quietly claiming the connection is safe.
+    console.warn('Could not confirm the database connection is encrypted.');
   }
 }
 
