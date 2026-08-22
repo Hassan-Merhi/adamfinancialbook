@@ -49,6 +49,25 @@ it the book's own vocabulary; it falls back to the rules reader if anything goes
 wrong. Neither one saves: both return a draft, and every id they return is
 checked against the catalog before it is shown.
 
+## The screens
+
+- **Today** — cash on hand, what is owed to you and what you owe, cash by
+  business, and everything entered today.
+- **Accounts & loans** — one page, because a business's cash and its
+  obligations are read together. Minus is money it must return, plus is money
+  it is waiting on.
+- **Projects** — what each job has paid, and which receipts have not reached an
+  account yet.
+- **People** — three lists that never mix: they owe you, payroll, suppliers.
+- **Day report** — any day rebuilt exactly as it stood: cash at the end of that
+  day, what came in, what went out, what was taken on credit, what merely moved,
+  and what was outstanding *then*. Walk backwards and forwards a day at a time,
+  filtered to one business or all of them.
+
+Every figure opens into the entries behind it: a statement with a running
+balance, filters by text, type and date range, and a Correct button on each row.
+One codebase serves the desktop and the phone.
+
 ## Rules the code enforces
 
 | Rule | Where |
@@ -90,15 +109,15 @@ dashboard — with it set, every API call must send an `x-book-token` header.
 | Phase | What it adds |
 |---|---|
 | 1 — Foundation ✅ | Database, the entry-and-effects model, opening balances, plain forms over a real book |
-| **2 — Entry by sentence ✅** *(this)* | You type it the way you say it; the reading comes back for confirmation, with every consequence shown, before it is saved |
-| 3 — The screens | Accounts and loans on one page, statements with filters, the day report that walks backwards and forwards |
+| 2 — Entry by sentence ✅ | You type it the way you say it; the reading comes back for confirmation, with every consequence shown, before it is saved |
+| **3 — The screens ✅** *(this)* | Accounts and loans on one page, statements with filters, the day report that walks backwards and forwards, on desktop and phone |
 | 4 — Live and on your phone | Login, installed to the home screen, works with no signal, the day report delivered at your cut-off time |
 | 5 — Hardening | Audit trail, backups, spreadsheet export, a second user who enters while you approve |
 
 ## Layout
 
 ```
-shared/     types and the engine — no database, no screens, fully tested
-server/     Postgres schema, the API, and reading the book in and out
-client/     the app
+shared/     types, the engine, the rules reader — no database, no screens, tested
+server/     Postgres schema, the API, the Claude reader, reading the book in and out
+client/     the app — views/ is one file per screen, ui.tsx the pieces they share
 ```

@@ -120,6 +120,19 @@ export interface Entry extends EntryInput {
   createdAt: string;
 }
 
+/**
+ * Money spoken for but not yet paid. It is a note to himself, never a movement:
+ * nothing here appears in any balance.
+ */
+export interface Reminder {
+  id: Id;
+  what: string;
+  amount: number;
+  accountId: Id | null;
+  note: string;
+  settled: boolean;
+}
+
 /** Everything the engine needs to interpret a sentence and compute effects. */
 export interface Catalog {
   businesses: Business[];
@@ -132,4 +145,5 @@ export interface Catalog {
 
 export interface Book extends Catalog {
   entries: Entry[];
+  reminders: Reminder[];
 }

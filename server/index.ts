@@ -149,6 +149,25 @@ app.put('/api/loans', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+/** A promise to pay, kept beside the book so it is not forgotten — never a movement. */
+app.post('/api/reminders', wrap(async (req, res) => {
+  const body = z.object({
+    what: z.string().min(1).max(120),
+    amount: z.number().default(0),
+    accountId: z.string().nullish(),
+    note: z.string().default(''),
+  }).parse(req.body);
+  const id = newId('rem');
+  await query('INSERT INTO reminders (id, what, amount, account_id, note) VALUES ($1,$2,$3,$4,$5)',
+    [id, body.what, body.amount, body.accountId ?? null, body.note]);
+  res.status(201).json({ id, ...body });
+}));
+
+app.delete('/api/reminders/:id', wrap(async (req, res) => {
+  await query('UPDATE reminders SET settled = true WHERE id = $1', [String(req.params.id)]);
+  res.json({ ok: true });
+}));
+
 /* ---------------- entries ---------------- */
 
 const entryInput = z.object({

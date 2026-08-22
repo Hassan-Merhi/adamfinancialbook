@@ -298,7 +298,10 @@ export function correctEntry(entry: Entry, amount: number, catalog: Catalog): En
 
 /* ------------------------------------------------------------------ */
 
-export function round(n: number): number { return Math.round(n * 100) / 100; }
+export function round(n: number): number {
+  const r = Math.round(n * 100) / 100;
+  return r === 0 ? 0 : r;   // never hand back -0, or a zero balance prints as "−$0"
+}
 function nearly(a: number, b: number): boolean { return Math.abs(a - b) < 0.005; }
 
 /* ------------------------------------------------------------------ *

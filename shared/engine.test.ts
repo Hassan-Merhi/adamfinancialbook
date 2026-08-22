@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   accountBalance, businessCash, correctEntry, loanBalance, loanFrom,
-  personBalance, possibleDuplicateReceipt, projectReceived, statement, withLoanEffects,
+  personBalance, possibleDuplicateReceipt, projectReceived, statement, totalCash, withLoanEffects,
 } from './engine.js';
 import type { Book, EntryInput } from './types.js';
 
@@ -24,6 +24,7 @@ function book(): Book {
     ],
     loans: [{ id: 'l1', fromBusiness: 'con', toBusiness: 'mot', opening: 7_000 }],
     entries: [],
+    reminders: [],
   };
 }
 
@@ -174,5 +175,52 @@ describe('corrections', () => {
     const once = correctEntry(entry, 1_000, b);
     const twice = correctEntry(once, 1_200, b);
     expect(twice.correctedFrom).toBe(1_500);
+  });
+});
+
+describe('the day report reads the book as it stood', () => {
+  it('cash per business, and the total, for a past day', () => {
+    const b = book();
+    log(b, { occurredOn: '2026-08-01', kind: 'expense', amount: 1_000, purpose: 'One', raw: '', accountId: 'con_cash' });
+    log(b, { occurredOn: '2026-08-05', kind: 'expense', amount: 500, purpose: 'Two', raw: '', accountId: 'mot_cash' });
+
+    expect(businessCash(b, 'con', '2026-08-01')).toBe(9_000);
+    expect(businessCash(b, 'mot', '2026-08-01')).toBe(2_000);   // not spent yet on the 1st
+    expect(businessCash(b, 'mot', '2026-08-05')).toBe(1_500);
+    expect(totalCash(b, '2026-08-01')).toBe(11_000);
+    expect(totalCash(b)).toBe(10_500);
+  });
+
+  it('what was outstanding that day, not what is outstanding now', () => {
+    const b = book();
+    log(b, { occurredOn: '2026-08-02', kind: 'transfer', amount: 3_000, purpose: 'Part payment', raw: '', accountId: 'con_cash', toAccountId: 'mot_cash' });
+    log(b, { occurredOn: '2026-08-09', kind: 'transfer', amount: 4_000, purpose: 'The rest', raw: '', accountId: 'con_cash', toAccountId: 'mot_cash' });
+
+    expect(loanBalance(b, b.loans[0], '2026-08-01')).toBe(7_000);
+    expect(loanBalance(b, b.loans[0], '2026-08-02')).toBe(4_000);
+    expect(loanBalance(b, b.loans[0])).toBe(0);
+  });
+
+  it('a supplier balance answers for the date asked', () => {
+    const b = book();
+    log(b, { occurredOn: '2026-08-04', kind: 'credit_purchase', amount: 1_700, purpose: 'Steel', raw: '', personId: 'dani' });
+    log(b, { occurredOn: '2026-08-10', kind: 'supplier_payment', amount: 700, purpose: 'Part paid', raw: '', accountId: 'con_cash', personId: 'dani' });
+
+    expect(personBalance(b, 'dani', '2026-08-03')).toBe(0);
+    expect(personBalance(b, 'dani', '2026-08-04')).toBe(-1_700);
+    expect(personBalance(b, 'dani')).toBe(-1_000);
+  });
+});
+
+describe('what one entry did to one thing', () => {
+  it('a statement of a loan reads from the side you asked for', () => {
+    const b = book();
+    log(b, { occurredOn: '2026-08-03', kind: 'expense', amount: 200, purpose: 'Advertising', raw: '', accountId: 'con_cash', forBusiness: 'mot' });
+
+    const fromCon = statement(b, { type: 'loan', fromBusiness: 'con', toBusiness: 'mot', view: 'con' });
+    const fromMot = statement(b, { type: 'loan', fromBusiness: 'con', toBusiness: 'mot', view: 'mot' });
+    expect(fromCon[0].delta).toBe(200);    // Construction's position improves
+    expect(fromCon[0].running).toBe(-6_800);
+    expect(fromMot[0].running).toBe(6_800); // and Motors is owed that much less
   });
 });

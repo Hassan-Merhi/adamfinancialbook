@@ -87,3 +87,15 @@ CREATE TABLE IF NOT EXISTS effects (
 CREATE INDEX IF NOT EXISTS entries_occurred_on_idx ON entries (occurred_on);
 CREATE INDEX IF NOT EXISTS effects_entry_idx ON effects (entry_id);
 CREATE INDEX IF NOT EXISTS effects_target_idx ON effects (type, target_id);
+
+-- "Will pay $11,550 transport from the bank" is a promise, not a movement.
+-- Reminders sit beside the book and never touch a balance.
+CREATE TABLE IF NOT EXISTS reminders (
+  id          TEXT PRIMARY KEY,
+  what        TEXT NOT NULL,
+  amount      NUMERIC(14,2) NOT NULL DEFAULT 0,
+  account_id  TEXT REFERENCES accounts(id),
+  note        TEXT NOT NULL DEFAULT '',
+  settled     BOOLEAN NOT NULL DEFAULT false,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

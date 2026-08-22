@@ -25,8 +25,14 @@ section is not decoration, it is the constraint the whole codebase is built on.
 - `shared/` — types, the engine, and the rules reader. Pure functions, no
   database, no React. Every money rule lives here and every one has a test.
 - `server/` — Postgres schema, the API, loading and saving the book.
-- `client/` — the app. The look is CSS tokens only; changing the palette or the
-  fonts must never require touching a screen.
+- `client/` — the app. `views/` is one file per screen, `ui.tsx` holds the
+  pieces they share, `Entry.tsx` is the box and the confirmation card. The look
+  is CSS tokens only; changing the palette or the fonts must never require
+  touching a screen.
+
+Balances shown on screen come from `book.balances` (worked out server-side for
+today) or from calling the engine with a date (any past day). Never add a
+figure to the client that the engine cannot also produce for a past date.
 
 ## Before pushing
 

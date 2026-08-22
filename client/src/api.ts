@@ -41,5 +41,8 @@ export const api = {
     send('/people', 'POST', b),
   setLoan: (b: { fromBusiness: string; toBusiness: string; opening: number }) => send('/loans', 'PUT', b),
   addEntry: (input: EntryInput) => send<Entry>('/entries', 'POST', input),
+  addReminder: (b: { what: string; amount: number; accountId: string | null; note?: string }) =>
+    send('/reminders', 'POST', b),
+  clearReminder: (id: string) => send(`/reminders/${id}`, 'DELETE'),
   correct: (id: string, amount: number) => send(`/entries/${id}`, 'PATCH', { amount }),
 };

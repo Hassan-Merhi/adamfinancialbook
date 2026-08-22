@@ -5,7 +5,7 @@ import { withLoanEffects } from '../shared/engine.js';
 import type { Book, Effect, Entry, EntryInput } from '../shared/types.js';
 
 export async function loadBook(): Promise<Book> {
-  const [businesses, accounts, projects, receipts, people, loans, entries, effects] = await Promise.all([
+  const [businesses, accounts, projects, receipts, people, loans, entries, effects, reminders] = await Promise.all([
     query('SELECT id, name FROM businesses ORDER BY created_at'),
     query('SELECT id, name, business_id, opening FROM accounts ORDER BY created_at'),
     query('SELECT id, name, scope, business_id FROM projects ORDER BY created_at'),
@@ -14,6 +14,7 @@ export async function loadBook(): Promise<Book> {
     query('SELECT id, from_business, to_business, opening FROM loans'),
     query('SELECT * FROM entries ORDER BY occurred_on, created_at'),
     query('SELECT * FROM effects ORDER BY id'),
+    query('SELECT id, what, amount, account_id, note, settled FROM reminders WHERE settled = false ORDER BY created_at'),
   ]);
 
   const byEntry = new Map<string, Effect[]>();
@@ -42,6 +43,9 @@ export async function loadBook(): Promise<Book> {
       kind: p.kind, opening: p.opening, salary: p.salary,
     })),
     loans: loans.map((l) => ({ id: l.id, fromBusiness: l.from_business, toBusiness: l.to_business, opening: l.opening })),
+    reminders: reminders.map((r) => ({
+      id: r.id, what: r.what, amount: r.amount, accountId: r.account_id, note: r.note, settled: r.settled,
+    })),
     entries: entries.map((t) => ({
       id: t.id, occurredOn: iso(t.occurred_on), kind: t.kind, amount: t.amount,
       purpose: t.purpose, raw: t.raw, accountId: t.account_id, toAccountId: t.to_account_id,
