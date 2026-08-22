@@ -28,7 +28,13 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
   const text = await res.text();
   const data = text ? safeParse(text) : null;
   if (res.status === 401) throw new NotSignedIn();
-  if (!res.ok) throw new Error(data?.error ?? `Request failed (${res.status})`);
+  if (!res.ok) {
+    // When the answer is not the app's own JSON, show the first words of what
+    // did answer — Express, a proxy and a service that is still starting all
+    // say 404 in their own words, and the words are what tell them apart.
+    const said = data?.error ?? (text ? text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) : '');
+    throw new Error(said ? `${said} (${res.status})` : `Request failed (${res.status})`);
+  }
   return data as T;
 }
 
