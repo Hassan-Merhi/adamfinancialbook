@@ -67,8 +67,8 @@ export default function Entry({ book, reload, say, onQueued }: {
   };
 
   return (
-    <>
-      <div className="card">
+    <div className="entrywrap">
+      <div className="card entrycard">
         <div className="entry">
           <input
             value={text}
@@ -105,7 +105,7 @@ export default function Entry({ book, reload, say, onQueued }: {
             fail={(m) => say(m, true)}
             onQueued={onQueued}
           />)}
-    </>
+    </div>
   );
 }
 

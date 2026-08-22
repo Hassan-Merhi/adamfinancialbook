@@ -5,7 +5,7 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { api, type LoadedBook } from '../api';
 import {
-  accountBalance, businessCash, loanBalance, personBalance, totalCash,
+  accountBalance, businessCash, loanBalance, ordered, personBalance, totalCash,
 } from '../../../shared/engine';
 import type { Entry } from '../../../shared/types';
 import { Card, Empty, longDate, money, shiftDay, shortDate, signed, today, tone } from '../ui';
@@ -25,7 +25,8 @@ export default function Report({ book, run }: {
   };
 
   const day = useMemo(
-    () => book.entries.filter((e) => e.occurredOn === date && (!business || businessOf(e) === business)),
+    // ordered() leaves out voided entries: they count for nothing, here too
+    () => ordered(book.entries).filter((e) => e.occurredOn === date && (!business || businessOf(e) === business)),
     [book.entries, date, business],
   );
 

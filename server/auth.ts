@@ -100,12 +100,15 @@ const OPEN = new Set(['/health', '/login', '/first-owner', '/me']);
  * never end up live with the door open.
  */
 export const requireLogin: RequestHandler = async (req, res, next) => {
-  if (OPEN.has(req.path)) return next();
+  // Always work out who is asking, even on the open paths: /me has to be able
+  // to answer "you are still signed in" after a page reload.
   const userId = readSession(readCookie(req.headers.cookie, 'book_session'));
-  if (!userId) return res.status(401).json({ error: 'Sign in to open the book.' });
-  const rows = await query<User>('SELECT id, email, role FROM users WHERE id = $1', [userId]);
-  if (!rows[0]) return res.status(401).json({ error: 'Sign in to open the book.' });
-  req.user = rows[0];
+  if (userId) {
+    const rows = await query<User>('SELECT id, email, role FROM users WHERE id = $1', [userId]);
+    if (rows[0]) req.user = rows[0];
+  }
+  if (OPEN.has(req.path)) return next();
+  if (!req.user) return res.status(401).json({ error: 'Sign in to open the book.' });
   next();
 };
 

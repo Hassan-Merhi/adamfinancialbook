@@ -1,4 +1,5 @@
 import type { LoadedBook } from '../api';
+import { ordered } from '../../../shared/engine';
 import { Card, Empty, KINDS, Row, Tile, longDate, money, shortDate, today, tone } from '../ui';
 import type { Focus } from './Statement';
 
@@ -10,7 +11,8 @@ export default function Today({ book, open, goto }: {
   const owedToYou = book.people.reduce((s, p) => s + Math.max(0, book.balances.people[p.id] ?? 0), 0);
   const youOwe = book.people.reduce((s, p) => s + Math.min(0, book.balances.people[p.id] ?? 0), 0);
   const between = book.loans.reduce((s, l) => s + Math.abs(book.balances.loans[l.id] ?? 0), 0);
-  const entered = book.entries.filter((e) => e.occurredOn === today());
+  // ordered() leaves out voided entries, which count for nothing
+  const entered = ordered(book.entries).filter((e) => e.occurredOn === today());
 
   return (
     <>

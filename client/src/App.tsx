@@ -22,15 +22,25 @@ import './styles.css';
 
 type View = 'today' | 'money' | 'projects' | 'people' | 'report' | 'history' | 'setup';
 
-const NAV: { id: View; label: string }[] = [
-  { id: 'today', label: 'Today' },
-  { id: 'money', label: 'Accounts & loans' },
-  { id: 'projects', label: 'Projects' },
-  { id: 'people', label: 'People' },
-  { id: 'report', label: 'Day report' },
-  { id: 'history', label: 'History' },
-  { id: 'setup', label: 'Set it up' },
+/** The long label is for the rail; the short one and the icon are for the phone. */
+const NAV: { id: View; label: string; short: string; icon: string }[] = [
+  { id: 'today', label: 'Today', short: 'Today',
+    icon: 'M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
+  { id: 'money', label: 'Accounts & loans', short: 'Money',
+    icon: 'M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z' },
+  { id: 'projects', label: 'Projects', short: 'Projects',
+    icon: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' },
+  { id: 'people', label: 'People', short: 'People',
+    icon: 'M9 4.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4zM3 20c0-3.3 2.7-5 6-5s6 1.7 6 5M16 6.5a3 3 0 0 1 0 6M17.5 20c0-2.2-.7-3.7-2-4.6' },
+  { id: 'report', label: 'Day report', short: 'Report',
+    icon: 'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM8 8h8M8 12h8M8 16h5' },
+  { id: 'history', label: 'History', short: 'History',
+    icon: 'M12 7v5l3 2M3.5 12a8.5 8.5 0 1 0 2.2-5.7M3 4v4h4' },
+  { id: 'setup', label: 'Set it up', short: 'Setup',
+    icon: 'M4 7h16M4 12h16M4 17h16M9 5v4M15 10v4M7 15v4' },
 ];
+
+const LOOKS = [['assistant', 'Assistant'], ['ledger', 'Ledger']] as const;
 
 export default function App() {
   const [me, setMe] = useState<Me | null>(null);
@@ -40,6 +50,27 @@ export default function App() {
   const [note, setNote] = useState<{ text: string; bad?: boolean } | null>(null);
   const [waiting, setWaiting] = useState(outbox.all().length);
   const [offline, setOffline] = useState(!navigator.onLine);
+  const [look, setLook] = useState(0);
+
+  // The look is only a set of tokens; nothing else in the app knows about it.
+  useEffect(() => {
+    try {
+      const kept = localStorage.getItem('book.look');
+      const found = LOOKS.findIndex(([id]) => id === kept);
+      if (found > 0) setLook(found);
+    } catch { /* private mode: the default look is fine */ }
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-vibe', LOOKS[look][0]);
+    try { localStorage.setItem('book.look', LOOKS[look][0]); } catch { /* nothing to do */ }
+  }, [look]);
+
+  const flipTheme = () => {
+    const now = document.documentElement.getAttribute('data-theme');
+    const dark = now ? now === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
+  };
 
   const reload = async () => {
     try {
@@ -122,6 +153,12 @@ export default function App() {
 
   return (
     <div className="shell">
+      {/* On a phone the rail sits at the bottom, so the name and the figure live up here. */}
+      <header className="topbar">
+        <b>Financial Book</b>
+        <span className="num">{money(book.balances.totalCash)}</span>
+      </header>
+
       <nav className="rail">
         <div className="brand">
           <b>Financial Book</b>
@@ -129,7 +166,11 @@ export default function App() {
         </div>
         {NAV.filter((n) => me.user!.role === 'owner' || (n.id !== 'setup' && n.id !== 'history')).map((n) => (
           <button key={n.id} className="navbtn" aria-current={!focus && view === n.id}
-            onClick={() => go(n.id)}>{n.label}</button>
+            onClick={() => go(n.id)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d={n.icon} /></svg>
+            <span className="long">{n.label}</span>
+            <span className="short">{n.short}</span>
+          </button>
         ))}
         <div className="railfoot">
           <span className="muted">{me.user.email}{me.user.role === 'entry' ? ' · can enter only' : ''}</span>
@@ -140,39 +181,60 @@ export default function App() {
         </div>
       </nav>
 
-      <main>
-        <div className="wrap">
+      {/* The box you type in and the views are one column: on a desktop the box
+          sits at the top of it, on a phone it drops to the bottom, by your thumb. */}
+      <div className="content">
+        <div className="dockable">
           {(offline || waiting > 0) && (
-            <div className="note">
+            <div className="note docknote">
               {offline ? 'No signal — these are the figures from the last time the book loaded. ' : ''}
               {waiting > 0
                 ? `${waiting} ${waiting === 1 ? 'entry is' : 'entries are'} waiting to be sent, and will go the moment there is a network.`
                 : 'Anything you log now will be sent when you are back.'}
             </div>
           )}
-
           <Entry book={book} reload={reload} say={say} onQueued={() => setWaiting(outbox.all().length)} />
-
-          {note && <div className={`note ${note.bad ? 'err' : 'ok'}`}>{note.text}</div>}
-
-          {empty && (
-            <div className="note">
-              The book is empty. Say <b>create a business called …</b> in the box above, then
-              <b> add account … under … with $…</b> — opening balances go in as you create each one.
-            </div>
-          )}
-
-          {focus
-            ? <Statement book={book} focus={focus} back={() => setFocus(null)} run={run} />
-            : view === 'today' ? <Today book={book} open={open} goto={go} />
-            : view === 'money' ? <Money book={book} open={open} />
-            : view === 'projects' ? <Projects book={book} open={open} />
-            : view === 'people' ? <People book={book} open={open} />
-            : view === 'report' ? <Report book={book} run={run} />
-            : view === 'history' ? <History book={book} />
-            : <Setup book={book} run={run} />}
         </div>
-      </main>
+
+        <main>
+          <div className="wrap">
+            {note && <div className={`note ${note.bad ? 'err' : 'ok'}`}>{note.text}</div>}
+
+            {empty && (
+              <div className="note">
+                The book is empty. Say <b>create a business called …</b> in the box, then
+                <b> add account … under … with $…</b> — opening balances go in as you create each one.
+              </div>
+            )}
+
+            {focus
+              ? <Statement book={book} focus={focus} back={() => setFocus(null)} run={run} />
+              : view === 'today' ? <Today book={book} open={open} goto={go} />
+              : view === 'money' ? <Money book={book} open={open} />
+              : view === 'projects' ? <Projects book={book} open={open} />
+              : view === 'people' ? <People book={book} open={open} />
+              : view === 'report' ? <Report book={book} run={run} />
+              : view === 'history' ? <History book={book} />
+              : <Setup book={book} run={run} />}
+
+            {/* the same two switches as the toggles, for a screen with no room for them */}
+            <div className="lookrow">
+              <span className="lab">Look</span>
+              {LOOKS.map(([id, label], i) => (
+                <button key={id} className="tab" aria-pressed={look === i} onClick={() => setLook(i)}>{label}</button>
+              ))}
+              <button className="tab" onClick={flipTheme}>Light / dark</button>
+            </div>
+          </div>
+        </main>
+      </div>
+
+      <div className="toggles">
+        <button className="toggle" onClick={() => setLook((look + 1) % LOOKS.length)}>
+          Look · {LOOKS[look][1]}
+        </button>
+        <button className="toggle" onClick={flipTheme}>Theme</button>
+      </div>
     </div>
   );
 }

@@ -59,3 +59,20 @@ describe('the day report, in words', () => {
     expect(dayHeadline(b, '2026-08-22')).toBe('Cash $11,100 · in $0 · out $900 · 1 entries');
   });
 });
+
+describe('a voided entry is not reported', () => {
+  it('never appears as money spent, and does not count in the headline', () => {
+    const b = book();
+    log(b, { occurredOn: '2026-08-22', kind: 'expense', amount: 900, purpose: 'Real one', raw: '', accountId: 'con_cash' });
+    const wrong = { occurredOn: '2026-08-22', kind: 'expense' as const, amount: 5_000, purpose: 'Wrong one', raw: '', accountId: 'con_cash' };
+    b.entries.push({
+      id: 'voided', ...wrong, effects: withLoanEffects(wrong, b),
+      correctedFrom: null, voided: true, voidReason: 'Wrong account', createdAt: '2026-08-22T00:00:09Z',
+    });
+
+    const text = dayReport(b, '2026-08-22');
+    expect(text).toContain('Real one: -$900');
+    expect(text).not.toContain('Wrong one');
+    expect(dayHeadline(b, '2026-08-22')).toContain('out $900');
+  });
+});

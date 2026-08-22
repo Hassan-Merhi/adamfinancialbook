@@ -3,7 +3,7 @@
  * arrives on your phone at your cut-off time.
  */
 import {
-  accountBalance, businessCash, loanBalance, personBalance, totalCash,
+  accountBalance, businessCash, loanBalance, ordered, personBalance, totalCash,
 } from '../shared/engine.js';
 import type { Book, Entry } from '../shared/types.js';
 
@@ -12,7 +12,8 @@ const money = (v: number) =>
 
 export function dayReport(book: Book, date: string): string {
   const out: string[] = [];
-  const day = book.entries.filter((e) => e.occurredOn === date);
+  // ordered() leaves out voided entries, so a voided one is never reported as spent
+  const day = ordered(book.entries).filter((e) => e.occurredOn === date);
   const name = (id: string | null | undefined, list: { id: string; name: string }[]) =>
     list.find((x) => x.id === id)?.name ?? '';
 
@@ -65,7 +66,7 @@ export function dayReport(book: Book, date: string): string {
 
 /** A one-line version, for a notification that has to fit on a lock screen. */
 export function dayHeadline(book: Book, date: string): string {
-  const day = book.entries.filter((e) => e.occurredOn === date);
+  const day = ordered(book.entries).filter((e) => e.occurredOn === date);
   const spent = day.filter((e) => !e.historical && ['expense', 'salary', 'person_loan', 'supplier_payment'].includes(e.kind))
     .reduce((s, e) => s + e.amount, 0);
   const received = day.filter((e) => e.kind === 'receipt' && !e.historical).reduce((s, e) => s + e.amount, 0);

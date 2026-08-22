@@ -68,6 +68,17 @@ Every figure opens into the entries behind it: a statement with a running
 balance, filters by text, type and date range, and a Correct button on each row.
 One codebase serves the desktop and the phone.
 
+## The look
+
+Two looks, switched live from the buttons at the bottom right — **Assistant**
+(flat, Inter, generous corners) and **Ledger** (a dark rail, Archivo and IBM
+Plex Mono, tighter corners) — plus a light/dark switch. On a phone the same two
+switches sit at the bottom of the Today screen. Your choice is remembered.
+
+A look is a block of CSS custom properties: colours, three typefaces, two corner
+radii. No screen and no figure knows which one is on, which is why switching is
+instant and a new one is an afternoon rather than a rebuild.
+
 ## Rules the code enforces
 
 | Rule | Where |
@@ -104,6 +115,11 @@ you approve.
 
 Open it in Safari or Chrome and add it to the home screen: it installs as an
 app, opens full screen, and works with no signal.
+
+The phone layout puts your thumb first: the name and the cash figure along the
+top, the views scrolling in the middle, the box you type in just above a row of
+tabs at the bottom. The confirmation card opens as a sheet over the views, with
+**Log it** pinned where you can always reach it.
 
 With no network it opens on the figures from the last time it loaded, says so
 plainly, and reads your sentences locally instead of asking the server. Anything
