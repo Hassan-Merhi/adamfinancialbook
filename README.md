@@ -172,11 +172,38 @@ npm run typecheck
 npm run build
 ```
 
+## Where the database lives
+
+The book keeps its data on **Neon** and runs on **Render**. Neon's free database
+is not deleted after thirty days the way Render's free one is, which is the only
+reason for the split.
+
+1. **neon.tech** → new project. Pick the region nearest you — from Lubumbashi
+   that is Frankfurt (`aws-eu-central-1`).
+2. Copy the **pooled** connection string (its host contains `-pooler`). It ends
+   in `?sslmode=require`; leave that on.
+3. Create the tables once, from your own machine:
+   ```bash
+   echo 'DATABASE_URL=<the string you copied>' > .env
+   echo 'SESSION_SECRET=anything-long-for-now' >> .env
+   npm run db:setup
+   ```
+4. Paste the same string into `DATABASE_URL` on both Render services.
+
+Pick the **Frankfurt** region on Render too. The app talks to the database on
+every request, and a book whose database is on another continent feels slow for
+no reason.
+
+The connection is encrypted and the certificate is verified. If the server turns
+out not to be speaking TLS, the app refuses to start rather than sending your
+figures across the internet in the clear. `PGSSL=off` is for a Postgres on your
+own machine.
+
 ## Deploying
 
 On Render: **New → Blueprint → pick this repo → Apply**. It reads `render.yaml`
-and creates all three pieces — the app, a Postgres 16 database, and the nightly
-report job — already wired together. `SESSION_SECRET` is generated for you. Set `REPORT_TO` and `SMTP_URL` when you want the report to
+and creates the app and the nightly report job. `SESSION_SECRET` is generated
+for you; paste your Neon `DATABASE_URL` into both. Set `REPORT_TO` and `SMTP_URL` when you want the report to
 arrive rather than just print, and `ANTHROPIC_API_KEY` if you want Claude to read
 the sentences.
 

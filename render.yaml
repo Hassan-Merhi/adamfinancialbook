@@ -1,12 +1,12 @@
-# One Blueprint: the app, its database, and the nightly report.
+# One Blueprint: the app and the nightly report. The database lives on Neon.
 #
-# On Render: New → Blueprint → pick this repo → Apply. It creates all three and
-# wires them together. SESSION_SECRET is generated for you; the only values you
-# ever type are the optional ones marked sync: false below.
+# On Render: New → Blueprint → pick this repo → Apply. Then paste your Neon
+# connection string into DATABASE_URL on both services. SESSION_SECRET is
+# generated for you; everything else marked sync: false is optional.
 #
-# Free instead of paid: set the web service to `plan: free`, the database to
-# `plan: free`, and delete the cron service (Render has no free cron). A free
-# database is deleted after 30 days, so move to paid before you rely on it.
+# Free while testing: set the web service to `plan: free` and delete the cron
+# service (Render has no free cron). Neon's free database is not deleted after
+# 30 days the way Render's is, which is why the database lives there.
 services:
   - type: web
     name: financial-book
@@ -17,9 +17,7 @@ services:
     healthCheckPath: /api/health
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: financial-book-db
-          property: connectionString
+        sync: false          # your Neon connection string (the pooled one)
       - key: SESSION_SECRET
         generateValue: true      # signs the login cookie; Render makes one
       - key: ANTHROPIC_API_KEY
@@ -37,17 +35,10 @@ services:
     startCommand: npm run report:send
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: financial-book-db
-          property: connectionString
+        sync: false          # the same Neon connection string
       - key: REPORT_TO
         sync: false          # where the report should land
       - key: SMTP_URL
         sync: false          # e.g. smtps://user:pass@smtp.gmail.com:465
       - key: NODE_VERSION
         value: "22"
-
-databases:
-  - name: financial-book-db
-    plan: basic-256mb
-    postgresMajorVersion: "16"
