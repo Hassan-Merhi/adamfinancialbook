@@ -161,10 +161,10 @@ app.post('/api/users/:id/username', ownerOnly, wrap(async (req, res) => {
   const { username } = z.object({ username: z.string().min(1).max(100) }).parse(req.body);
   const target = await getUser(String(req.params.id));
   if (!target) return res.status(404).json({ error: 'No such person.' });
-  const next = await setUsername(target.id, username);
-  await record(req, 'username changed', target.id, { from: target.email, to: next });
-  if (target.id === req.user!.id) req.user!.email = next;
-  res.json({ ok: true, username: next });
+  const changed = await setUsername(target.id, username);
+  await record(req, 'username changed', target.id, { from: target.email, to: changed.username });
+  if (target.id === req.user!.id) req.user!.email = changed.username;
+  res.json({ ok: true, username: changed.username });
 }));
 
 app.post('/api/users/:id/password', ownerOnly, wrap(async (req, res) => {
