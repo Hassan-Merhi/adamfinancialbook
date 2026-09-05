@@ -1,8 +1,4 @@
-/**
- * What has been done to the book, and the ways of getting it out.
- *
- * Nothing here changes a figure — it is the record beside the record.
- */
+/** What has been done to the book, plus export and backup actions. */
 import { useEffect, useState } from 'react';
 import { api, type LoadedBook } from '../api';
 import type { AuditLine } from '../../../shared/types';
@@ -18,51 +14,43 @@ export default function History({ book }: { book: LoadedBook }) {
   }, []);
 
   return (
-    <>
-      <p className="lede">
-        Every change to the book, oldest at the bottom. An entry is never deleted — a wrong one is
-        voided, stops counting, and stays here with its reason.
-      </p>
+    <section className="history-page">
+      <div className="dhead history-head">
+        <div><h2>History</h2><p className="muted">Audit trail, voided entries, exports, and backups.</p></div>
+        {lines && <span className="chip">{lines.length} events</span>}
+      </div>
 
-      <Card title="Take it with you">
-        <div className="form">
-          <a className="btn ghost" href="/api/export/entries.csv">Entries as a spreadsheet</a>
-          <a className="btn ghost" href="/api/backup.json">Whole book, as a backup</a>
-        </div>
-      </Card>
+      <div className="history-export-grid">
+        <a className="history-export-card" href="/api/export/entries.csv"><span>Spreadsheet</span><b>Export entries</b><small>CSV for Excel or Sheets</small></a>
+        <a className="history-export-card" href="/api/backup.json"><span>Backup</span><b>Download whole book</b><small>Complete JSON snapshot</small></a>
+      </div>
 
       {voided.length > 0 && (
-        <Card title="Voided" aside={`${voided.length} — counting for nothing`}>
-          {voided.map((e) => (
-            <div className="row" key={e.id}>
-              <span className="main">
-                <b style={{ textDecoration: 'line-through' }}>{e.purpose}</b>
-                <small>{shortDate(e.occurredOn)} · {e.voidReason}</small>
-              </span>
-              <span className="val num muted">{money(e.amount)}</span>
+        <Card title="Voided entries" aside={`${voided.length} · not counting`}>
+          {voided.map((entry) => (
+            <div className="row history-void-row" key={entry.id}>
+              <span className="main"><b>{entry.purpose}</b><small>{shortDate(entry.occurredOn)} · {entry.voidReason}</small></span>
+              <span className="val num muted">{money(entry.amount)}</span>
             </div>
           ))}
         </Card>
       )}
 
-      <Card title="History" aside={lines ? `${lines.length} lines` : undefined}>
+      <Card title="Audit trail" aside={lines ? 'newest first' : undefined}>
         {error && <Empty>{error}</Empty>}
         {!lines && !error && <Empty>Reading the history…</Empty>}
         {lines?.length === 0 && <Empty>Nothing has been done to this book yet.</Empty>}
-        {lines?.map((l) => (
-          <div className="row" key={l.id}>
-            <span className="main">
-              <b>{l.action}</b>
-              <small>{describe(l)}</small>
-            </span>
-            <span className="val num muted" style={{ fontWeight: 400, fontSize: 12.5 }}>
-              {new Date(l.at).toLocaleString()}
-              <small>{l.actorEmail ?? 'someone'}</small>
-            </span>
-          </div>
-        ))}
+        <div className="audit-timeline">
+          {lines?.map((line) => (
+            <article className="audit-event" key={line.id}>
+              <span className="audit-dot" aria-hidden="true" />
+              <div className="audit-copy"><b>{line.action}</b>{describe(line) && <small>{describe(line)}</small>}<span>{line.actorEmail ?? 'someone'}</span></div>
+              <time>{new Date(line.at).toLocaleString()}</time>
+            </article>
+          ))}
+        </div>
       </Card>
-    </>
+    </section>
   );
 }
 

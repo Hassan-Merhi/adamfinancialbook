@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, type EvidenceFile, type LoadedBook } from '../api';
 
 interface LibraryItem extends EvidenceFile {
@@ -44,49 +44,34 @@ export default function Files({ book }: { book: LoadedBook }) {
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      setLoading(true);
-      setError('');
-      setFiles([]);
+      setLoading(true); setError(''); setFiles([]);
       try {
         const [dashboard, users] = await Promise.all([api.evidenceDashboard(), api.users()]);
         if (cancelled) return;
-        const emails = new Map(users.users.map((u) => [u.id, u.email]));
-        const accountNames = new Map(book.accounts.map((a) => [a.id, a.name]));
+        const usernames = new Map(users.users.map((user) => [user.id, user.email]));
+        const accountNames = new Map(book.accounts.map((item) => [item.id, item.name]));
         const targets: Target[] = [];
 
         for (const entry of book.entries) {
           if (entry.voided) continue;
           const accountId = entry.accountId ?? entry.toAccountId ?? null;
           targets.push({
-            source: 'entry',
-            id: entry.id,
-            relatedDate: entry.occurredOn,
-            description: entry.purpose || entry.raw || 'Book entry',
-            amount: entry.amount,
+            source: 'entry', id: entry.id, relatedDate: entry.occurredOn,
+            description: entry.purpose || entry.raw || 'Book entry', amount: entry.amount,
             accountName: accountId ? accountNames.get(accountId) ?? '' : '',
-            person: entry.createdBy ? emails.get(entry.createdBy) ?? '' : '',
-            status: entry.kind,
+            person: entry.createdBy ? usernames.get(entry.createdBy) ?? '' : '', status: entry.kind,
           });
         }
-
         for (const request of dashboard.approvals ?? []) {
           targets.push({
-            source: 'approval',
-            id: request.id,
-            relatedDate: day(request.created_at),
-            description: request.request_text || 'Approval request',
-            amount: request.amount,
-            accountName: request.account_name ?? '',
-            person: request.requester_email ?? '',
-            status: request.status,
+            source: 'approval', id: request.id, relatedDate: day(request.created_at),
+            description: request.request_text || 'Approval request', amount: request.amount,
+            accountName: request.account_name ?? '', person: request.requester_email ?? '', status: request.status,
           });
         }
 
         setProgress({ done: 0, total: targets.length });
-        if (!targets.length) {
-          setLoading(false);
-          return;
-        }
+        if (!targets.length) { setLoading(false); return; }
 
         let cursor = 0;
         let completed = 0;
@@ -98,22 +83,8 @@ export default function Files({ book }: { book: LoadedBook }) {
             if (index >= targets.length) return;
             const target = targets[index];
             try {
-              const response = target.source === 'entry'
-                ? await api.evidenceForEntry(target.id)
-                : await api.evidenceForRequest(target.id);
-              for (const file of response.files) {
-                found.push({
-                  ...file,
-                  source: target.source,
-                  relatedId: target.id,
-                  relatedDate: target.relatedDate,
-                  description: target.description,
-                  amount: target.amount,
-                  accountName: target.accountName,
-                  person: target.person,
-                  status: target.status,
-                });
-              }
+              const response = target.source === 'entry' ? await api.evidenceForEntry(target.id) : await api.evidenceForRequest(target.id);
+              for (const file of response.files) found.push({ ...target, ...file, relatedId: target.id });
             } catch (e) {
               if (!cancelled) setError((e as Error).message);
             }
@@ -137,92 +108,49 @@ export default function Files({ book }: { book: LoadedBook }) {
 
   const accounts = useMemo(() => [...new Set(files.map((f) => f.accountName).filter(Boolean))].sort(), [files]);
   const people = useMemo(() => [...new Set(files.map((f) => f.person).filter(Boolean))].sort(), [files]);
-
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return files.filter((f) => {
-      if (kind === 'images' && !isImage(f.mime_type)) return false;
-      if (kind === 'pdf' && f.mime_type !== 'application/pdf') return false;
-      if (source !== 'all' && f.source !== source) return false;
-      if (account !== 'all' && f.accountName !== account) return false;
-      if (person !== 'all' && f.person !== person) return false;
-      if (from && f.relatedDate && f.relatedDate < from) return false;
-      if (to && f.relatedDate && f.relatedDate > to) return false;
+    return files.filter((file) => {
+      if (kind === 'images' && !isImage(file.mime_type)) return false;
+      if (kind === 'pdf' && file.mime_type !== 'application/pdf') return false;
+      if (source !== 'all' && file.source !== source) return false;
+      if (account !== 'all' && file.accountName !== account) return false;
+      if (person !== 'all' && file.person !== person) return false;
+      if (from && file.relatedDate && file.relatedDate < from) return false;
+      if (to && file.relatedDate && file.relatedDate > to) return false;
       if (!q) return true;
-      return [f.filename, f.description, f.accountName, f.person, f.status]
-        .some((value) => String(value || '').toLowerCase().includes(q));
+      return [file.filename, file.description, file.accountName, file.person, file.status].some((value) => String(value || '').toLowerCase().includes(q));
     });
   }, [files, search, kind, source, account, person, from, to]);
+  const filtered = !!(search || kind !== 'all' || source !== 'all' || account !== 'all' || person !== 'all' || from || to);
+  const clearFilters = () => { setSearch(''); setKind('all'); setSource('all'); setAccount('all'); setPerson('all'); setFrom(''); setTo(''); };
 
   return (
-    <section>
-      <div style={heading}>
-        <div>
-          <h2>Receipts & files</h2>
-          <p className="lede" style={{ marginTop: 4 }}>Every stored receipt, photo, quote and PDF attached to a transaction or approval request.</p>
-        </div>
-        <div style={countBox}>
-          <b className="num">{visible.length}</b>
-          <span className="muted small">shown · {files.length} stored</span>
-        </div>
+    <section className="files-page">
+      <div className="dhead files-head">
+        <div><h2>Receipts & files</h2><p className="muted">Photos, quotes, PDFs, and receipts attached to transactions or approval requests.</p></div>
+        <div className="files-count"><b className="num">{visible.length}</b><span>{files.length} stored</span></div>
       </div>
 
-      {loading && (
-        <div className="note">
-          Finding stored files… {progress.total ? `${progress.done} of ${progress.total} records checked` : 'opening the evidence index'}.
-        </div>
-      )}
+      {loading && <div className="note">Finding stored files… {progress.total ? `${progress.done} of ${progress.total} records checked` : 'opening evidence'}.</div>}
       {error && <div className="note err">Some evidence could not be indexed: {error}</div>}
 
-      <div className="card" style={{ padding: 14, overflow: 'visible' }}>
-        <div style={filters}>
-          <label style={field}>Search
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Filename, reason, account or person" style={control} />
-          </label>
-          <label style={field}>File type
-            <select value={kind} onChange={(e) => setKind(e.target.value)} style={control}>
-              <option value="all">All files</option>
-              <option value="images">Photos / images</option>
-              <option value="pdf">PDFs</option>
-            </select>
-          </label>
-          <label style={field}>Attached to
-            <select value={source} onChange={(e) => setSource(e.target.value)} style={control}>
-              <option value="all">Transactions + requests</option>
-              <option value="entry">Transactions</option>
-              <option value="approval">Approval requests</option>
-            </select>
-          </label>
-          <label style={field}>Account
-            <select value={account} onChange={(e) => setAccount(e.target.value)} style={control}>
-              <option value="all">All accounts</option>
-              {accounts.map((a) => <option key={a} value={a}>{a}</option>)}
-            </select>
-          </label>
-          <label style={field}>Person
-            <select value={person} onChange={(e) => setPerson(e.target.value)} style={control}>
-              <option value="all">Everyone</option>
-              {people.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
-          </label>
-          <label style={field}>From
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={control} />
-          </label>
-          <label style={field}>To
-            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={control} />
-          </label>
+      <div className="card files-filter-card">
+        <div className="files-filters">
+          <label className="files-search">Search<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Filename, reason, account or user" /></label>
+          <label>File type<select value={kind} onChange={(e) => setKind(e.target.value)}><option value="all">All files</option><option value="images">Photos / images</option><option value="pdf">PDFs</option></select></label>
+          <label>Attached to<select value={source} onChange={(e) => setSource(e.target.value)}><option value="all">Transactions + requests</option><option value="entry">Transactions</option><option value="approval">Approval requests</option></select></label>
+          <label>Account<select value={account} onChange={(e) => setAccount(e.target.value)}><option value="all">All accounts</option>{accounts.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+          <label>User<select value={person} onChange={(e) => setPerson(e.target.value)}><option value="all">Everyone</option>{people.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+          <label>From<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
+          <label>To<input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+          {filtered && <button className="btn ghost small files-clear" onClick={clearFilters}>Clear filters</button>}
         </div>
       </div>
 
-      {!loading && !files.length ? (
-        <div className="card"><div className="row"><div className="main"><b>No receipts or files stored yet.</b><small>Files added from delegated spending and approval requests will appear here automatically.</small></div></div></div>
-      ) : !loading && !visible.length ? (
-        <div className="card"><div className="row"><div className="main"><b>No files match these filters.</b><small>Clear a filter or widen the date range.</small></div></div></div>
-      ) : (
-        <div style={gallery}>
-          {visible.map((file) => <FileCard key={file.id} file={file} />)}
-        </div>
-      )}
+      {!loading && !files.length ? <EmptyState title="No files stored yet" detail="Receipts and files added to transactions or approvals will appear here." />
+        : !loading && !visible.length ? <EmptyState title="No files match" detail="Clear a filter or widen the date range." />
+        : <div className="files-gallery">{visible.map((file) => <FileCard key={file.id} file={file} />)}</div>}
     </section>
   );
 }
@@ -230,54 +158,31 @@ export default function Files({ book }: { book: LoadedBook }) {
 function FileCard({ file }: { file: LibraryItem }) {
   const url = api.evidenceUrl(file.id);
   return (
-    <article className="card" style={fileCard}>
-      <a href={url} target="_blank" rel="noreferrer" style={previewLink} aria-label={`Open ${file.filename}`}>
-        {isImage(file.mime_type)
-          ? <img src={url} alt={file.filename} loading="lazy" decoding="async" style={previewImage} />
-          : <div style={pdfPreview}><b>PDF</b><span>{size(file.byte_size)}</span></div>}
+    <article className="card file-card">
+      <a href={url} target="_blank" rel="noreferrer" className="file-preview" aria-label={`Open ${file.filename}`}>
+        {isImage(file.mime_type) ? <img src={url} alt={file.filename} loading="lazy" decoding="async" /> : <div className="pdf-preview"><b>PDF</b><span>{size(file.byte_size)}</span></div>}
       </a>
-      <div style={details}>
-        <div style={fileTitleRow}>
-          <b style={fileName}>{file.filename}</b>
-          <span className="muted small">{size(file.byte_size)}</span>
-        </div>
-        <div style={description}>{file.description}</div>
-        <div style={metaGrid}>
-          <Meta label="Type" value={file.source === 'entry' ? 'Transaction' : 'Approval request'} />
+      <div className="file-details">
+        <div className="file-title"><b>{file.filename}</b><span>{size(file.byte_size)}</span></div>
+        <p>{file.description}</p>
+        <div className="file-meta">
+          <Meta label="Type" value={file.source === 'entry' ? 'Transaction' : 'Approval'} />
           <Meta label="Amount" value={file.amount == null ? '—' : money(file.amount)} mono />
           <Meta label="Account" value={file.accountName || '—'} />
-          <Meta label="Person" value={file.person || '—'} />
-          <Meta label="Transaction date" value={file.relatedDate || '—'} />
+          <Meta label="User" value={file.person || '—'} />
+          <Meta label="Date" value={file.relatedDate || '—'} />
           <Meta label="Uploaded" value={day(file.created_at) || '—'} />
         </div>
-        <div style={cardActions}>
-          <span style={pill}>{file.status.replaceAll('_', ' ')}</span>
-          <a href={url} target="_blank" rel="noreferrer" className="btn ghost" style={{ textDecoration: 'none' }}>Open file</a>
-        </div>
+        <div className="file-actions"><span className="chip">{file.status.replaceAll('_', ' ')}</span><a href={url} target="_blank" rel="noreferrer" className="btn ghost small">Open file</a></div>
       </div>
     </article>
   );
 }
 
 function Meta({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return <div style={meta}><span className="muted small">{label}</span><span className={mono ? 'num' : ''} style={{ overflowWrap: 'anywhere' }}>{value}</span></div>;
+  return <div className="file-meta-item"><span>{label}</span><b className={mono ? 'num' : ''}>{value}</b></div>;
 }
 
-const heading: CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 18, alignItems: 'flex-start', marginBottom: 14 };
-const countBox: CSSProperties = { display: 'grid', textAlign: 'right', flex: 'none' };
-const filters: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(220px,2fr) repeat(auto-fit,minmax(140px,1fr))', gap: 10, alignItems: 'end' };
-const field: CSSProperties = { display: 'grid', gap: 5, fontSize: 12, fontWeight: 600, minWidth: 0 };
-const control: CSSProperties = { width: '100%', minWidth: 0, minHeight: 40, padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 'var(--r-ctl)', background: 'var(--paper)', color: 'var(--ink)' };
-const gallery: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,290px),1fr))', gap: 14 };
-const fileCard: CSSProperties = { marginBottom: 0, display: 'flex', flexDirection: 'column', minWidth: 0 };
-const previewLink: CSSProperties = { display: 'block', background: 'var(--sunk)', borderBottom: '1px solid var(--line)', minHeight: 190, textDecoration: 'none', color: 'inherit' };
-const previewImage: CSSProperties = { width: '100%', height: 210, objectFit: 'contain', display: 'block', background: 'var(--sunk)' };
-const pdfPreview: CSSProperties = { height: 210, display: 'grid', placeContent: 'center', justifyItems: 'center', gap: 6, color: 'var(--ink-2)', fontSize: 13 };
-const details: CSSProperties = { padding: 14, display: 'grid', gap: 10 };
-const fileTitleRow: CSSProperties = { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 };
-const fileName: CSSProperties = { minWidth: 0, overflowWrap: 'anywhere' };
-const description: CSSProperties = { color: 'var(--ink-2)', minHeight: 42, overflowWrap: 'anywhere' };
-const metaGrid: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: '8px 12px' };
-const meta: CSSProperties = { display: 'grid', gap: 1, minWidth: 0, fontSize: 13 };
-const cardActions: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingTop: 2 };
-const pill: CSSProperties = { border: '1px solid var(--line)', background: 'var(--sunk)', borderRadius: 999, padding: '3px 8px', fontSize: 11.5, color: 'var(--ink-2)', textTransform: 'capitalize' };
+function EmptyState({ title, detail }: { title: string; detail: string }) {
+  return <div className="card files-empty"><b>{title}</b><span>{detail}</span></div>;
+}
