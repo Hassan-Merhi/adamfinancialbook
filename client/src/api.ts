@@ -36,6 +36,33 @@ export interface EntrySearchHit {
   targetId: string | null;
 }
 
+export interface LibraryFile {
+  id: string;
+  filename: string;
+  mime_type: string;
+  byte_size: number;
+  created_at: string;
+  source: 'entry' | 'approval';
+  relatedId: string;
+  relatedDate: string;
+  description: string;
+  amount: number | null;
+  accountName: string;
+  person: string;
+  status: string;
+}
+export interface FilePageFilters {
+  q?: string;
+  kind?: 'images' | 'pdf' | '';
+  source?: 'entry' | 'approval' | '';
+  accountId?: string;
+  userId?: string;
+  from?: string;
+  to?: string;
+  cursor?: string | null;
+  limit?: number;
+}
+
 /** Thrown when an ordinary app request discovers that the session is gone. */
 export class NotSignedIn extends Error {
   constructor() { super('Sign in to open the book.'); }
@@ -111,6 +138,19 @@ function historyPage(cursor?: string | null, limit = 50) {
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set('cursor', cursor);
   return send<{ lines: AuditLine[]; nextCursor: string | null }>(`/history-page?${params.toString()}`, 'GET');
+}
+
+function filePage(filters: FilePageFilters = {}) {
+  const params = new URLSearchParams({ limit: String(filters.limit ?? 40) });
+  if (filters.q?.trim()) params.set('q', filters.q.trim());
+  if (filters.kind) params.set('kind', filters.kind);
+  if (filters.source) params.set('source', filters.source);
+  if (filters.accountId) params.set('accountId', filters.accountId);
+  if (filters.userId) params.set('userId', filters.userId);
+  if (filters.from) params.set('from', filters.from);
+  if (filters.to) params.set('to', filters.to);
+  if (filters.cursor) params.set('cursor', filters.cursor);
+  return send<{ items: LibraryFile[]; nextCursor: string | null }>(`/files-page?${params.toString()}`, 'GET');
 }
 
 /** `email` is the legacy wire-field name; the product now presents it as username. */
@@ -324,6 +364,7 @@ export const api = {
   statementPage,
   searchEntries,
   historyPage,
+  filePage,
   read: (text: string, today: string) => send<Reading>('/read', 'POST', { text, today }),
   addBusiness: (name: string) => send('/businesses', 'POST', { name }),
   addAccount: (b: { name: string; businessId?: string | null; opening: number }) => send('/accounts', 'POST', b),
