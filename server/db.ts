@@ -1,5 +1,8 @@
 import 'dotenv/config';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { TLSSocket } from 'node:tls';
+import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 
 // NUMERIC comes back as a string by default; this book only holds money at a
@@ -58,6 +61,17 @@ if (tls !== 'off') {
     console.warn('Could not confirm the database connection is encrypted.');
   }
 }
+
+/**
+ * Keep production in step with the code even when a host is configured with
+ * `npm start` instead of the Blueprint's `npm run db:setup && npm start`.
+ * schema.sql is deliberately idempotent, so applying it on boot is safe and
+ * also repairs installations that are missing newer tables such as
+ * notifications, pending transfers and approvals.
+ */
+const here = dirname(fileURLToPath(import.meta.url));
+const schema = readFileSync(join(here, 'schema.sql'), 'utf8');
+await pool.query(schema);
 
 export async function query<T = any>(text: string, params: unknown[] = []): Promise<T[]> {
   const res = await pool.query(text, params);
