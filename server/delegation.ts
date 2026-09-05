@@ -532,23 +532,22 @@ router.post('/delegation/attachments', imageBody, wrap(async (req, res) => {
   if (requestId && !(await canSeeApproval(req, requestId))) return res.status(403).json({ error: 'You cannot attach to that request.' });
   const data = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
   if (!data.length) return res.status(400).json({ error: 'Choose a receipt or photo first.' });
-  const contentType = req.headers['content-type'];
-  if (contentType !== undefined && typeof contentType !== 'string') {
-    return res.status(400).json({ error: 'Content-Type header must be supplied once as text.' });
-  }
-  const mime = contentType ?? '';
-  if (!['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(mime)) {
-    return res.status(415).json({ error: 'Use a JPG, PNG, WebP or PDF.' });
-  }
-  const rawNameHeader = req.headers['x-file-name'];
-  if (rawNameHeader !== undefined && typeof rawNameHeader !== 'string') {
-    return res.status(400).json({ error: 'File name header must be supplied once as text.' });
-  }
-  const rawName = rawNameHeader ?? 'evidence';
-  let filename = rawName;
-  try { filename = decodeURIComponent(rawName); } catch { /* keep the safe header text */ }
-  filename = filename.replace(/[\r\n]/g, '').slice(0, 180) || 'evidence';
+
+  const requestedMime = req.get('content-type');
+  const mime = requestedMime === 'image/jpeg' ? 'image/jpeg'
+    : requestedMime === 'image/png' ? 'image/png'
+    : requestedMime === 'image/webp' ? 'image/webp'
+    : requestedMime === 'application/pdf' ? 'application/pdf'
+    : null;
+  if (!mime) return res.status(415).json({ error: 'Use a JPG, PNG, WebP or PDF.' });
+
   const id = newId('att');
+  const extension = mime === 'image/jpeg' ? 'jpg'
+    : mime === 'image/png' ? 'png'
+    : mime === 'image/webp' ? 'webp'
+    : 'pdf';
+  const filename = `evidence-${id}.${extension}`;
+
   await query(
     `INSERT INTO attachments
       (id, uploaded_by, entry_id, approval_request_id, filename, mime_type, byte_size, data)
