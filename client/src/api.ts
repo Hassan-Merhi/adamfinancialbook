@@ -12,6 +12,30 @@ export interface Balances {
 }
 export type LoadedBook = Book & { balances: Balances };
 
+export type StatementTarget =
+  | { type: 'account'; id: string }
+  | { type: 'person'; id: string }
+  | { type: 'project'; id: string }
+  | { type: 'loan'; fromBusiness: string; toBusiness: string; view: string };
+
+export interface StatementRowView { entry: Entry; delta: number; running: number }
+export interface StatementPage {
+  items: StatementRowView[];
+  nextCursor: string | null;
+  total: number;
+  inSum: number;
+  outSum: number;
+}
+export interface StatementFilters { q?: string; kind?: string; from?: string; to?: string; cursor?: string | null; limit?: number }
+
+export interface EntrySearchHit {
+  id: string;
+  title: string;
+  subtitle: string;
+  targetType: 'account' | 'person' | 'project' | null;
+  targetId: string | null;
+}
+
 /** Thrown when an ordinary app request discovers that the session is gone. */
 export class NotSignedIn extends Error {
   constructor() { super('Sign in to open the book.'); }
@@ -47,6 +71,46 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
 
 function safeParse(text: string) {
   try { return JSON.parse(text); } catch { return null; }
+}
+
+function localToday() {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+}
+
+function overview(on?: string) {
+  const params = new URLSearchParams({ today: localToday() });
+  if (on) params.set('on', on);
+  return send<LoadedBook>(`/overview?${params.toString()}`, 'GET');
+}
+
+function statementPage(target: StatementTarget, filters: StatementFilters = {}) {
+  const params = new URLSearchParams({ type: target.type });
+  if (target.type === 'loan') {
+    params.set('fromBusiness', target.fromBusiness);
+    params.set('toBusiness', target.toBusiness);
+    params.set('view', target.view);
+  } else {
+    params.set('id', target.id);
+  }
+  if (filters.q?.trim()) params.set('q', filters.q.trim());
+  if (filters.kind) params.set('kind', filters.kind);
+  if (filters.from) params.set('from', filters.from);
+  if (filters.to) params.set('to', filters.to);
+  if (filters.cursor) params.set('cursor', filters.cursor);
+  params.set('limit', String(filters.limit ?? 50));
+  return send<StatementPage>(`/statement-page?${params.toString()}`, 'GET');
+}
+
+function searchEntries(q: string, limit = 12) {
+  const params = new URLSearchParams({ q, limit: String(limit) });
+  return send<{ items: EntrySearchHit[] }>(`/search/entries?${params.toString()}`, 'GET');
+}
+
+function historyPage(cursor?: string | null, limit = 50) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set('cursor', cursor);
+  return send<{ lines: AuditLine[]; nextCursor: string | null }>(`/history-page?${params.toString()}`, 'GET');
 }
 
 /** `email` is the legacy wire-field name; the product now presents it as username. */
@@ -256,6 +320,10 @@ export const api = {
   firstOwner: (username: string, password: string) => send<Me>('/first-owner', 'POST', { username, password }),
   logout: () => send('/logout', 'POST'),
   book: () => send<LoadedBook>('/book', 'GET'),
+  overview,
+  statementPage,
+  searchEntries,
+  historyPage,
   read: (text: string, today: string) => send<Reading>('/read', 'POST', { text, today }),
   addBusiness: (name: string) => send('/businesses', 'POST', { name }),
   addAccount: (b: { name: string; businessId?: string | null; opening: number }) => send('/accounts', 'POST', b),
