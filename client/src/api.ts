@@ -218,21 +218,20 @@ async function addEntry(input: EntryInput): Promise<EntrySaveResult> {
   }
 }
 
-function evidenceQuery(entryId?: string, requestId?: string) {
-  const params = new URLSearchParams();
-  if (entryId) params.set('entryId', entryId);
-  if (requestId) params.set('requestId', requestId);
-  return send<{ files: EvidenceFile[] }>(`/delegation/attachments?${params.toString()}`, 'GET');
+function evidenceQuery(kind: 'entry' | 'request', id: string) {
+  return send<{ files: EvidenceFile[] }>(
+    `/delegation/attachments/${kind}/${encodeURIComponent(id)}`,
+    'GET',
+  );
 }
 
 async function uploadEvidence(entryId: string, file: File): Promise<void> {
-  const res = await fetch(`/api/delegation/attachments?entryId=${encodeURIComponent(entryId)}`, {
+  const res = await fetch(`/api/delegation/attachments/entry/${encodeURIComponent(entryId)}`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: {
       'content-type': file.type || 'application/octet-stream',
       'x-book': '1',
-      'x-file-name': encodeURIComponent(file.name),
     },
     body: file,
   });
@@ -290,8 +289,8 @@ export const api = {
   evidenceDashboard,
   setUserAccounts: (id: string, accountIds: string[]) =>
     send(`/delegation/users/${encodeURIComponent(id)}/accounts`, 'PUT', { accountIds }),
-  evidenceForEntry: (entryId: string) => evidenceQuery(entryId, undefined),
-  evidenceForRequest: (requestId: string) => evidenceQuery(undefined, requestId),
+  evidenceForEntry: (entryId: string) => evidenceQuery('entry', entryId),
+  evidenceForRequest: (requestId: string) => evidenceQuery('request', requestId),
   uploadEvidence,
   confirmTransfer: (id: string) => send(`/delegation/transfers/${id}/confirm`, 'POST'),
   rejectTransfer: (id: string) => send(`/delegation/transfers/${id}/reject`, 'POST'),
