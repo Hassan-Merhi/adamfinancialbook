@@ -131,7 +131,7 @@ describe.skipIf(!DATABASE_URL)('real PostgreSQL API', () => {
   }, 15_000);
 
   it('migrates legacy schema, protects mutations, and bootstraps one owner', async () => {
-    expect((await db<{ version: string }>('SELECT version FROM schema_migrations ORDER BY version')).map((x) => Number(x.version))).toEqual([1, 2]);
+    expect((await db<{ version: string }>('SELECT version FROM schema_migrations ORDER BY version')).map((x) => Number(x.version))).toEqual([1, 2, 3]);
     const columns = (await db<{ column_name: string }>(
       `SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='users'`,
     )).map((x) => x.column_name);
