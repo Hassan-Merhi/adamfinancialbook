@@ -18,6 +18,7 @@
     "db:setup": "tsx server/setup-db.ts",
     "test": "vitest run",
     "test:integration": "vitest run server/api.integration.test.ts",
+    "test:financial-e2e": "vitest run server/financial-e2e.integration.test.ts",
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm test -- --passWithNoTests && npm run build",
     "user:add": "npm run db:migrate && tsx server/add-user.ts",
