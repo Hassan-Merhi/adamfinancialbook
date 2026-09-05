@@ -1,24 +1,20 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { passwordComplaint, readSession, signSession } from './session.js';
-import {
+import { describe, expect, it } from 'vitest';
+
+process.env.SESSION_SECRET = 'phase-6-test-secret-that-is-definitely-long-enough';
+// security.ts also owns PostgreSQL-backed session helpers. Unit tests below use
+// only its pure helpers; PGSSL=off prevents db.ts from eagerly opening a socket.
+process.env.DATABASE_URL ??= 'postgresql://unit:unit@127.0.0.1:1/unit';
+process.env.PGSSL = 'off';
+
+const { passwordComplaint, readSession, signSession } = await import('./session.js');
+const {
   decryptMfaSecret,
   encryptMfaSecret,
   sessionSeconds,
   verifyTotp,
-} from './security.js';
+} = await import('./security.js');
 
 describe('Phase 6 security primitives', () => {
-  const originalSecret = process.env.SESSION_SECRET;
-
-  beforeEach(() => {
-    process.env.SESSION_SECRET = 'phase-6-test-secret-that-is-definitely-long-enough';
-  });
-
-  afterEach(() => {
-    if (originalSecret === undefined) delete process.env.SESSION_SECRET;
-    else process.env.SESSION_SECRET = originalSecret;
-  });
-
   it('uses shorter sessions for delegated users than owners', () => {
     expect(sessionSeconds('entry')).toBe(24 * 60 * 60);
     expect(sessionSeconds('owner')).toBe(7 * 24 * 60 * 60);
