@@ -182,7 +182,7 @@ export const api = {
   book: () => send<LoadedBook>('/book', 'GET'),
   read: (text: string, today: string) => send<Reading>('/read', 'POST', { text, today }),
   addBusiness: (name: string) => send('/businesses', 'POST', { name }),
-  addAccount: (b: { name: string; businessId: string; opening: number }) => send('/accounts', 'POST', b),
+  addAccount: (b: { name: string; businessId?: string | null; opening: number }) => send('/accounts', 'POST', b),
   addProject: (b: { name: string; businessId: string; opening: number; scope?: string }) => send('/projects', 'POST', b),
   addPerson: (b: { name: string; businessId: string; kind: string; opening: number; salary: number; role: string }) =>
     send('/people', 'POST', b),
