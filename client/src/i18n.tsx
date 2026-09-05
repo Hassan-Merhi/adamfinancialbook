@@ -180,7 +180,8 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       flushTimer = null;
       if (disposed || !waiting.size) return;
       const sources = [...waiting.keys()].slice(0, 80);
-      const callbackSets = sources.map((source) => waiting.get(source) ?? new Set());
+      const callbackSets = sources.map((source) =>
+        waiting.get(source) ?? new Set<(translation: string) => void>());
       sources.forEach((source) => waiting.delete(source));
 
       try {
