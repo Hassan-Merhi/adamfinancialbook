@@ -1,4 +1,5 @@
-import { Router, type RequestHandler } from 'express';
+import { Router, type Request, type RequestHandler, type Response } from 'express';
+import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { record } from './audit.js';
 import { loadBook } from './book.js';
@@ -11,7 +12,7 @@ const router = Router();
 const wrap = (fn: RequestHandler): RequestHandler =>
   (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-function ownerOnly(req: Parameters<RequestHandler>[0], res: Parameters<RequestHandler>[1]): boolean {
+function ownerOnly(req: Request, res: Response): boolean {
   if (req.user?.role === 'owner') return true;
   res.status(403).json({ error: 'Only the owner can allocate delegated spending.' });
   return false;
@@ -153,7 +154,7 @@ router.post('/allocation/spending', wrap(async (req, res) => {
   res.json({ ok: true, count: entryIds.length, total });
 }));
 
-async function writeEffects(client: { query: (text: string, values?: unknown[]) => Promise<unknown> }, entryId: string, effects: Effect[]) {
+async function writeEffects(client: PoolClient, entryId: string, effects: Effect[]) {
   for (const effect of effects) {
     await client.query(
       `INSERT INTO effects (entry_id, type, target_id, from_business, to_business, delta)
