@@ -34,41 +34,23 @@ import './ux6.css';
 import './mobile-core.css';
 
 type View = 'today' | 'money' | 'projects' | 'people' | 'attention' | 'report' | 'files' | 'history' | 'access' | 'setup' | 'approvals';
-
-type NavItem = {
-  id: View;
-  label: string;
-  short: string;
-  icon: string;
-  ownerOnly?: boolean;
-};
+type NavItem = { id: View; label: string; short: string; icon: string; ownerOnly?: boolean };
 
 const PRIMARY_NAV: NavItem[] = [
-  { id: 'today', label: 'Today', short: 'Today',
-    icon: 'M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
-  { id: 'money', label: 'Accounts & loans', short: 'Money',
-    icon: 'M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z' },
-  { id: 'projects', label: 'Projects', short: 'Projects',
-    icon: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' },
-  { id: 'people', label: 'People', short: 'People',
-    icon: 'M9 4.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4zM3 20c0-3.3 2.7-5 6-5s6 1.7 6 5M16 6.5a3 3 0 0 1 0 6M17.5 20c0-2.2-.7-3.7-2-4.6' },
+  { id: 'today', label: 'Today', short: 'Today', icon: 'M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
+  { id: 'money', label: 'Accounts & loans', short: 'Money', icon: 'M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z' },
+  { id: 'projects', label: 'Projects', short: 'Projects', icon: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' },
+  { id: 'people', label: 'People', short: 'People', icon: 'M9 4.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4zM3 20c0-3.3 2.7-5 6-5s6 1.7 6 5M16 6.5a3 3 0 0 1 0 6M17.5 20c0-2.2-.7-3.7-2-4.6' },
 ];
 
 const MORE_NAV: NavItem[] = [
-  { id: 'attention', label: 'Needs attention', short: 'Attention',
-    icon: 'M12 3 2.8 19h18.4L12 3zM12 9v4M12 16.5h.01' },
-  { id: 'report', label: 'Day report', short: 'Report',
-    icon: 'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM8 8h8M8 12h8M8 16h5' },
-  { id: 'approvals', label: 'Approvals', short: 'Approvals',
-    icon: 'M5 12.5 9.2 17 19 7' },
-  { id: 'files', label: 'Receipts & files', short: 'Files', ownerOnly: true,
-    icon: 'M6 3h8l4 4v14H6zM14 3v5h5M9 13h6M9 17h4' },
-  { id: 'history', label: 'History', short: 'History', ownerOnly: true,
-    icon: 'M12 7v5l3 2M3.5 12a8.5 8.5 0 1 0 2.2-5.7M3 4v4h4' },
-  { id: 'access', label: 'Access', short: 'Access',
-    icon: 'M15.5 5a4.5 4.5 0 1 0-2.2 3.9L18 13.4V17h3.5v-3.5l-6-6A4.5 4.5 0 0 0 15.5 5zM11 5.6a1.4 1.4 0 1 1-2.8 0 1.4 1.4 0 0 1 2.8 0z' },
-  { id: 'setup', label: 'Set it up', short: 'Setup', ownerOnly: true,
-    icon: 'M4 7h16M4 12h16M4 17h16M9 5v4M15 10v4M7 15v4' },
+  { id: 'attention', label: 'Needs attention', short: 'Attention', icon: 'M12 3 2.8 19h18.4L12 3zM12 9v4M12 16.5h.01' },
+  { id: 'report', label: 'Day report', short: 'Report', icon: 'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM8 8h8M8 12h8M8 16h5' },
+  { id: 'approvals', label: 'Approvals', short: 'Approvals', icon: 'M5 12.5 9.2 17 19 7' },
+  { id: 'files', label: 'Receipts & files', short: 'Files', ownerOnly: true, icon: 'M6 3h8l4 4v14H6zM14 3v5h5M9 13h6M9 17h4' },
+  { id: 'history', label: 'History', short: 'History', ownerOnly: true, icon: 'M12 7v5l3 2M3.5 12a8.5 8.5 0 1 0 2.2-5.7M3 4v4h4' },
+  { id: 'access', label: 'Access', short: 'Access', icon: 'M15.5 5a4.5 4.5 0 1 0-2.2 3.9L18 13.4V17h3.5v-3.5l-6-6A4.5 4.5 0 0 0 15.5 5zM11 5.6a1.4 1.4 0 1 1-2.8 0 1.4 1.4 0 0 1 2.8 0z' },
+  { id: 'setup', label: 'Set it up', short: 'Setup', ownerOnly: true, icon: 'M4 7h16M4 12h16M4 17h16M9 5v4M15 10v4M7 15v4' },
 ];
 
 const MORE_ICON = 'M5 12h.01M12 12h.01M19 12h.01';
@@ -111,6 +93,8 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
   };
 
+  const say = (text: string, bad?: boolean) => setNote({ text, bad });
+
   const reload = async () => {
     try {
       const fresh = await api.book();
@@ -118,10 +102,17 @@ export default function App() {
       snapshot.save(fresh);
       setOffline(false);
     } catch (e) {
-      if (e instanceof NotSignedIn) { setMe({ user: null, needsFirstOwner: false }); return; }
+      if (e instanceof NotSignedIn) {
+        setMe({ user: null, needsFirstOwner: false });
+        return;
+      }
       const kept = snapshot.load<LoadedBook>();
-      if (kept) { setBook(kept); setOffline(true); }
-      else say((e as Error).message, true);
+      if (kept) {
+        setBook(kept);
+        setOffline(true);
+      } else {
+        say((e as Error).message, true);
+      }
     }
   };
 
@@ -130,13 +121,21 @@ export default function App() {
     try {
       setDashboard(await api.evidenceDashboard());
     } catch {
-      /* The book remains usable offline; keep the last attention snapshot. */
+      /* Keep the last attention snapshot while offline or temporarily unavailable. */
     }
   };
 
   useEffect(() => {
     api.me()
-      .then((m) => { setMe(m); if (m.user) { lastUser.save(m.user); void reload(); } else lastUser.clear(); })
+      .then((next) => {
+        setMe(next);
+        if (next.user) {
+          lastUser.save(next.user);
+          void reload();
+        } else {
+          lastUser.clear();
+        }
+      })
       .catch((e) => {
         const kept = snapshot.load<LoadedBook>();
         const who = lastUser.load<NonNullable<Me['user']>>();
@@ -144,7 +143,9 @@ export default function App() {
           setMe({ user: who, needsFirstOwner: false });
           setBook(kept);
           setOffline(true);
-        } else setMe({ user: null, needsFirstOwner: false });
+        } else {
+          setMe({ user: null, needsFirstOwner: false });
+        }
       });
   }, []);
 
@@ -153,10 +154,13 @@ export default function App() {
     try {
       const sent = await flushOutbox((input) => api.addEntry(input));
       setWaiting(outbox.all().length);
-      if (sent) { await reload(); say(`${sent} ${sent === 1 ? 'entry' : 'entries'} logged from the outbox.`); }
+      if (sent) {
+        await reload();
+        say(`${sent} ${sent === 1 ? 'entry' : 'entries'} logged from the outbox.`);
+      }
     } catch (e) {
       setWaiting(outbox.all().length);
-      say(`One queued entry was refused: ${(e as Error).message`, true);
+      say(`One queued entry was refused: ${(e as Error).message}`, true);
     }
   };
 
@@ -166,7 +170,10 @@ export default function App() {
     window.addEventListener('online', online);
     window.addEventListener('offline', gone);
     if (navigator.onLine) void flush();
-    return () => { window.removeEventListener('online', online); window.removeEventListener('offline', gone); };
+    return () => {
+      window.removeEventListener('online', online);
+      window.removeEventListener('offline', gone);
+    };
   }, [me?.user?.id]);
 
   useEffect(() => {
@@ -187,7 +194,10 @@ export default function App() {
       }
     };
     const resume = () => {
-      if (document.visibilityState !== 'visible') { stopTimer(); return; }
+      if (document.visibilityState !== 'visible') {
+        stopTimer();
+        return;
+      }
       void refreshDashboard();
       startTimer();
     };
@@ -201,11 +211,16 @@ export default function App() {
     };
   }, [me?.user?.id]);
 
-  const say = (text: string, bad?: boolean) => setNote({ text, bad });
   const run = async (work: () => Promise<unknown>, done: string) => {
-    try { await work(); await reload(); say(done); }
-    catch (e) { say((e as Error).message, true); }
+    try {
+      await work();
+      await reload();
+      say(done);
+    } catch (e) {
+      say((e as Error).message, true);
+    }
   };
+
   const refreshAll = async () => { await Promise.all([reload(), refreshDashboard()]); };
   const signOut = async () => {
     await api.logout();
@@ -224,20 +239,18 @@ export default function App() {
     setNote(null);
     setMoreOpen(false);
   };
-  const open = (f: Focus) => {
-    setFocus(f);
+  const open = (nextFocus: Focus) => {
+    setFocus(nextFocus);
     setNote(null);
     setMoreOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   if (!me) return <LoadingSkeleton />;
-
   if (!me.user) {
     return <SignIn needsFirstOwner={me.needsFirstOwner}
       done={(next) => { setMe(next); lastUser.save(next.user); void reload(); }} />;
   }
-
   if (!book) {
     return (
       <>
@@ -256,7 +269,10 @@ export default function App() {
   const attention = attentionCounts(book, dashboard, missingReceiptCount);
 
   const handlePromptAction = (action: PromptAction) => {
-    if (action.mode === 'focus') { open(action.target); return; }
+    if (action.mode === 'focus') {
+      open(action.target);
+      return;
+    }
     if (action.view === 'more') {
       setFocus(null);
       setNote(null);
@@ -280,6 +296,7 @@ export default function App() {
   return (
     <div className="shell">
       <a className="skip-link" href="#main-content">Skip to content</a>
+
       <header className="topbar">
         <b>Financial Book</b>
         <div className="topbar-search-wrap">
@@ -311,12 +328,17 @@ export default function App() {
         ))}
 
         <div className="moregroup">
-          <button className="navbtn morebtn" aria-current={moreIsCurrent ? 'page' : undefined} aria-expanded={moreOpen}
-            aria-haspopup="dialog" aria-label="More pages" onClick={() => setMoreOpen((openNow) => !openNow)}>
+          <button className="navbtn morebtn" aria-current={moreIsCurrent ? 'page' : undefined}
+            aria-expanded={moreOpen} aria-haspopup="dialog" aria-label="More pages"
+            onClick={() => setMoreOpen((openNow) => !openNow)}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={MORE_ICON} /></svg>
             <span className="long">More</span>
             <span className="short">More</span>
-            {attention.total > 0 && <span className="navbadge" aria-label={`${attention.total} items need attention`}>{attention.total > 99 ? '99+' : attention.total}</span>}
+            {attention.total > 0 && (
+              <span className="navbadge" aria-label={`${attention.total} items need attention`}>
+                {attention.total > 99 ? '99+' : attention.total}
+              </span>
+            )}
           </button>
 
           {moreOpen && (
@@ -336,7 +358,8 @@ export default function App() {
                     const label = item.id === 'approvals' && entryOnly ? 'My wallet' : item.label;
                     return (
                       <button key={item.id} className="moreitem"
-                        aria-current={!focus && view === item.id ? 'page' : undefined} onClick={() => go(item.id)}>
+                        aria-current={!focus && view === item.id ? 'page' : undefined}
+                        onClick={() => go(item.id)}>
                         <span className="moreitem-main">
                           <svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.icon} /></svg>
                           <span>{label}</span>
@@ -361,7 +384,7 @@ export default function App() {
                   </button>
                   <div className="moreaccount">
                     <span className="moreaccount-copy">
-                      <b>{me.user.role === 'entry' ? 'Entry user' : 'Account'}</b>
+                      <b>{entryOnly ? 'Entry user' : 'Account'}</b>
                       <span>{me.user.email}</span>
                     </span>
                     <button type="button" className="more-signout" onClick={() => { void signOut(); }}>Sign out</button>
@@ -373,7 +396,7 @@ export default function App() {
         </div>
 
         <div className="railfoot">
-          <span className="muted">{me.user.email}{me.user.role === 'entry' ? ' · can enter only' : ''}</span>
+          <span className="muted">{me.user.email}{entryOnly ? ' · can enter only' : ''}</span>
           <div className="language-desktop"><LanguageControl /></div>
           <button className="linkbtn" onClick={() => { void signOut(); }}>Sign out</button>
         </div>
@@ -398,7 +421,11 @@ export default function App() {
         {(!entryLanding || note) && (
           <main id="main-content" tabIndex={-1}>
             <div className="wrap">
-              {note && <div className={`note ${note.bad ? 'err' : 'ok'}`} role={note.bad ? 'alert' : 'status'} aria-live="polite">{note.text}</div>}
+              {note && (
+                <div className={`note ${note.bad ? 'err' : 'ok'}`} role={note.bad ? 'alert' : 'status'} aria-live="polite">
+                  {note.text}
+                </div>
+              )}
 
               {!entryLanding && (
                 <>
@@ -428,8 +455,8 @@ export default function App() {
                     : view === 'report' ? <Report book={book} run={run} />
                     : view === 'files' ? <Files book={book} />
                     : view === 'history' ? <History book={book} />
-                    : view === 'access' ? <Access me={me.user!} say={say} />
-                    : view === 'approvals' ? <Approvals me={me.user!} say={say} />
+                    : view === 'access' ? <Access me={me.user} say={say} />
+                    : view === 'approvals' ? <Approvals me={me.user} say={say} />
                     : <Setup book={book} run={run} />}
                 </>
               )}
