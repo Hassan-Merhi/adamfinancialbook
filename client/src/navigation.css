@@ -1,6 +1,9 @@
 @import './phase5.css';
 
 /* Phase 2: keep only the everyday destinations in the rail and tuck the rest under More. */
+/* The sticky rail is its own stacking context. Lift that entire context only while
+   the More drawer is open so the drawer/backdrop cannot be covered by page cards. */
+.rail:has(.moremenu) { z-index:300; }
 .moregroup { position:relative; }
 .moregroup > .navbtn { width:100%; }
 .morebtn { position:relative; }
