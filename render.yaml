@@ -13,7 +13,7 @@ services:
     runtime: node
     plan: starter
     buildCommand: npm ci && npm run build
-    startCommand: npm start
+    startCommand: npm run db:setup && npm start
     healthCheckPath: /api/health
     envVars:
       - key: DATABASE_URL

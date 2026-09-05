@@ -16,6 +16,7 @@ import {
   checkPassword, cookieHeader, passwordComplaint, signSession, suggestPassword, SESSION_DAYS,
 } from './session.js';
 import { dayReport } from './report.js';
+import { delegationGate } from './delegation.js';
 import {
   accountBalance, businessCash, loanBalance, personBalance,
   possibleDuplicateReceipt, projectReceived, statement, totalCash,
@@ -29,7 +30,7 @@ app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
   res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Permissions-Policy', 'geolocation=(), camera=(), microphone=()');
+  res.setHeader('Permissions-Policy', 'geolocation=(), camera=(self), microphone=()');
   res.setHeader('Content-Security-Policy',
     "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
     "font-src 'self' https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'");
@@ -49,6 +50,10 @@ app.use('/api', (req, res, next) => {
   if (req.get('x-book') === '1') return next();
   res.status(403).json({ error: 'Refused: that request did not come from the app.' });
 });
+
+// Delegated-account rules sit in front of the normal book routes. Owners fall
+// through to the original behavior; entry-only users receive a restricted book.
+app.use('/api', delegationGate);
 
 const wrap = (fn: express.RequestHandler): express.RequestHandler =>
   (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
