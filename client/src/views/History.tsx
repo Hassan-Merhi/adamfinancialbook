@@ -5,19 +5,45 @@ import type { AuditLine } from '../../../shared/types';
 import { Card, Empty, money, shortDate } from '../ui';
 
 export default function History({ book }: { book: LoadedBook }) {
-  const [lines, setLines] = useState<AuditLine[] | null>(null);
+  const [lines, setLines] = useState<AuditLine[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const voided = book.entries.filter((e) => e.voided);
 
   useEffect(() => {
-    api.history().then((r) => setLines(r.lines)).catch((e) => setError((e as Error).message));
+    let cancelled = false;
+    api.historyPage(null, 50)
+      .then((page) => {
+        if (cancelled) return;
+        setLines(page.lines);
+        setNextCursor(page.nextCursor);
+      })
+      .catch((e) => { if (!cancelled) setError((e as Error).message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, []);
+
+  const loadMore = async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await api.historyPage(nextCursor, 50);
+      setLines((current) => [...current, ...page.lines]);
+      setNextCursor(page.nextCursor);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   return (
     <section className="history-page">
       <div className="dhead history-head">
         <div><h2>History</h2><p className="muted">Audit trail, voided entries, exports, and backups.</p></div>
-        {lines && <span className="chip">{lines.length} events</span>}
+        {!loading && <span className="chip">{lines.length} loaded events</span>}
       </div>
 
       <div className="history-export-grid">
@@ -26,7 +52,7 @@ export default function History({ book }: { book: LoadedBook }) {
       </div>
 
       {voided.length > 0 && (
-        <Card title="Voided entries" aside={`${voided.length} · not counting`}>
+        <Card title="Recent voided entries" aside={`${voided.length} · not counting`}>
           {voided.map((entry) => (
             <div className="row history-void-row" key={entry.id}>
               <span className="main"><b>{entry.purpose}</b><small>{shortDate(entry.occurredOn)} · {entry.voidReason}</small></span>
@@ -36,12 +62,12 @@ export default function History({ book }: { book: LoadedBook }) {
         </Card>
       )}
 
-      <Card title="Audit trail" aside={lines ? 'newest first' : undefined}>
+      <Card title="Audit trail" aside={lines.length ? 'newest first' : undefined}>
         {error && <Empty>{error}</Empty>}
-        {!lines && !error && <Empty>Reading the history…</Empty>}
-        {lines?.length === 0 && <Empty>Nothing has been done to this book yet.</Empty>}
+        {loading && !error && <Empty>Reading the history…</Empty>}
+        {!loading && !error && lines.length === 0 && <Empty>Nothing has been done to this book yet.</Empty>}
         <div className="audit-timeline">
-          {lines?.map((line) => (
+          {lines.map((line) => (
             <article className="audit-event" key={line.id}>
               <span className="audit-dot" aria-hidden="true" />
               <div className="audit-copy"><b>{line.action}</b>{describe(line) && <small>{describe(line)}</small>}<span>{line.actorEmail ?? 'someone'}</span></div>
@@ -49,6 +75,11 @@ export default function History({ book }: { book: LoadedBook }) {
             </article>
           ))}
         </div>
+        {nextCursor && (
+          <button className="btn ghost" disabled={loadingMore} onClick={() => void loadMore()}>
+            {loadingMore ? 'Loading…' : 'Load older history'}
+          </button>
+        )}
       </Card>
     </section>
   );
