@@ -8,16 +8,18 @@
   },
   "scripts": {
     "dev": "concurrently -k -n api,web -c cyan,magenta \"npm:dev:api\" \"npm:dev:web\"",
-    "dev:api": "tsx watch server/index.ts",
+    "dev:api": "tsx watch server/start.ts",
     "dev:web": "vite",
     "build": "vite build",
-    "start": "tsx server/index.ts",
+    "start": "tsx server/start.ts",
+    "db:migrate": "tsx server/migrate.ts",
+    "db:status": "tsx server/migration-status.ts",
     "db:setup": "tsx server/setup-db.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "user:add": "tsx server/add-user.ts",
-    "report:send": "tsx server/send-report.ts",
-    "backup": "tsx server/backup.ts"
+    "user:add": "npm run db:migrate && tsx server/add-user.ts",
+    "report:send": "npm run db:migrate && tsx server/send-report.ts",
+    "backup": "npm run db:migrate && tsx server/backup.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",

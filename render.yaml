@@ -13,15 +13,19 @@ services:
     runtime: node
     plan: starter
     buildCommand: npm ci && npm run build
-    startCommand: npm run db:setup && npm start
+    # npm start runs ordered DB migrations first and refuses to open the HTTP
+    # server if a migration fails or an applied migration checksum has drifted.
+    startCommand: npm start
     healthCheckPath: /api/health
     envVars:
       - key: DATABASE_URL
         sync: false          # your Neon connection string (the pooled one)
       - key: SESSION_SECRET
-        generateValue: true      # signs the login cookie; Render makes one
+        generateValue: true  # signs the login cookie; Render makes one
       - key: ANTHROPIC_API_KEY
-        sync: false          # optional: Claude reads sentences; desktop Chrome translation needs no key
+        sync: false          # optional: Claude reads sentences and can translate dynamic text
+      - key: GOOGLE_TRANSLATE_API_KEY
+        sync: false          # optional: preferred server translation provider
       - key: NODE_VERSION
         value: "22"
 
@@ -32,6 +36,7 @@ services:
     plan: starter
     schedule: "0 17 * * *"
     buildCommand: npm ci
+    # report:send also runs db:migrate first, so the cron cannot use stale schema.
     startCommand: npm run report:send
     envVars:
       - key: DATABASE_URL
