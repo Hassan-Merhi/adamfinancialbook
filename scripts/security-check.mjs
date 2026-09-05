@@ -14,10 +14,25 @@ const detectors = [
   ['AWS access key', /\bAKIA[0-9A-Z]{16}\b/],
   ['Google API key', /\bAIza[0-9A-Za-z_-]{35}\b/],
   ['Slack token', /\bxox[baprs]-[0-9A-Za-z-]{20,}\b/],
-  ['credentialed database URL', /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s:/@]+:[^\s/@]+@/i],
 ];
 
+const databaseUrlPattern = /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s'"`<>]+/gi;
+const loopbackHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 const findings = [];
+
+function hasRemoteDatabaseCredentials(text) {
+  for (const match of text.matchAll(databaseUrlPattern)) {
+    const candidate = match[0].replace(/[),;]+$/, '');
+    try {
+      const url = new URL(candidate);
+      if (url.username && url.password && !loopbackHosts.has(url.hostname.toLowerCase())) return true;
+    } catch {
+      // If a credential-looking DB URL cannot be parsed safely, flag it rather than ignore it.
+      if (/\/\/[^\s:/@]+:[^\s/@]+@/.test(candidate)) return true;
+    }
+  }
+  return false;
+}
 
 async function walk(dir) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -41,6 +56,9 @@ async function walk(dir) {
     const text = await readFile(absolute, 'utf8');
     for (const [label, pattern] of detectors) {
       if (pattern.test(text)) findings.push(`${repoPath}: possible ${label}`);
+    }
+    if (hasRemoteDatabaseCredentials(text)) {
+      findings.push(`${repoPath}: possible credentialed remote database URL`);
     }
   }
 }
