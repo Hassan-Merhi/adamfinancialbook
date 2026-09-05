@@ -9,13 +9,7 @@ import { history, record } from './audit.js';
 import { backup, entriesCsv } from './export.js';
 import { readSentence } from './read.js';
 import { translateTexts } from './translate.js';
-import {
-  createUser, findUser, getUser, listUsers, ownerCount, ownerOnly, removeUser,
-  requireLogin, setPassword, setRole, userCount, verifyPassword, type Role,
-} from './auth.js';
-import {
-  checkPassword, cookieHeader, passwordComplaint, signSession, suggestPassword, SESSION_DAYS,
-} from './session.js';
+import { ownerOnly, requireLogin, userCount } from './auth.js';
 import { dayReport } from './report.js';
 import { delegationGate } from './delegation.js';
 import {
@@ -38,14 +32,17 @@ app.use((_req, res, next) => {
   next();
 });
 
-// Nothing behind /api opens without a session.
+// Authentication, sessions, MFA, login throttling and access lifecycle all live
+// in auth.ts/security.ts. Keeping one security entrypoint prevents an older route
+// from silently bypassing newer controls.
 if (!process.env.SESSION_SECRET) {
   throw new Error('SESSION_SECRET is not set — the book would be open to anyone. Set it in .env.');
 }
 app.use('/api', requireLogin);
 
 // Browsers send cookies on cross-site form posts too, so a state-changing call
-// must also carry a header a form cannot set.
+// must also carry a header a form cannot set. Security routes intercepted by
+// requireLogin apply the same check before responding.
 app.use('/api', (req, res, next) => {
   if (req.method === 'GET' || req.path === '/login' || req.path === '/first-owner') return next();
   if (req.get('x-book') === '1') return next();
@@ -63,150 +60,6 @@ const wrap = (fn: express.RequestHandler): express.RequestHandler =>
 
 app.get('/api/me', wrap(async (req, res) => {
   res.json({ user: req.user ?? null, needsFirstOwner: (await userCount()) === 0 });
-}));
-
-/** A handful of wrong guesses and the door stops answering for a while. */
-const attempts = new Map<string, { count: number; until: number }>();
-const MAX_TRIES = 8;
-const LOCK_MS = 15 * 60_000;
-
-function tooManyTries(key: string): boolean {
-  const found = attempts.get(key);
-  if (!found) return false;
-  if (Date.now() > found.until) { attempts.delete(key); return false; }
-  return found.count >= MAX_TRIES;
-}
-
-function noteFailure(key: string): void {
-  const found = attempts.get(key);
-  const count = found && Date.now() <= found.until ? found.count + 1 : 1;
-  attempts.set(key, { count, until: Date.now() + LOCK_MS });
-}
-
-app.post('/api/login', wrap(async (req, res) => {
-  const { email, password } = z.object({ email: z.string(), password: z.string() }).parse(req.body);
-  const key = `${req.ip}|${email.toLowerCase().trim()}`;
-  if (tooManyTries(key)) {
-    return res.status(429).json({ error: 'Too many tries. Wait fifteen minutes and try again.' });
-  }
-  const user = await findUser(email);
-  // the same answer either way, so a wrong email cannot be told from a wrong password
-  if (!user || !(await checkPassword(password, user.passwordHash))) {
-    noteFailure(key);
-    await record(req, 'sign-in refused', email, { ip: req.ip });
-    return res.status(401).json({ error: 'That email and password do not match.' });
-  }
-  attempts.delete(key);
-  res.setHeader('Set-Cookie', cookieHeader(signSession(user.id, user.tokenVersion), SESSION_DAYS * 86_400));
-  req.user = { id: user.id, email: user.email, role: user.role };
-  await record(req, 'signed in', user.email);
-  res.json({ user: { id: user.id, email: user.email, role: user.role } });
-}));
-
-app.post('/api/logout', wrap(async (_req, res) => {
-  res.setHeader('Set-Cookie', cookieHeader('', 0));
-  res.json({ ok: true });
-}));
-
-/** The very first owner, once, on an empty book. After that it is closed. */
-app.post('/api/first-owner', wrap(async (req, res) => {
-  if ((await userCount()) > 0) return res.status(403).json({ error: 'The book already has an owner.' });
-  const { email, password } = z.object({
-    email: z.string().email(), password: z.string().min(8),
-  }).parse(req.body);
-  const user = await createUser(email, password, 'owner');
-  res.setHeader('Set-Cookie', cookieHeader(signSession(user.id, 0), SESSION_DAYS * 86_400));
-  req.user = user;
-  await record(req, 'book opened', user.email);
-  res.status(201).json({ user });
-}));
-
-/* ---------------- who can open the book ---------------- */
-
-app.get('/api/users', ownerOnly, wrap(async (_req, res) => {
-  const rows = await listUsers();
-  res.json({
-    users: rows.map((u) => ({
-      id: u.id, email: u.email, role: u.role,
-      createdAt: new Date(u.created_at).toISOString(),
-      lastSeen: u.last_seen ? new Date(u.last_seen).toISOString() : null,
-    })),
-    suggestion: suggestPassword(),
-  });
-}));
-
-app.post('/api/users', ownerOnly, wrap(async (req, res) => {
-  const { email, password, role } = z.object({
-    email: z.string().email(),
-    password: z.string(),
-    role: z.enum(['owner', 'entry']),
-  }).parse(req.body);
-
-  const complaint = passwordComplaint(password);
-  if (complaint) return res.status(400).json({ error: complaint });
-  if (await findUser(email)) return res.status(409).json({ error: 'That email can already open the book.' });
-
-  const user = await createUser(email, password, role);
-  await record(req, 'person given access', user.id, { email: user.email, role });
-  res.status(201).json({ user });
-}));
-
-/** The owner sets someone a new password and tells them what it is. */
-app.post('/api/users/:id/password', ownerOnly, wrap(async (req, res) => {
-  const { password } = z.object({ password: z.string() }).parse(req.body);
-  const complaint = passwordComplaint(password);
-  if (complaint) return res.status(400).json({ error: complaint });
-
-  const target = await getUser(String(req.params.id));
-  if (!target) return res.status(404).json({ error: 'No such person.' });
-
-  const version = await setPassword(target.id, password);
-  await record(req, 'password reset', target.id, { email: target.email });
-  // resetting your own password would otherwise sign you out of this very tab
-  if (target.id === req.user!.id) {
-    res.setHeader('Set-Cookie', cookieHeader(signSession(target.id, version), SESSION_DAYS * 86_400));
-  }
-  res.json({ ok: true });
-}));
-
-app.post('/api/users/:id/role', ownerOnly, wrap(async (req, res) => {
-  const { role } = z.object({ role: z.enum(['owner', 'entry']) }).parse(req.body);
-  const target = await getUser(String(req.params.id));
-  if (!target) return res.status(404).json({ error: 'No such person.' });
-  // the book must never be left with nobody who can change it
-  if (target.role === 'owner' && role !== 'owner' && (await ownerCount()) === 1) {
-    return res.status(400).json({ error: 'This is the only owner — make someone else an owner first.' });
-  }
-  await setRole(target.id, role as Role);
-  await record(req, 'role changed', target.id, { email: target.email, role });
-  res.json({ ok: true });
-}));
-
-app.delete('/api/users/:id', ownerOnly, wrap(async (req, res) => {
-  const target = await getUser(String(req.params.id));
-  if (!target) return res.status(404).json({ error: 'No such person.' });
-  if (target.id === req.user!.id) return res.status(400).json({ error: 'You cannot remove yourself.' });
-  if (target.role === 'owner' && (await ownerCount()) === 1) {
-    return res.status(400).json({ error: 'This is the only owner.' });
-  }
-  await removeUser(target.id);
-  await record(req, 'access removed', target.id, { email: target.email });
-  res.json({ ok: true });
-}));
-
-/** Anyone signed in can change their own password, knowing the old one. */
-app.post('/api/password', wrap(async (req, res) => {
-  const { current, next } = z.object({ current: z.string(), next: z.string() }).parse(req.body);
-  const complaint = passwordComplaint(next);
-  if (complaint) return res.status(400).json({ error: complaint });
-  if (!(await verifyPassword(req.user!.id, current))) {
-    return res.status(401).json({ error: 'That is not your current password.' });
-  }
-  const version = await setPassword(req.user!.id, next);
-  await record(req, 'password changed', req.user!.id, { email: req.user!.email });
-  // this tab stays open; everywhere else the old session dies
-  res.setHeader('Set-Cookie', cookieHeader(signSession(req.user!.id, version), SESSION_DAYS * 86_400));
-  res.json({ ok: true });
 }));
 
 app.get('/api/health', wrap(async (_req, res) => {
