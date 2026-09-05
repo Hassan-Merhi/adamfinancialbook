@@ -1,4 +1,5 @@
 import { Router, type RequestHandler } from 'express';
+import { rateLimit } from 'express-rate-limit';
 import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { ownerOnly, verifyPassword } from './auth.js';
@@ -9,6 +10,19 @@ const router = Router();
 
 const wrap = (fn: RequestHandler): RequestHandler =>
   (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+// Password verification is intentionally rate-limited per authenticated owner.
+// Only failed requests consume the allowance, so a legitimate successful reset
+// does not lock the owner out of later maintenance work.
+const resetAttemptLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  keyGenerator: (req) => req.user!.id,
+  message: { error: 'Too many failed reset attempts. Try again in 15 minutes.' },
+});
 
 export interface ResetPreview {
   businesses: number;
@@ -151,7 +165,7 @@ router.get('/reset/preview', ownerOnly, wrap(async (req, res) => {
   res.json({ counts: await resetPreview(req.user!.id) });
 }));
 
-router.post('/reset', ownerOnly, wrap(async (req, res) => {
+router.post('/reset', ownerOnly, resetAttemptLimiter, wrap(async (req, res) => {
   const body = z.object({
     scope: z.enum(['activity', 'book', 'everything']),
     password: z.string().min(1).max(300),
