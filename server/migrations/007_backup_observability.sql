@@ -1,3 +1,19 @@
+-- Phase 9 consolidates operational state into the managed schema so a fresh
+-- restore target has every table needed before data is replayed.
+CREATE TABLE IF NOT EXISTS translation_cache (
+  language        TEXT NOT NULL CHECK (language IN ('en','fr','ar')),
+  source_language TEXT CHECK (source_language IS NULL OR source_language IN ('en','fr','ar')),
+  source_hash     TEXT NOT NULL,
+  source_text     TEXT NOT NULL,
+  translated_text TEXT NOT NULL,
+  provider        TEXT NOT NULL DEFAULT 'google',
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (language, source_hash)
+);
+
+CREATE INDEX IF NOT EXISTS translation_cache_updated_idx
+  ON translation_cache (updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS backup_runs (
   id                TEXT PRIMARY KEY,
   started_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
