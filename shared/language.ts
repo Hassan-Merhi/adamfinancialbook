@@ -84,7 +84,7 @@ export function protectTranslationText(text: string, names: string[] = []): Prot
   // a number embedded inside a protected identifier does not become a new token.
   for (const match of text.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)) protect(match[0]);
   for (const match of text.matchAll(/(?:USD|EUR|GBP|ZAR|CDF|[$€£])\s?\d[\d,.]*(?:\s?(?:USD|EUR|GBP|ZAR|CDF))?/giu)) protect(match[0]);
-  for (const match of text.matchAll(/\b\d[\d,.]*%\b/g)) protect(match[0]);
+  for (const match of text.matchAll(/\b\d[\d,.]*%/g)) protect(match[0]);
   for (const match of text.matchAll(/\b\d+(?:[.,]\d+)?\b/g)) protect(match[0]);
 
   return { masked, tokens };
