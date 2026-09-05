@@ -1,22 +1,41 @@
 /**
- * npm run backup [directory]
+ * npm run backup -- [directory]
  *
- * Writes the whole book to a timestamped file. Render keeps its own database
- * backups; this is the copy you can hold, read, and restore from anywhere.
+ * Creates an authenticated AES-256-GCM encrypted logical PostgreSQL snapshot.
+ * BACKUP_ENCRYPTION_KEY is required. Old .afb files in the target directory are
+ * pruned using BACKUP_RETENTION_DAYS (default 30).
  */
 import 'dotenv/config';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pool } from './db.js';
-import { loadBook } from './book.js';
-import { backup } from './export.js';
 
-const dir = process.argv[2] ?? 'backups';
-mkdirSync(dir, { recursive: true });
+const directoryArg = process.argv.slice(2).find((value) => !value.startsWith('-'));
+const directory = directoryArg ?? process.env.BACKUP_DIRECTORY ?? 'backups';
+const retentionDays = Number(process.env.BACKUP_RETENTION_DAYS ?? 30);
+mkdirSync(directory, { recursive: true });
 
-const book = await loadBook();
-const file = join(dir, `book-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-writeFileSync(file, backup(book));
+const [{ createEncryptedDatabaseBackup, pruneBackupFiles }, { pool }] = await Promise.all([
+  import('./backup-service.js'),
+  import('./db.js'),
+]);
 
-console.log(`Wrote ${file} — ${book.entries.length} entries, ${book.accounts.length} accounts.`);
-await pool.end();
+try {
+  const artifact = await createEncryptedDatabaseBackup('local-archive');
+  const path = join(directory, artifact.filename);
+  writeFileSync(path, artifact.buffer, { mode: 0o600 });
+  const pruned = pruneBackupFiles(directory, retentionDays);
+  console.log(JSON.stringify({
+    event: 'backup.file.written',
+    path,
+    id: artifact.id,
+    bytes: artifact.bytes,
+    checksum: artifact.checksum,
+    migrationVersion: artifact.migrationVersion,
+    tables: artifact.tableCount,
+    rows: artifact.rowCount,
+    retentionDays,
+    pruned,
+  }));
+} finally {
+  await pool.end();
+}
