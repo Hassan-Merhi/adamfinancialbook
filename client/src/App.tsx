@@ -384,7 +384,7 @@ export default function App() {
                     ? <Statement book={book} focus={focus} back={() => setFocus(null)} run={run} />
                     : view === 'today' ? <Today book={book} open={open} goto={go} attentionCount={attention.total} />
                     : view === 'money' ? <Money book={book} open={open} />
-                    : view === 'projects' ? <Projects book={book} open={open} />
+                    : view === 'projects' ? <Projects book={book} open={open} reload={reload} />
                     : view === 'people' ? <People book={book} open={open} />
                     : view === 'attention' ? <Attention
                         book={book}
