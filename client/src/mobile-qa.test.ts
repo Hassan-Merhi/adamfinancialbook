@@ -21,6 +21,14 @@ describe('mobile performance contract', () => {
     expect(app).toContain("document.addEventListener('visibilitychange', resume)");
   });
 
+  it('keeps compact startup compatible with bounded translation work and prompt-name protection', () => {
+    const translation = read('client/src/browser-translation.ts');
+    expect(translation).toContain('const DISPLAY_CONCURRENCY = 6');
+    expect(translation).toContain("url.pathname === '/api/overview'");
+    expect(translation).toContain('rememberCatalog(await response.clone().json())');
+    expect(translation).toContain('Do not warm LanguageDetector here');
+  });
+
   it('keeps the phone viewport, safe areas, RTL and reduced-motion contracts', () => {
     const html = read('client/index.html');
     const core = read('client/src/mobile-core.css');
