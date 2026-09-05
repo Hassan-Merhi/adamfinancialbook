@@ -31,6 +31,7 @@ import { money } from './ui';
 import './styles.css';
 import './navigation.css';
 import './ux6.css';
+import './mobile-core.css';
 
 type View = 'today' | 'money' | 'projects' | 'people' | 'attention' | 'report' | 'files' | 'history' | 'access' | 'setup' | 'approvals';
 
@@ -46,7 +47,7 @@ const PRIMARY_NAV: NavItem[] = [
   { id: 'today', label: 'Today', short: 'Today',
     icon: 'M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
   { id: 'money', label: 'Accounts & loans', short: 'Money',
-    icon: 'M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z' },
+    icon: 'M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z' },
   { id: 'projects', label: 'Projects', short: 'Projects',
     icon: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' },
   { id: 'people', label: 'People', short: 'People',
@@ -72,7 +73,6 @@ const MORE_NAV: NavItem[] = [
 
 const MORE_ICON = 'M5 12h.01M12 12h.01M19 12h.01';
 const SEARCH_ICON = 'm21 21-4.2-4.2M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4z';
-const LOOKS = [['assistant', 'Assistant'], ['ledger', 'Ledger']] as const;
 const DASHBOARD_REFRESH_MS = 45_000;
 
 export default function App() {
@@ -84,23 +84,14 @@ export default function App() {
   const [note, setNote] = useState<{ text: string; bad?: boolean } | null>(null);
   const [waiting, setWaiting] = useState(outbox.all().length);
   const [offline, setOffline] = useState(!navigator.onLine);
-  const [look, setLook] = useState(0);
   const [moreOpen, setMoreOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [missingReceiptCount, setMissingReceiptCount] = useState(0);
 
   useEffect(() => {
-    try {
-      const kept = localStorage.getItem('book.look');
-      const found = LOOKS.findIndex(([id]) => id === kept);
-      if (found > 0) setLook(found);
-    } catch { /* private mode: the default look is fine */ }
+    document.documentElement.setAttribute('data-vibe', 'assistant');
+    try { localStorage.removeItem('book.look'); } catch { /* private mode */ }
   }, []);
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-vibe', LOOKS[look][0]);
-    try { localStorage.setItem('book.look', LOOKS[look][0]); } catch { /* nothing to do */ }
-  }, [look]);
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -178,8 +169,6 @@ export default function App() {
     return () => { window.removeEventListener('online', online); window.removeEventListener('offline', gone); };
   }, [me?.user?.id]);
 
-  // Attention data no longer wakes hidden tabs every 15 seconds. Refresh when
-  // visible/focused, then at a relaxed cadence while the app is actively used.
   useEffect(() => {
     if (!me?.user) {
       setDashboard(null);
@@ -218,6 +207,17 @@ export default function App() {
     catch (e) { say((e as Error).message, true); }
   };
   const refreshAll = async () => { await Promise.all([reload(), refreshDashboard()]); };
+  const signOut = async () => {
+    await api.logout();
+    lastUser.clear();
+    snapshot.save(null);
+    setMe({ user: null, needsFirstOwner: false });
+    setBook(null);
+    setDashboard(null);
+    setMissingReceiptCount(0);
+    setMoreOpen(false);
+    setSearchOpen(false);
+  };
   const go = (next: View) => {
     setView(next);
     setFocus(null);
@@ -283,8 +283,6 @@ export default function App() {
       <header className="topbar">
         <b>Financial Book</b>
         <div className="topbar-search-wrap">
-          <span className="num">{money(book.balances.totalCash)}</span>
-          <LanguageControl compact />
           <button className="search-trigger mobile" onClick={() => setSearchOpen(true)} aria-label="Search">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SEARCH_ICON} /></svg>
             <span>Search</span>
@@ -314,7 +312,7 @@ export default function App() {
 
         <div className="moregroup">
           <button className="navbtn morebtn" aria-current={moreIsCurrent ? 'page' : undefined} aria-expanded={moreOpen}
-            aria-haspopup="menu" aria-label="More pages" onClick={() => setMoreOpen((openNow) => !openNow)}>
+            aria-haspopup="dialog" aria-label="More pages" onClick={() => setMoreOpen((openNow) => !openNow)}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={MORE_ICON} /></svg>
             <span className="long">More</span>
             <span className="short">More</span>
@@ -322,31 +320,62 @@ export default function App() {
           </button>
 
           {moreOpen && (
-            <div className="moremenu" role="menu" aria-label="More pages">
-              {visibleMore.map((item) => {
-                const label = item.id === 'approvals' && entryOnly ? 'My wallet' : item.label;
-                return (
-                  <button key={item.id} className="moreitem" role="menuitem"
-                    aria-current={!focus && view === item.id ? 'page' : undefined} onClick={() => go(item.id)}>
-                    <span>{label}</span>
-                    {item.id === 'attention' && attention.total > 0 && (
-                      <span className="navbadge inline">{attention.total > 99 ? '99+' : attention.total}</span>
-                    )}
+            <>
+              <button type="button" className="morebackdrop" onClick={() => setMoreOpen(false)} aria-label="Close More" />
+              <section className="moremenu" role="dialog" aria-modal="true" aria-label="More pages and settings">
+                <header className="moremenu-head">
+                  <span className="moremenu-head-copy">
+                    <b>More</b>
+                    <span>Pages and settings</span>
+                  </span>
+                  <button type="button" className="moremenu-close" onClick={() => setMoreOpen(false)} aria-label="Close More">×</button>
+                </header>
+
+                <div className="moremenu-pages">
+                  {visibleMore.map((item) => {
+                    const label = item.id === 'approvals' && entryOnly ? 'My wallet' : item.label;
+                    return (
+                      <button key={item.id} className="moreitem"
+                        aria-current={!focus && view === item.id ? 'page' : undefined} onClick={() => go(item.id)}>
+                        <span className="moreitem-main">
+                          <svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.icon} /></svg>
+                          <span>{label}</span>
+                        </span>
+                        {item.id === 'attention' && attention.total > 0 && (
+                          <span className="navbadge inline">{attention.total > 99 ? '99+' : attention.total}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="moremobile">
+                  <span className="moremobile-title">Settings</span>
+                  <div className="morelanguage">
+                    <span className="moretool-label">Language</span>
+                    <LanguageControl compact />
+                  </div>
+                  <button type="button" className="moreutility" onClick={flipTheme}>
+                    <span>Appearance</span>
+                    <strong>Light / dark</strong>
                   </button>
-                );
-              })}
-            </div>
+                  <div className="moreaccount">
+                    <span className="moreaccount-copy">
+                      <b>{me.user.role === 'entry' ? 'Entry user' : 'Account'}</b>
+                      <span>{me.user.email}</span>
+                    </span>
+                    <button type="button" className="more-signout" onClick={() => { void signOut(); }}>Sign out</button>
+                  </div>
+                </div>
+              </section>
+            </>
           )}
         </div>
 
         <div className="railfoot">
           <span className="muted">{me.user.email}{me.user.role === 'entry' ? ' · can enter only' : ''}</span>
           <div className="language-desktop"><LanguageControl /></div>
-          <button className="linkbtn" onClick={async () => {
-            await api.logout(); lastUser.clear(); snapshot.save(null);
-            setMe({ user: null, needsFirstOwner: false });
-            setBook(null); setDashboard(null); setMissingReceiptCount(0); setSearchOpen(false);
-          }}>Sign out</button>
+          <button className="linkbtn" onClick={() => { void signOut(); }}>Sign out</button>
         </div>
       </nav>
 
@@ -402,14 +431,6 @@ export default function App() {
                     : view === 'access' ? <Access me={me.user!} say={say} />
                     : view === 'approvals' ? <Approvals me={me.user!} say={say} />
                     : <Setup book={book} run={run} />}
-
-                  <div className="lookrow">
-                    <span className="lab">Look</span>
-                    {LOOKS.map(([id, label], i) => (
-                      <button key={id} className="tab" aria-pressed={look === i} onClick={() => setLook(i)}>{label}</button>
-                    ))}
-                    <button className="tab" onClick={flipTheme}>Light / dark</button>
-                  </div>
                 </>
               )}
             </div>
@@ -426,13 +447,6 @@ export default function App() {
         owner={!entryOnly}
         onChoose={handleSearchAction}
       />
-
-      <div className="toggles">
-        <button className="toggle" onClick={() => setLook((look + 1) % LOOKS.length)}>
-          Look · {LOOKS[look][1]}
-        </button>
-        <button className="toggle" onClick={flipTheme}>Theme</button>
-      </div>
     </div>
   );
 }
