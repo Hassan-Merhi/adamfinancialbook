@@ -76,19 +76,50 @@ export interface EvidenceApproval {
   status: 'pending' | 'approved' | 'rejected';
   requester_email?: string;
   account_name?: string;
+  review_note?: string;
+  created_at: string;
+}
+
+export interface EvidencePendingTransfer {
+  id: string;
+  amount: number;
+  purpose: string;
+  from_account_id: string;
+  to_account_id: string;
+  from_account_name: string;
+  to_account_name: string;
+  recipient_email?: string;
+  created_at: string;
+}
+
+export interface EvidenceNotification {
+  id: string;
+  type?: string;
+  title: string;
+  body: string;
+  related_type?: string | null;
+  related_id?: string | null;
+  read_at: string | null;
   created_at: string;
 }
 
 export interface EvidenceActivity {
   id: string;
+  occurred_on?: string;
+  amount?: number;
+  purpose?: string;
+  kind?: string;
   actor_email?: string;
   account_name?: string;
+  created_at?: string;
 }
 
 export interface EvidenceDashboard {
   mode: 'owner' | 'entry';
   approvals: EvidenceApproval[];
+  pendingTransfers: EvidencePendingTransfer[];
   recentActivity: EvidenceActivity[];
+  notifications: EvidenceNotification[];
 }
 
 /**
@@ -126,6 +157,23 @@ function evidenceQuery(entryId?: string, requestId?: string) {
   return send<{ files: EvidenceFile[] }>(`/delegation/attachments?${params.toString()}`, 'GET');
 }
 
+async function uploadEvidence(entryId: string, file: File): Promise<void> {
+  const res = await fetch(`/api/delegation/attachments?entryId=${encodeURIComponent(entryId)}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'content-type': file.type || 'application/octet-stream',
+      'x-book': '1',
+      'x-file-name': encodeURIComponent(file.name),
+    },
+    body: file,
+  });
+  const text = await res.text();
+  const data = text ? safeParse(text) : null;
+  if (res.status === 401) throw new NotSignedIn();
+  if (!res.ok) throw new Error(data?.error || `Upload failed (${res.status})`);
+}
+
 export const api = {
   me: () => send<Me>('/me', 'GET'),
   login: (email: string, password: string) => send<Me>('/login', 'POST', { email, password }),
@@ -155,5 +203,12 @@ export const api = {
   evidenceDashboard: () => send<EvidenceDashboard>('/delegation/dashboard', 'GET'),
   evidenceForEntry: (entryId: string) => evidenceQuery(entryId, undefined),
   evidenceForRequest: (requestId: string) => evidenceQuery(undefined, requestId),
+  uploadEvidence,
+  confirmTransfer: (id: string) => send(`/delegation/transfers/${id}/confirm`, 'POST'),
+  rejectTransfer: (id: string) => send(`/delegation/transfers/${id}/reject`, 'POST'),
+  decideApproval: (id: string, status: 'approved' | 'rejected', note = '') =>
+    send(`/delegation/approvals/${id}/decision`, 'POST', { status, note }),
+  markNotificationRead: (id: string) => send(`/delegation/notifications/${id}/read`, 'POST'),
+  markAllNotificationsRead: () => send('/delegation/notifications/read-all', 'POST'),
   evidenceUrl: (id: string) => `/api/delegation/attachments/${encodeURIComponent(id)}`,
 };

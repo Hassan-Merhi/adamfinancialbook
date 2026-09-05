@@ -5,7 +5,7 @@
  * "where do I stand". Any figure opens into the entries behind it.
  */
 import { useEffect, useState } from 'react';
-import { api, NotSignedIn, type LoadedBook, type Me } from './api';
+import { api, NotSignedIn, type EvidenceDashboard, type LoadedBook, type Me } from './api';
 import SignIn from './views/SignIn';
 import { flushOutbox, lastUser, looksOffline, outbox, snapshot } from './offline';
 import Entry from './Entry';
@@ -13,6 +13,7 @@ import Today from './views/Today';
 import Money from './views/Money';
 import Projects from './views/Projects';
 import People from './views/People';
+import Attention from './views/Attention';
 import Report from './views/Report';
 import Setup from './views/Setup';
 import History from './views/History';
@@ -20,12 +21,15 @@ import Access from './views/Access';
 import Files from './views/Files';
 import Approvals from './views/Approvals';
 import Statement, { type Focus } from './views/Statement';
+import GlobalSearch from './GlobalSearch';
+import { attentionCounts } from './attention';
+import type { SearchAction } from './search';
 import type { PromptAction } from '../../shared/prompt-actions';
 import { money } from './ui';
 import './styles.css';
 import './navigation.css';
 
-type View = 'today' | 'money' | 'projects' | 'people' | 'report' | 'files' | 'history' | 'access' | 'setup' | 'approvals';
+type View = 'today' | 'money' | 'projects' | 'people' | 'attention' | 'report' | 'files' | 'history' | 'access' | 'setup' | 'approvals';
 
 type NavItem = {
   id: View;
@@ -48,6 +52,8 @@ const PRIMARY_NAV: NavItem[] = [
 ];
 
 const MORE_NAV: NavItem[] = [
+  { id: 'attention', label: 'Needs attention', short: 'Attention',
+    icon: 'M12 3 2.8 19h18.4L12 3zM12 9v4M12 16.5h.01' },
   { id: 'report', label: 'Day report', short: 'Report',
     icon: 'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM8 8h8M8 12h8M8 16h5' },
   { id: 'approvals', label: 'Approvals', short: 'Approvals',
@@ -63,19 +69,22 @@ const MORE_NAV: NavItem[] = [
 ];
 
 const MORE_ICON = 'M5 12h.01M12 12h.01M19 12h.01';
+const SEARCH_ICON = 'm21 21-4.2-4.2M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4z';
 const LOOKS = [['assistant', 'Assistant'], ['ledger', 'Ledger']] as const;
 
 export default function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [book, setBook] = useState<LoadedBook | null>(null);
+  const [dashboard, setDashboard] = useState<EvidenceDashboard | null>(null);
   const [view, setView] = useState<View>('today');
   const [focus, setFocus] = useState<Focus | null>(null);
   const [note, setNote] = useState<{ text: string; bad?: boolean } | null>(null);
   const [waiting, setWaiting] = useState(outbox.all().length);
   const [offline, setOffline] = useState(!navigator.onLine);
   const [look, setLook] = useState(0);
-  const [approvalUnread, setApprovalUnread] = useState(0);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [missingReceiptCount, setMissingReceiptCount] = useState(0);
 
   // The look is only a set of tokens; nothing else in the app knows about it.
   useEffect(() => {
@@ -111,6 +120,18 @@ export default function App() {
     }
   };
 
+  const refreshDashboard = async () => {
+    if (!me?.user) {
+      setDashboard(null);
+      return;
+    }
+    try {
+      setDashboard(await api.evidenceDashboard());
+    } catch {
+      // The book remains usable offline; keep the last attention snapshot.
+    }
+  };
+
   useEffect(() => {
     api.me()
       .then((m) => { setMe(m); if (m.user) { lastUser.save(m.user); reload(); } else lastUser.clear(); })
@@ -142,7 +163,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    const online = () => { setOffline(false); flush(); };
+    const online = () => { setOffline(false); flush(); refreshDashboard(); };
     const gone = () => setOffline(true);
     window.addEventListener('online', online);
     window.addEventListener('offline', gone);
@@ -150,24 +171,16 @@ export default function App() {
     return () => { window.removeEventListener('online', online); window.removeEventListener('offline', gone); };
   }, [me?.user?.id]);
 
-  // Keep the unread count useful even though approvals now lives under More.
+  // One lightweight dashboard request feeds the attention badge, hub, and search.
   useEffect(() => {
-    if (!me?.user) { setApprovalUnread(0); return; }
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const res = await fetch('/api/delegation/dashboard', {
-          credentials: 'same-origin',
-          headers: { 'x-book': '1' },
-        });
-        if (!res.ok) return;
-        const data = await res.json() as { notifications?: Array<{ read_at: string | null }> };
-        if (!cancelled) setApprovalUnread((data.notifications || []).filter((n) => !n.read_at).length);
-      } catch { /* offline or temporarily unavailable: keep the last count */ }
-    };
-    void poll();
-    const timer = window.setInterval(() => { void poll(); }, 12_000);
-    return () => { cancelled = true; window.clearInterval(timer); };
+    if (!me?.user) {
+      setDashboard(null);
+      setMissingReceiptCount(0);
+      return;
+    }
+    void refreshDashboard();
+    const timer = window.setInterval(() => { void refreshDashboard(); }, 15_000);
+    return () => window.clearInterval(timer);
   }, [me?.user?.id]);
 
   const say = (text: string, bad?: boolean) => setNote({ text, bad });
@@ -175,13 +188,21 @@ export default function App() {
     try { await work(); await reload(); say(done); }
     catch (e) { say((e as Error).message, true); }
   };
+  const refreshAll = async () => {
+    await Promise.all([reload(), refreshDashboard()]);
+  };
   const go = (next: View) => {
     setView(next);
     setFocus(null);
     setNote(null);
     setMoreOpen(false);
   };
-  const open = (f: Focus) => { setFocus(f); setNote(null); setMoreOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  const open = (f: Focus) => {
+    setFocus(f);
+    setNote(null);
+    setMoreOpen(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   if (!me) return <div className="wrap"><p className="muted">Opening the book…</p></div>;
 
@@ -205,6 +226,7 @@ export default function App() {
   const showPrompt = !entryOnly || view === 'today';
   const visibleMore = MORE_NAV.filter((item) => !item.ownerOnly || me.user!.role === 'owner');
   const moreIsCurrent = !focus && visibleMore.some((item) => item.id === view);
+  const attention = attentionCounts(book, dashboard, missingReceiptCount);
 
   const handlePromptAction = (action: PromptAction) => {
     if (action.mode === 'focus') {
@@ -228,18 +250,34 @@ export default function App() {
     go(next);
   };
 
+  const handleSearchAction = (action: SearchAction) => {
+    if (action.mode === 'focus') open(action.target);
+    else go(action.view as View);
+  };
+
   return (
     <div className="shell">
       {/* On a phone the rail sits at the bottom, so the name and the figure live up here. */}
       <header className="topbar">
         <b>Financial Book</b>
-        <span className="num">{money(book.balances.totalCash)}</span>
+        <div className="topbar-search-wrap">
+          <span className="num">{money(book.balances.totalCash)}</span>
+          <button className="search-trigger mobile" onClick={() => setSearchOpen(true)} aria-label="Search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SEARCH_ICON} /></svg>
+            <span>Search</span>
+          </button>
+        </div>
       </header>
 
       <nav className="rail">
         <div className="brand">
           <b>Financial Book</b>
           <span>{money(book.balances.totalCash)} on hand</span>
+          <button className="search-trigger desktop" onClick={() => setSearchOpen(true)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SEARCH_ICON} /></svg>
+            <span>Search everything</span>
+            <kbd>⌘K</kbd>
+          </button>
         </div>
 
         {PRIMARY_NAV.map((item) => (
@@ -257,7 +295,7 @@ export default function App() {
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={MORE_ICON} /></svg>
             <span className="long">More</span>
             <span className="short">More</span>
-            {approvalUnread > 0 && <span className="navbadge">{approvalUnread > 99 ? '99+' : approvalUnread}</span>}
+            {attention.total > 0 && <span className="navbadge">{attention.total > 99 ? '99+' : attention.total}</span>}
           </button>
 
           {moreOpen && (
@@ -268,8 +306,8 @@ export default function App() {
                   <button key={item.id} className="moreitem" role="menuitem"
                     aria-current={!focus && view === item.id} onClick={() => go(item.id)}>
                     <span>{label}</span>
-                    {item.id === 'approvals' && approvalUnread > 0 && (
-                      <span className="navbadge inline">{approvalUnread > 99 ? '99+' : approvalUnread}</span>
+                    {item.id === 'attention' && attention.total > 0 && (
+                      <span className="navbadge inline">{attention.total > 99 ? '99+' : attention.total}</span>
                     )}
                   </button>
                 );
@@ -282,7 +320,8 @@ export default function App() {
           <span className="muted">{me.user.email}{me.user.role === 'entry' ? ' · can enter only' : ''}</span>
           <button className="linkbtn" onClick={async () => {
             await api.logout(); lastUser.clear(); snapshot.save(null);
-            setMe({ user: null, needsFirstOwner: false }); setBook(null);
+            setMe({ user: null, needsFirstOwner: false });
+            setBook(null); setDashboard(null); setMissingReceiptCount(0); setSearchOpen(false);
           }}>Sign out</button>
         </div>
       </nav>
@@ -322,10 +361,20 @@ export default function App() {
 
                   {focus
                     ? <Statement book={book} focus={focus} back={() => setFocus(null)} run={run} />
-                    : view === 'today' ? <Today book={book} open={open} goto={go} />
+                    : view === 'today' ? <Today book={book} open={open} goto={go} attentionCount={attention.total} />
                     : view === 'money' ? <Money book={book} open={open} />
                     : view === 'projects' ? <Projects book={book} open={open} />
                     : view === 'people' ? <People book={book} open={open} />
+                    : view === 'attention' ? <Attention
+                        book={book}
+                        dashboard={dashboard}
+                        role={me.user.role}
+                        open={open}
+                        goto={go}
+                        refresh={refreshAll}
+                        say={say}
+                        onMissingCount={setMissingReceiptCount}
+                      />
                     : view === 'report' ? <Report book={book} run={run} />
                     : view === 'files' ? <Files book={book} />
                     : view === 'history' ? <History book={book} />
@@ -347,6 +396,16 @@ export default function App() {
           </main>
         )}
       </div>
+
+      <GlobalSearch
+        open={searchOpen}
+        onOpen={() => setSearchOpen(true)}
+        onClose={() => setSearchOpen(false)}
+        book={book}
+        dashboard={dashboard}
+        owner={!entryOnly}
+        onChoose={handleSearchAction}
+      />
 
       <div className="toggles">
         <button className="toggle" onClick={() => setLook((look + 1) % LOOKS.length)}>

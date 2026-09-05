@@ -1,21 +1,18 @@
 import type { LoadedBook } from '../api';
-import { ordered, receiptsNotInCash } from '../../../shared/engine';
+import { ordered } from '../../../shared/engine';
 import { Card, Empty, KINDS, Row, Tile, longDate, money, shortDate, signed, today, tone } from '../ui';
 import type { Focus } from './Statement';
 
-export default function Today({ book, open }: {
+export default function Today({ book, open, goto, attentionCount }: {
   book: LoadedBook;
   open: (f: Focus) => void;
-  goto: (view: 'report') => void;
+  goto: (view: 'attention') => void;
+  attentionCount: number;
 }) {
   const date = today();
   const activity = ordered(book.entries);
   const enteredToday = activity.filter((entry) => entry.occurredOn === date);
   const recent = [...activity].reverse().slice(0, 5);
-
-  const reminders = book.reminders.filter((reminder) => !reminder.settled);
-  const receiptsWaiting = book.projects.flatMap((project) => receiptsNotInCash(book, project.id));
-  const attentionCount = reminders.length + receiptsWaiting.length;
 
   const accountMoves = enteredToday.flatMap((entry) =>
     entry.effects.filter((effect) => effect.type === 'account'),
@@ -38,29 +35,14 @@ export default function Today({ book, open }: {
       </div>
 
       <Card title="Needs attention" aside={attentionCount ? `${attentionCount} open` : 'all clear'}>
-        {attentionCount === 0 && <Empty>Nothing needs your attention right now.</Empty>}
-
-        {reminders.map((reminder) => (
-          <Row
-            key={`reminder-${reminder.id}`}
-            title={reminder.what}
-            sub={[
-              'Allocated, not paid',
-              accountName(reminder.accountId),
-              reminder.note,
-            ].filter(Boolean).join(' · ')}
-            value={money(reminder.amount)}
-          />
-        ))}
-
-        {receiptsWaiting.map((receipt) => (
-          <Row
-            key={`receipt-${receipt.id}`}
-            title={book.projects.find((project) => project.id === receipt.projectId)?.name ?? 'Project receipt'}
-            sub={`Recorded, not in cash${receipt.occurredOn ? ` · ${shortDate(receipt.occurredOn)}` : ''}`}
-            value={money(receipt.amount)}
-          />
-        ))}
+        {attentionCount === 0
+          ? <Empty>Nothing needs your attention right now.</Empty>
+          : <Row
+              title={`${attentionCount} ${attentionCount === 1 ? 'item needs' : 'items need'} a decision or follow-up`}
+              sub="Approvals, cash handoffs, missing receipts, reminders, and money still in limbo — all in one place."
+              value="Open"
+              onOpen={() => goto('attention')}
+            />}
       </Card>
 
       <Card title="Recent activity" aside={recent.length ? 'latest 5' : undefined}>

@@ -5,6 +5,7 @@ export type PromptView =
   | 'money'
   | 'projects'
   | 'people'
+  | 'attention'
   | 'report'
   | 'files'
   | 'history'
@@ -24,6 +25,7 @@ const PAGE_ALIASES: Array<{ view: PromptView; label: string; aliases: string[] }
   { view: 'money', label: 'Money', aliases: ['money', 'accounts', 'account balances', 'balances', 'loans'] },
   { view: 'projects', label: 'Projects', aliases: ['projects', 'jobs'] },
   { view: 'people', label: 'People', aliases: ['people', 'suppliers', 'payroll', 'workers'] },
+  { view: 'attention', label: 'Needs attention', aliases: ['attention', 'needs attention', 'pending', 'pending items', 'things to do'] },
   { view: 'report', label: 'Day report', aliases: ['report', 'day report', 'today report', "today's report"] },
   { view: 'files', label: 'Receipts & files', aliases: ['files', 'receipts', 'receipts and files', 'receipts & files'] },
   { view: 'history', label: 'History', aliases: ['history', 'audit', 'activity history'] },
