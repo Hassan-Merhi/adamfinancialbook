@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { translateTexts } from './translate.js';
 
 const DATABASE_URL = process.env.TEST_DATABASE_URL;
 let client: pg.Client | null = null;
+let translateTexts: typeof import('./translate.js').translateTexts;
 const oldKey = process.env.GOOGLE_TRANSLATE_API_KEY;
 
 function digest(sourceLanguage: string | undefined, text: string) {
@@ -17,6 +17,7 @@ describe.skipIf(!DATABASE_URL)('Phase 8 durable translation cache', () => {
     client = new pg.Client({ connectionString: DATABASE_URL, ssl: false });
     await client.connect();
     await client.query('DROP TABLE IF EXISTS translation_cache');
+    ({ translateTexts } = await import('./translate.js'));
   });
 
   afterAll(async () => {
