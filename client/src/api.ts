@@ -54,6 +54,41 @@ export interface Keyholder {
 
 export interface Reading { draft: Draft; source: 'claude' | 'rules'; duplicate: ProjectReceipt | null }
 
+export interface PendingTransferSave {
+  mode: 'pending_transfer';
+  id: string;
+  status: 'pending';
+}
+export type EntrySaveResult = Entry | PendingTransferSave;
+
+/**
+ * The prompt uses the ordinary entry endpoint for every transaction. When the
+ * destination is a delegated wallet, the server intentionally refuses a direct
+ * ledger transfer. In that one case, turn the exact same confirmed draft into a
+ * cash-handoff request so the recipient must confirm receipt before anything
+ * posts to the ledger.
+ */
+async function addEntry(input: EntryInput): Promise<EntrySaveResult> {
+  try {
+    return await send<Entry>('/entries', 'POST', input);
+  } catch (err) {
+    const delegatedDestination = err instanceof Error
+      && err.message.includes('belongs to a delegated user');
+    if (input.kind !== 'transfer' || !input.accountId || !input.toAccountId || !delegatedDestination) {
+      throw err;
+    }
+
+    const pending = await send<{ id: string; status: 'pending' }>('/delegation/transfers', 'POST', {
+      fromAccountId: input.accountId,
+      toAccountId: input.toAccountId,
+      amount: input.amount,
+      purpose: input.purpose || 'Cash handoff',
+      occurredOn: input.occurredOn,
+    });
+    return { mode: 'pending_transfer', ...pending };
+  }
+}
+
 export const api = {
   me: () => send<Me>('/me', 'GET'),
   login: (email: string, password: string) => send<Me>('/login', 'POST', { email, password }),
@@ -67,7 +102,7 @@ export const api = {
   addPerson: (b: { name: string; businessId: string; kind: string; opening: number; salary: number; role: string }) =>
     send('/people', 'POST', b),
   setLoan: (b: { fromBusiness: string; toBusiness: string; opening: number }) => send('/loans', 'PUT', b),
-  addEntry: (input: EntryInput) => send<Entry>('/entries', 'POST', input),
+  addEntry,
   addReminder: (b: { what: string; amount: number; accountId: string | null; note?: string }) =>
     send('/reminders', 'POST', b),
   clearReminder: (id: string) => send(`/reminders/${id}`, 'DELETE'),
