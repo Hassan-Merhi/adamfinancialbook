@@ -1,0 +1,225 @@
+/* Phase 5 — visual polish, responsive surfaces, and motion.
+   This file intentionally changes presentation only: no financial behaviour. */
+
+:root[data-vibe="assistant"] {
+  --paper:#F6F7F9;
+  --card:#FFFFFF;
+  --sunk:#F1F3F6;
+  --line:#E3E7EC;
+  --line-soft:#EEF0F3;
+  --ink:#15181C;
+  --ink-2:#535B66;
+  --ink-3:#89919C;
+  --accent:#2563EB;
+  --accent-soft:#EAF1FF;
+  --pos:#147A4B;
+  --neg:#C23C32;
+  --rail:#FBFCFD;
+  --r-card:18px;
+  --r-ctl:12px;
+  --shadow:0 1px 2px rgba(18,24,32,.04),0 8px 24px rgba(18,24,32,.04);
+  --lift:0 20px 60px rgba(18,24,32,.16);
+}
+
+:root[data-vibe="assistant"][data-theme="dark"] {
+  --paper:#111315;
+  --card:#181B1F;
+  --sunk:#20242A;
+  --line:#2C3138;
+  --line-soft:#24292F;
+  --ink:#F1F3F5;
+  --ink-2:#B9C0C8;
+  --ink-3:#7E8792;
+  --accent:#78A8FF;
+  --accent-soft:#1D3157;
+  --pos:#5AC58A;
+  --neg:#F08078;
+  --rail:#14171A;
+  --shadow:0 1px 2px rgba(0,0,0,.25),0 10px 30px rgba(0,0,0,.18);
+  --lift:0 24px 70px rgba(0,0,0,.42);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-vibe="assistant"]:not([data-theme="light"]) {
+    --paper:#111315;
+    --card:#181B1F;
+    --sunk:#20242A;
+    --line:#2C3138;
+    --line-soft:#24292F;
+    --ink:#F1F3F5;
+    --ink-2:#B9C0C8;
+    --ink-3:#7E8792;
+    --accent:#78A8FF;
+    --accent-soft:#1D3157;
+    --pos:#5AC58A;
+    --neg:#F08078;
+    --rail:#14171A;
+    --shadow:0 1px 2px rgba(0,0,0,.25),0 10px 30px rgba(0,0,0,.18);
+    --lift:0 24px 70px rgba(0,0,0,.42);
+  }
+}
+
+body { letter-spacing:-.005em; }
+.shell { background:var(--paper); }
+.content { min-width:0; }
+.wrap { max-width:1000px; padding:22px 26px 88px; }
+.dockable { max-width:1000px; padding:28px 26px 2px; }
+
+.card,
+.tile,
+.review,
+.entrycard {
+  border-color:var(--line);
+  box-shadow:var(--shadow);
+}
+.card { margin-bottom:20px; border-radius:var(--r-card); }
+.card > h3 { padding:15px 18px; font-size:13px; }
+.row { padding:13px 18px; transition:background-color .14s ease,transform .14s ease; }
+.row.link:hover { transform:translateX(2px); }
+.tile { padding:16px 18px; transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease; }
+.tile:hover { transform:translateY(-1px); box-shadow:0 10px 28px rgba(18,24,32,.07); border-color:color-mix(in srgb,var(--line) 65%,var(--ink-3)); }
+.tile .v { font-size:26px; }
+
+.btn,
+.fi,
+.f input,
+.f select,
+.entry input,
+.toggle,
+.tab {
+  transition:background-color .14s ease,border-color .14s ease,color .14s ease,transform .12s ease,box-shadow .14s ease;
+}
+.btn:not(:disabled):active,
+.toggle:active,
+.tab:active { transform:translateY(1px) scale(.99); }
+.btn:not(.ghost) { box-shadow:0 1px 2px rgba(0,0,0,.08); }
+.btn.ghost:hover { background:color-mix(in srgb,var(--sunk) 75%,var(--card)); border-color:color-mix(in srgb,var(--line) 55%,var(--ink-3)); }
+.fi:focus,
+.f input:focus,
+.f select:focus,
+.entry input:focus { border-color:color-mix(in srgb,var(--accent) 65%,var(--line)); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 12%,transparent); outline:none; }
+
+.note { box-shadow:0 1px 2px rgba(0,0,0,.02); }
+.dhead { margin-bottom:18px; }
+.dhead h2 { font-size:23px; }
+.filters { gap:9px; }
+.fi { min-height:40px; }
+
+/* Statement pages become a calm side panel on larger screens. */
+@media (min-width:761px) {
+  main:has(.back) {
+    position:fixed;
+    inset:0;
+    z-index:210;
+    overflow:hidden;
+    background:rgba(15,20,26,.30);
+    backdrop-filter:blur(3px);
+    -webkit-backdrop-filter:blur(3px);
+    animation:phase5FadeIn .16s ease-out both;
+  }
+  main:has(.back) > .wrap {
+    position:absolute;
+    top:0;
+    right:0;
+    bottom:0;
+    width:min(780px,74vw);
+    max-width:none;
+    overflow-y:auto;
+    margin:0;
+    padding:28px 28px 70px;
+    background:var(--paper);
+    border-left:1px solid var(--line);
+    box-shadow:-24px 0 70px rgba(15,20,26,.16);
+    animation:phase5SlideIn .22s cubic-bezier(.2,.8,.2,1) both;
+  }
+  main:has(.back) .back {
+    position:sticky;
+    top:0;
+    z-index:3;
+    display:inline-flex;
+    align-items:center;
+    min-height:34px;
+    margin:-10px 0 12px;
+    padding:6px 10px;
+    border:1px solid var(--line);
+    border-radius:999px;
+    background:color-mix(in srgb,var(--card) 92%,transparent);
+    box-shadow:var(--shadow);
+    backdrop-filter:blur(12px);
+    -webkit-backdrop-filter:blur(12px);
+    text-decoration:none;
+  }
+}
+
+/* Mobile statement = bottom sheet, with room to keep context around it. */
+@media (max-width:760px) {
+  .wrap { padding:16px 14px 28px; }
+  .dockable { padding:0; }
+  main:has(.back) {
+    position:fixed;
+    inset:0;
+    z-index:210;
+    display:flex;
+    align-items:flex-end;
+    background:rgba(8,12,16,.34);
+    backdrop-filter:blur(3px);
+    -webkit-backdrop-filter:blur(3px);
+    animation:phase5FadeIn .16s ease-out both;
+  }
+  main:has(.back) > .wrap {
+    width:100%;
+    max-height:92dvh;
+    overflow-y:auto;
+    margin:0;
+    padding:14px 14px calc(28px + env(safe-area-inset-bottom));
+    background:var(--paper);
+    border:1px solid var(--line);
+    border-bottom:0;
+    border-radius:24px 24px 0 0;
+    box-shadow:0 -20px 60px rgba(0,0,0,.22);
+    animation:phase5SheetUp .24s cubic-bezier(.2,.8,.2,1) both;
+  }
+  main:has(.back) > .wrap::before {
+    content:'';
+    display:block;
+    width:38px;
+    height:4px;
+    margin:0 auto 10px;
+    border-radius:999px;
+    background:var(--line);
+  }
+  main:has(.back) .back {
+    display:inline-flex;
+    margin-bottom:10px;
+    padding:6px 8px;
+    border-radius:999px;
+    background:var(--sunk);
+    text-decoration:none;
+  }
+  main:has(.back) .filters { display:grid; grid-template-columns:1fr 1fr; }
+  main:has(.back) .filters .grow { grid-column:1 / -1; }
+  main:has(.back) .filters .flab { min-width:0; }
+  main:has(.back) .filters .fi { width:100%; min-width:0; }
+  .card > h3 { padding:14px 15px; }
+  .row { padding:12px 15px; }
+  .tile { padding:14px 15px; }
+  .tile .v { font-size:22px; }
+}
+
+/* Small motion makes the app feel faster without adding delay. */
+.card,
+.tile,
+.note,
+.dhead,
+.attention-summary { animation:phase5Rise .18s ease-out both; }
+.card:nth-of-type(2) { animation-delay:20ms; }
+.card:nth-of-type(3) { animation-delay:35ms; }
+
+@keyframes phase5Rise { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+@keyframes phase5FadeIn { from { opacity:0; } to { opacity:1; } }
+@keyframes phase5SlideIn { from { transform:translateX(28px); opacity:.7; } to { transform:none; opacity:1; } }
+@keyframes phase5SheetUp { from { transform:translateY(24px); opacity:.85; } to { transform:none; opacity:1; } }
+
+@media (prefers-reduced-motion:reduce) {
+  *,*::before,*::after { scroll-behavior:auto !important; transition-duration:.001ms !important; animation-duration:.001ms !important; animation-iteration-count:1 !important; }
+}
