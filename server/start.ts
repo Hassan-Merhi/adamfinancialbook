@@ -31,13 +31,16 @@ console.log(JSON.stringify({
   latestMigration: status.latest,
 }));
 
-// Extra delegation workflows are registered on the same router before the app
-// mounts it, keeping owner review logic isolated from the core ledger routes.
-const [{ delegationGate }, { expenseReviewRouter }] = await Promise.all([
+// Extra workflows are registered on the same router before the app mounts it,
+// keeping delegated review and destructive owner-only reset logic isolated from
+// the core ledger routes.
+const [{ delegationGate }, { expenseReviewRouter }, { resetRouter }] = await Promise.all([
   import('./delegation.js'),
   import('./expense-review.js'),
+  import('./reset.js'),
 ]);
 delegationGate.use(expenseReviewRouter);
+delegationGate.use(resetRouter);
 
 await import('./index.js');
 

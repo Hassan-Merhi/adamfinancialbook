@@ -1,0 +1,32 @@
+.reset-card { border-color:color-mix(in srgb, var(--neg) 28%, var(--line)); }
+.reset-card > h3 { color:var(--neg); }
+.reset-intro { display:flex; justify-content:space-between; gap:18px; padding:15px 16px; border-bottom:1px solid var(--line-soft); align-items:flex-start; }
+.reset-intro b { display:block; font-size:14px; }
+.reset-intro p { margin:4px 0 0; color:var(--ink-3); font-size:12.5px; max-width:620px; }
+.reset-backups { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+.reset-backups a { color:var(--ink-2); background:var(--sunk); border:1px solid var(--line); border-radius:var(--r-ctl); padding:7px 10px; font-size:12px; text-decoration:none; white-space:nowrap; }
+.reset-backups a:hover { color:var(--ink); border-color:var(--ink-3); }
+.reset-options { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; padding:14px 16px; }
+.reset-option { text-align:left; border:1px solid var(--line); border-radius:var(--r-ctl); padding:12px; background:var(--card); display:flex; flex-direction:column; gap:5px; min-height:150px; }
+.reset-option:hover { background:var(--sunk); }
+.reset-option.selected { border-color:var(--neg); box-shadow:0 0 0 1px color-mix(in srgb, var(--neg) 38%, transparent); }
+.reset-option-title { font-weight:700; font-size:13.5px; }
+.reset-option > span:not(.reset-option-title) { color:var(--ink-2); font-size:12.5px; line-height:1.45; }
+.reset-option small { color:var(--ink-3); font-size:11.5px; line-height:1.4; margin-top:auto; }
+.reset-confirm { margin:0 16px 16px; border:1px solid color-mix(in srgb, var(--neg) 35%, var(--line)); border-radius:var(--r-card); background:color-mix(in srgb, var(--neg) 4%, var(--card)); overflow:hidden; }
+.reset-warning { padding:12px 14px; border-bottom:1px solid var(--line-soft); display:flex; flex-direction:column; gap:3px; }
+.reset-warning b { color:var(--neg); font-size:13px; }
+.reset-warning span { color:var(--ink-3); font-size:12px; }
+.reset-fields { display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:14px; }
+.reset-fields .f { min-width:0; }
+.reset-error { margin:0 14px 12px; }
+.reset-actions { display:flex; justify-content:flex-end; gap:8px; padding:0 14px 14px; }
+.btn.reset-danger { background:var(--neg); color:#fff; }
+
+@media (max-width:760px) {
+  .reset-intro { flex-direction:column; }
+  .reset-backups { justify-content:flex-start; }
+  .reset-options { grid-template-columns:1fr; }
+  .reset-option { min-height:0; }
+  .reset-fields { grid-template-columns:1fr; }
+}
