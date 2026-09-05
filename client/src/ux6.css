@@ -11,6 +11,9 @@
 .language-control.compact .language-control-label { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
 .language-control.compact select { width:auto; min-height:34px; padding:5px 25px 5px 8px; }
 .railfoot .language-control { width:100%; margin:8px 0 3px; }
+.door-tools { display:flex; justify-content:flex-end; margin:0 0 10px; }
+#book-translation-status { top:auto !important; right:16px !important; bottom:16px !important; }
+html[dir="rtl"] #book-translation-status { right:auto !important; left:16px !important; }
 
 /* Loading has shape instead of flashing placeholder sentences. */
 .loading-shell { max-width:1000px; margin:0 auto; padding:34px 26px 80px; }
@@ -53,16 +56,16 @@ main { scroll-margin-top:12px; }
 @media (max-width:760px) {
   .loading-shell { padding:20px 14px 100px; }
   .skeleton-grid { grid-template-columns:1fr 1fr; }
-  .language-mobile { display:flex; }
   .language-desktop { display:none !important; }
   .topbar-search-wrap { gap:6px; }
   .topbar .language-control.compact select { max-width:92px; font-size:11.5px; }
   .pin-account { right:8px; width:38px; height:38px; }
   .money-account-open { padding-right:54px !important; }
   .btn, .moreitem, .searchresult { min-height:44px; }
+  #book-translation-status { right:10px !important; bottom:calc(86px + env(safe-area-inset-bottom)) !important; }
+  html[dir="rtl"] #book-translation-status { right:auto !important; left:10px !important; }
 }
 @media (min-width:761px) {
-  .language-mobile { display:none !important; }
   .language-desktop { display:flex; }
 }
 
