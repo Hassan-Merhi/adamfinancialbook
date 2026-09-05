@@ -17,11 +17,12 @@ import Report from './views/Report';
 import Setup from './views/Setup';
 import History from './views/History';
 import Access from './views/Access';
+import Approvals from './views/Approvals';
 import Statement, { type Focus } from './views/Statement';
 import { money } from './ui';
 import './styles.css';
 
-type View = 'today' | 'money' | 'projects' | 'people' | 'report' | 'history' | 'access' | 'setup';
+type View = 'today' | 'money' | 'projects' | 'people' | 'report' | 'history' | 'access' | 'setup' | 'approvals';
 
 /** The long label is for the rail; the short one and the icon are for the phone. */
 const NAV: { id: View; label: string; short: string; icon: string }[] = [
@@ -228,6 +229,7 @@ export default function App() {
                     : view === 'report' ? <Report book={book} run={run} />
                     : view === 'history' ? <History book={book} />
                     : view === 'access' ? <Access me={me.user!} say={say} />
+                    : view === 'approvals' ? <Approvals me={me.user!} say={say} />
                     : <Setup book={book} run={run} />}
 
                   {/* the same two switches as the toggles, for a screen with no room for them */}
@@ -244,6 +246,10 @@ export default function App() {
           </main>
         )}
       </div>
+
+      <button className="approval-launcher" aria-current={!focus && view === 'approvals'} onClick={() => go('approvals')}>
+        {entryOnly ? 'My wallet' : 'Approvals'}
+      </button>
 
       <div className="toggles">
         <button className="toggle" onClick={() => setLook((look + 1) % LOOKS.length)}>
