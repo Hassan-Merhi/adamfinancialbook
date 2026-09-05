@@ -50,6 +50,8 @@ export default function GlobalSearch({ open, onOpen, onClose, book, dashboard, o
 
   if (!open) return null;
 
+  const activeId = results[active] ? `global-search-result-${active}` : undefined;
+
   return (
     <div className="searchbackdrop" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
@@ -60,11 +62,16 @@ export default function GlobalSearch({ open, onOpen, onClose, book, dashboard, o
           <input
             ref={input}
             value={query}
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="global-search-results"
+            aria-activedescendant={activeId}
+            aria-autocomplete="list"
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'ArrowDown') {
                 event.preventDefault();
-                setActive((value) => Math.min(results.length - 1, value + 1));
+                setActive((value) => Math.max(0, Math.min(results.length - 1, value + 1)));
               } else if (event.key === 'ArrowUp') {
                 event.preventDefault();
                 setActive((value) => Math.max(0, value - 1));
@@ -76,10 +83,10 @@ export default function GlobalSearch({ open, onOpen, onClose, book, dashboard, o
             placeholder="Search accounts, people, projects, entries, approvals…"
             aria-label="Search"
           />
-          <kbd>Esc</kbd>
+          <button type="button" className="search-close" onClick={onClose} aria-label="Close search">×</button>
         </div>
 
-        <div className="searchresults" role="listbox" aria-label="Search results">
+        <div id="global-search-results" className="searchresults" role="listbox" aria-label="Search results">
           {results.length === 0 ? (
             <div className="search-empty">
               <b>No match</b>
@@ -87,6 +94,7 @@ export default function GlobalSearch({ open, onOpen, onClose, book, dashboard, o
             </div>
           ) : results.map((result, index) => (
             <button
+              id={`global-search-result-${index}`}
               key={result.id}
               type="button"
               role="option"
@@ -107,6 +115,7 @@ export default function GlobalSearch({ open, onOpen, onClose, book, dashboard, o
         <footer className="searchfoot">
           <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
           <span><kbd>Enter</kbd> open</span>
+          <span><kbd>Esc</kbd> close</span>
           <span>⌘/Ctrl + K anywhere</span>
         </footer>
       </section>

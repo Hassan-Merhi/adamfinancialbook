@@ -22,12 +22,15 @@ import Files from './views/Files';
 import Approvals from './views/Approvals';
 import Statement, { type Focus } from './views/Statement';
 import GlobalSearch from './GlobalSearch';
+import LanguageControl from './LanguageControl';
+import LoadingSkeleton from './LoadingSkeleton';
 import { attentionCounts } from './attention';
 import type { SearchAction } from './search';
 import type { PromptAction } from '../../shared/prompt-actions';
 import { money } from './ui';
 import './styles.css';
 import './navigation.css';
+import './ux6.css';
 
 type View = 'today' | 'money' | 'projects' | 'people' | 'attention' | 'report' | 'files' | 'history' | 'access' | 'setup' | 'approvals';
 
@@ -39,7 +42,6 @@ type NavItem = {
   ownerOnly?: boolean;
 };
 
-/** Keep the everyday rail intentionally small. Everything secondary lives under More. */
 const PRIMARY_NAV: NavItem[] = [
   { id: 'today', label: 'Today', short: 'Today',
     icon: 'M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
@@ -71,6 +73,7 @@ const MORE_NAV: NavItem[] = [
 const MORE_ICON = 'M5 12h.01M12 12h.01M19 12h.01';
 const SEARCH_ICON = 'm21 21-4.2-4.2M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4z';
 const LOOKS = [['assistant', 'Assistant'], ['ledger', 'Ledger']] as const;
+const DASHBOARD_REFRESH_MS = 45_000;
 
 export default function App() {
   const [me, setMe] = useState<Me | null>(null);
@@ -86,7 +89,6 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [missingReceiptCount, setMissingReceiptCount] = useState(0);
 
-  // The look is only a set of tokens; nothing else in the app knows about it.
   useEffect(() => {
     try {
       const kept = localStorage.getItem('book.look');
@@ -100,6 +102,18 @@ export default function App() {
     try { localStorage.setItem('book.look', LOOKS[look][0]); } catch { /* nothing to do */ }
   }, [look]);
 
+  useEffect(() => {
+    if (!moreOpen) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setMoreOpen(false);
+      }
+    };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [moreOpen]);
+
   const flipTheme = () => {
     const now = document.documentElement.getAttribute('data-theme');
     const dark = now ? now === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -110,7 +124,7 @@ export default function App() {
     try {
       const fresh = await api.book();
       setBook(fresh);
-      snapshot.save(fresh);          // so the app opens with figures next time, signal or not
+      snapshot.save(fresh);
       setOffline(false);
     } catch (e) {
       if (e instanceof NotSignedIn) { setMe({ user: null, needsFirstOwner: false }); return; }
@@ -121,24 +135,18 @@ export default function App() {
   };
 
   const refreshDashboard = async () => {
-    if (!me?.user) {
-      setDashboard(null);
-      return;
-    }
+    if (!me?.user || !navigator.onLine || document.visibilityState === 'hidden') return;
     try {
       setDashboard(await api.evidenceDashboard());
     } catch {
-      // The book remains usable offline; keep the last attention snapshot.
+      /* The book remains usable offline; keep the last attention snapshot. */
     }
   };
 
   useEffect(() => {
     api.me()
-      .then((m) => { setMe(m); if (m.user) { lastUser.save(m.user); reload(); } else lastUser.clear(); })
+      .then((m) => { setMe(m); if (m.user) { lastUser.save(m.user); void reload(); } else lastUser.clear(); })
       .catch((e) => {
-        // No signal: open the book as it was rather than asking someone already
-        // signed in to sign in again. The cookie is still there; only the
-        // confirmation is missing.
         const kept = snapshot.load<LoadedBook>();
         const who = lastUser.load<NonNullable<Me['user']>>();
         if (looksOffline(e) && kept && who) {
@@ -149,7 +157,6 @@ export default function App() {
       });
   }, []);
 
-  // Anything logged with no signal goes out the moment there is one.
   const flush = async () => {
     if (!outbox.all().length) return;
     try {
@@ -163,24 +170,46 @@ export default function App() {
   };
 
   useEffect(() => {
-    const online = () => { setOffline(false); flush(); refreshDashboard(); };
+    const online = () => { setOffline(false); void flush(); void refreshDashboard(); };
     const gone = () => setOffline(true);
     window.addEventListener('online', online);
     window.addEventListener('offline', gone);
-    if (navigator.onLine) flush();
+    if (navigator.onLine) void flush();
     return () => { window.removeEventListener('online', online); window.removeEventListener('offline', gone); };
   }, [me?.user?.id]);
 
-  // One lightweight dashboard request feeds the attention badge, hub, and search.
+  // Attention data no longer wakes hidden tabs every 15 seconds. Refresh when
+  // visible/focused, then at a relaxed cadence while the app is actively used.
   useEffect(() => {
     if (!me?.user) {
       setDashboard(null);
       setMissingReceiptCount(0);
       return;
     }
-    void refreshDashboard();
-    const timer = window.setInterval(() => { void refreshDashboard(); }, 15_000);
-    return () => window.clearInterval(timer);
+    let timer: number | null = null;
+    const stopTimer = () => {
+      if (timer !== null) window.clearInterval(timer);
+      timer = null;
+    };
+    const startTimer = () => {
+      stopTimer();
+      if (document.visibilityState === 'visible') {
+        timer = window.setInterval(() => { void refreshDashboard(); }, DASHBOARD_REFRESH_MS);
+      }
+    };
+    const resume = () => {
+      if (document.visibilityState !== 'visible') { stopTimer(); return; }
+      void refreshDashboard();
+      startTimer();
+    };
+    resume();
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('focus', resume);
+    return () => {
+      stopTimer();
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('focus', resume);
+    };
   }, [me?.user?.id]);
 
   const say = (text: string, bad?: boolean) => setNote({ text, bad });
@@ -188,9 +217,7 @@ export default function App() {
     try { await work(); await reload(); say(done); }
     catch (e) { say((e as Error).message, true); }
   };
-  const refreshAll = async () => {
-    await Promise.all([reload(), refreshDashboard()]);
-  };
+  const refreshAll = async () => { await Promise.all([reload(), refreshDashboard()]); };
   const go = (next: View) => {
     setView(next);
     setFocus(null);
@@ -204,19 +231,19 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  if (!me) return <div className="wrap"><p className="muted">Opening the book…</p></div>;
+  if (!me) return <LoadingSkeleton />;
 
   if (!me.user) {
     return <SignIn needsFirstOwner={me.needsFirstOwner}
-      done={(next) => { setMe(next); lastUser.save(next.user); reload(); }} />;
+      done={(next) => { setMe(next); lastUser.save(next.user); void reload(); }} />;
   }
 
   if (!book) {
     return (
-      <div className="wrap">
-        <p className="muted">Opening the book…</p>
-        {note?.bad && <div className="note err">{note.text}</div>}
-      </div>
+      <>
+        <LoadingSkeleton />
+        {note?.bad && <div className="note err" role="alert">{note.text}</div>}
+      </>
     );
   }
 
@@ -229,18 +256,13 @@ export default function App() {
   const attention = attentionCounts(book, dashboard, missingReceiptCount);
 
   const handlePromptAction = (action: PromptAction) => {
-    if (action.mode === 'focus') {
-      open(action.target);
-      return;
-    }
-
+    if (action.mode === 'focus') { open(action.target); return; }
     if (action.view === 'more') {
       setFocus(null);
       setNote(null);
       setMoreOpen(true);
       return;
     }
-
     const next = action.view as View;
     const nav = MORE_NAV.find((item) => item.id === next);
     if (entryOnly && nav?.ownerOnly) {
@@ -257,11 +279,12 @@ export default function App() {
 
   return (
     <div className="shell">
-      {/* On a phone the rail sits at the bottom, so the name and the figure live up here. */}
+      <a className="skip-link" href="#main-content">Skip to content</a>
       <header className="topbar">
         <b>Financial Book</b>
         <div className="topbar-search-wrap">
           <span className="num">{money(book.balances.totalCash)}</span>
+          <LanguageControl compact />
           <button className="search-trigger mobile" onClick={() => setSearchOpen(true)} aria-label="Search">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SEARCH_ICON} /></svg>
             <span>Search</span>
@@ -269,11 +292,11 @@ export default function App() {
         </div>
       </header>
 
-      <nav className="rail">
+      <nav className="rail" aria-label="Main navigation">
         <div className="brand">
           <b>Financial Book</b>
           <span>{money(book.balances.totalCash)} on hand</span>
-          <button className="search-trigger desktop" onClick={() => setSearchOpen(true)}>
+          <button className="search-trigger desktop" onClick={() => setSearchOpen(true)} aria-label="Search everything">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SEARCH_ICON} /></svg>
             <span>Search everything</span>
             <kbd>⌘K</kbd>
@@ -281,8 +304,8 @@ export default function App() {
         </div>
 
         {PRIMARY_NAV.map((item) => (
-          <button key={item.id} className="navbtn" aria-current={!focus && view === item.id}
-            onClick={() => go(item.id)}>
+          <button key={item.id} className="navbtn" aria-current={!focus && view === item.id ? 'page' : undefined}
+            onClick={() => go(item.id)} aria-label={item.label}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.icon} /></svg>
             <span className="long">{item.label}</span>
             <span className="short">{item.short}</span>
@@ -290,12 +313,12 @@ export default function App() {
         ))}
 
         <div className="moregroup">
-          <button className="navbtn morebtn" aria-current={moreIsCurrent} aria-expanded={moreOpen}
-            aria-haspopup="menu" onClick={() => setMoreOpen((openNow) => !openNow)}>
+          <button className="navbtn morebtn" aria-current={moreIsCurrent ? 'page' : undefined} aria-expanded={moreOpen}
+            aria-haspopup="menu" aria-label="More pages" onClick={() => setMoreOpen((openNow) => !openNow)}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={MORE_ICON} /></svg>
             <span className="long">More</span>
             <span className="short">More</span>
-            {attention.total > 0 && <span className="navbadge">{attention.total > 99 ? '99+' : attention.total}</span>}
+            {attention.total > 0 && <span className="navbadge" aria-label={`${attention.total} items need attention`}>{attention.total > 99 ? '99+' : attention.total}</span>}
           </button>
 
           {moreOpen && (
@@ -304,7 +327,7 @@ export default function App() {
                 const label = item.id === 'approvals' && entryOnly ? 'My wallet' : item.label;
                 return (
                   <button key={item.id} className="moreitem" role="menuitem"
-                    aria-current={!focus && view === item.id} onClick={() => go(item.id)}>
+                    aria-current={!focus && view === item.id ? 'page' : undefined} onClick={() => go(item.id)}>
                     <span>{label}</span>
                     {item.id === 'attention' && attention.total > 0 && (
                       <span className="navbadge inline">{attention.total > 99 ? '99+' : attention.total}</span>
@@ -318,6 +341,7 @@ export default function App() {
 
         <div className="railfoot">
           <span className="muted">{me.user.email}{me.user.role === 'entry' ? ' · can enter only' : ''}</span>
+          <div className="language-desktop"><LanguageControl /></div>
           <button className="linkbtn" onClick={async () => {
             await api.logout(); lastUser.clear(); snapshot.save(null);
             setMe({ user: null, needsFirstOwner: false });
@@ -326,14 +350,11 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Owners keep the fast-entry box on every view. Entry-only users get one
-          dedicated Today landing page for the prompt, so pages they are allowed
-          to open stay focused on that page's own content. */}
       <div className="content">
         {showPrompt && (
           <div className="dockable">
             {(offline || waiting > 0) && (
-              <div className="note docknote">
+              <div className="note docknote" role="status" aria-live="polite">
                 {offline ? 'No signal — these are the figures from the last time the book loaded. ' : ''}
                 {waiting > 0
                   ? `${waiting} ${waiting === 1 ? 'entry is' : 'entries are'} waiting to be sent, and will go the moment there is a network.`
@@ -346,9 +367,9 @@ export default function App() {
         )}
 
         {(!entryLanding || note) && (
-          <main>
+          <main id="main-content" tabIndex={-1}>
             <div className="wrap">
-              {note && <div className={`note ${note.bad ? 'err' : 'ok'}`}>{note.text}</div>}
+              {note && <div className={`note ${note.bad ? 'err' : 'ok'}`} role={note.bad ? 'alert' : 'status'} aria-live="polite">{note.text}</div>}
 
               {!entryLanding && (
                 <>
@@ -382,7 +403,6 @@ export default function App() {
                     : view === 'approvals' ? <Approvals me={me.user!} say={say} />
                     : <Setup book={book} run={run} />}
 
-                  {/* the same two switches as the toggles, for a screen with no room for them */}
                   <div className="lookrow">
                     <span className="lab">Look</span>
                     {LOOKS.map(([id, label], i) => (
