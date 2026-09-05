@@ -12,7 +12,7 @@
 .language-control.compact select { width:auto; min-height:34px; padding:5px 25px 5px 8px; }
 .railfoot .language-control { width:100%; margin:8px 0 3px; }
 .door-tools { display:flex; justify-content:flex-end; margin:0 0 10px; }
-#book-translation-status { top:auto !important; right:16px !important; bottom:16px !important; }
+#book-translation-status { top:auto !important; right:16px !important; bottom:58px !important; }
 html[dir="rtl"] #book-translation-status { right:auto !important; left:16px !important; }
 
 /* Loading has shape instead of flashing placeholder sentences. */
@@ -47,6 +47,8 @@ html[dir="rtl"] #book-translation-status { right:auto !important; left:16px !imp
 button, [role="button"], .btn, select, input { touch-action:manipulation; }
 .navbtn, .moreitem, .searchresult, .row.link, .btn { -webkit-tap-highlight-color:transparent; }
 main { scroll-margin-top:12px; }
+.search-close { flex:none; width:34px; height:34px; display:grid; place-items:center; border-radius:10px; color:var(--ink-3); font-size:22px; line-height:1; }
+.search-close:hover { background:var(--sunk); color:var(--ink); }
 
 /* Render long below-the-fold cards lazily in Chromium/WebKit while preserving layout. */
 @supports (content-visibility:auto) {
@@ -64,6 +66,11 @@ main { scroll-margin-top:12px; }
   .btn, .moreitem, .searchresult { min-height:44px; }
   #book-translation-status { right:10px !important; bottom:calc(86px + env(safe-area-inset-bottom)) !important; }
   html[dir="rtl"] #book-translation-status { right:auto !important; left:10px !important; }
+}
+@media (max-width:420px) {
+  .topbar .num { display:none; }
+  .topbar-search-wrap { margin-left:auto; }
+  html[dir="rtl"] .topbar-search-wrap { margin-left:0; margin-right:auto; }
 }
 @media (min-width:761px) {
   .language-desktop { display:flex; }
