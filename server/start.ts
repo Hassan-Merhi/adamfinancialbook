@@ -1,46 +1,63 @@
 import 'dotenv/config';
 import { getConfig } from './config.js';
+import { fireOperationalAlert, logOperationalEvent } from './alerts.js';
 
 const config = getConfig();
-console.log(JSON.stringify({
-  event: 'startup.validation.ok',
+logOperationalEvent('startup.validation.ok', {
   nodeEnv: config.NODE_ENV,
   node: process.version,
   port: config.PORT,
   pgssl: config.PGSSL,
-  release: process.env.RENDER_GIT_COMMIT ?? process.env.GIT_COMMIT ?? 'local',
-  service: process.env.RENDER_SERVICE_NAME ?? 'adam-financial-book',
-}));
+});
 
 // Load database code only after environment validation, so a bad deployment
 // fails with one clear configuration error before opening any connections.
 const { getMigrationStatus, runMigrations } = await import('./migration.js');
 
-const applied = await runMigrations();
-if (applied.length) {
-  console.log(JSON.stringify({ event: 'database.migrated', applied }));
+try {
+  const applied = await runMigrations();
+  if (applied.length) logOperationalEvent('database.migrated', { applied });
+
+  const status = await getMigrationStatus();
+  if (status.pending.length) {
+    throw new Error(`Database is not ready: ${status.pending.length} migration(s) remain pending.`);
+  }
+  logOperationalEvent('database.ready', {
+    currentMigration: status.current,
+    latestMigration: status.latest,
+  });
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  fireOperationalAlert('database.migration.failed', { error: message }, 'critical', 0);
+  throw error;
 }
 
-const status = await getMigrationStatus();
-if (status.pending.length) {
-  throw new Error(`Database is not ready: ${status.pending.length} migration(s) remain pending.`);
-}
-console.log(JSON.stringify({
-  event: 'database.ready',
-  currentMigration: status.current,
-  latestMigration: status.latest,
-}));
-
-// Extra workflows are registered on the same router before the app mounts it,
-// keeping delegated review and destructive owner-only reset logic isolated from
-// the core ledger routes.
-const [{ delegationGate }, { expenseReviewRouter }, { resetRouter }] = await Promise.all([
+// Routers are registered before index.ts mounts them. Public readiness remains
+// unauthenticated for Render/external uptime checks; detailed operations data is
+// owner-only behind the normal authenticated delegation gate.
+const [
+  { delegationGate },
+  { expenseReviewRouter },
+  { resetRouter },
+  { operationsRouter },
+  { requestTelemetry },
+  { healthRouter },
+  { publicSecurityRouter },
+] = await Promise.all([
   import('./delegation.js'),
   import('./expense-review.js'),
   import('./reset.js'),
+  import('./operations.js'),
+  import('./observability.js'),
+  import('./health.js'),
+  import('./security-gate.js'),
 ]);
+
+publicSecurityRouter.use(healthRouter);
+delegationGate.use(requestTelemetry);
 delegationGate.use(expenseReviewRouter);
 delegationGate.use(resetRouter);
+delegationGate.use(operationsRouter);
 
 await import('./index.js');
 
