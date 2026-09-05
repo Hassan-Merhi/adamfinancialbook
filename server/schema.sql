@@ -111,8 +111,25 @@ CREATE TABLE IF NOT EXISTS users (
   email         TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   role          TEXT NOT NULL CHECK (role IN ('owner','entry')),
+  language      TEXT NOT NULL DEFAULT 'en' CHECK (language IN ('en','fr','ar')),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Keep existing installations aligned with newer user preferences. CREATE TABLE
+-- IF NOT EXISTS does not add columns to an already-existing table, so every new
+-- user column must also have an idempotent ALTER migration here.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT NOT NULL DEFAULT 'en';
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'users_language_check'
+      AND conrelid = 'users'::regclass
+  ) THEN
+    ALTER TABLE users
+      ADD CONSTRAINT users_language_check CHECK (language IN ('en','fr','ar'));
+  END IF;
+END $$;
 
 -- An entry is never deleted. A wrong one is voided: it stops counting, keeps
 -- its place, and says why.
@@ -205,7 +222,7 @@ CREATE TABLE IF NOT EXISTS attachments (
   mime_type            TEXT NOT NULL,
   byte_size            INT NOT NULL CHECK (byte_size > 0),
   data                 BYTEA NOT NULL,
-  created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK ((entry_id IS NOT NULL AND approval_request_id IS NULL)
       OR (entry_id IS NULL AND approval_request_id IS NOT NULL))
 );
