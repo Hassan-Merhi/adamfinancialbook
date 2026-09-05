@@ -30,7 +30,7 @@
     "express": "^5.1.0",
     "nodemailer": "^9.0.5",
     "pg": "^8.16.3",
-    "zod": "^4.1.12"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
