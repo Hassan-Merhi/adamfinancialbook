@@ -17,11 +17,12 @@ import Report from './views/Report';
 import Setup from './views/Setup';
 import History from './views/History';
 import Access from './views/Access';
+import Files from './views/Files';
 import Statement, { type Focus } from './views/Statement';
 import { money } from './ui';
 import './styles.css';
 
-type View = 'today' | 'money' | 'projects' | 'people' | 'report' | 'history' | 'access' | 'setup';
+type View = 'today' | 'money' | 'projects' | 'people' | 'report' | 'files' | 'history' | 'access' | 'setup';
 
 /** The long label is for the rail; the short one and the icon are for the phone. */
 const NAV: { id: View; label: string; short: string; icon: string }[] = [
@@ -35,6 +36,8 @@ const NAV: { id: View; label: string; short: string; icon: string }[] = [
     icon: 'M9 4.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4zM3 20c0-3.3 2.7-5 6-5s6 1.7 6 5M16 6.5a3 3 0 0 1 0 6M17.5 20c0-2.2-.7-3.7-2-4.6' },
   { id: 'report', label: 'Day report', short: 'Report',
     icon: 'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM8 8h8M8 12h8M8 16h5' },
+  { id: 'files', label: 'Receipts & files', short: 'Files',
+    icon: 'M6 3h8l4 4v14H6zM14 3v5h5M9 13h6M9 17h4' },
   { id: 'history', label: 'History', short: 'History',
     icon: 'M12 7v5l3 2M3.5 12a8.5 8.5 0 1 0 2.2-5.7M3 4v4h4' },
   { id: 'setup', label: 'Set it up', short: 'Setup',
@@ -170,7 +173,7 @@ export default function App() {
           <b>Financial Book</b>
           <span>{money(book.balances.totalCash)} on hand</span>
         </div>
-        {NAV.filter((n) => me.user!.role === 'owner' || (n.id !== 'setup' && n.id !== 'history')).map((n) => (
+        {NAV.filter((n) => me.user!.role === 'owner' || (n.id !== 'setup' && n.id !== 'history' && n.id !== 'files')).map((n) => (
           <button key={n.id} className="navbtn" aria-current={!focus && view === n.id}
             onClick={() => go(n.id)}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={n.icon} /></svg>
@@ -226,6 +229,7 @@ export default function App() {
                     : view === 'projects' ? <Projects book={book} open={open} />
                     : view === 'people' ? <People book={book} open={open} />
                     : view === 'report' ? <Report book={book} run={run} />
+                    : view === 'files' ? <Files book={book} />
                     : view === 'history' ? <History book={book} />
                     : view === 'access' ? <Access me={me.user!} say={say} />
                     : <Setup book={book} run={run} />}
