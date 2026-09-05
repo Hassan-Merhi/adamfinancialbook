@@ -220,7 +220,8 @@ app.post('/api/password', wrap(async (req, res) => {
 
 /**
  * Clears financial/operational data without deleting the people who can sign in.
- * The order intentionally respects immutable revision and receipt foreign keys.
+ * The transaction first unlinks the intentionally two-way receipt/entry
+ * relationship, then deletes dependent history before the ledger rows.
  */
 app.post('/api/reset-book', ownerOnly, wrap(async (req, res) => {
   const { password } = z.object({ confirmation: z.literal('RESET'), password: z.string().min(1) }).parse(req.body);
@@ -231,16 +232,21 @@ app.post('/api/reset-book', ownerOnly, wrap(async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // entries.link_receipt_id -> project_receipts and project_receipts.entry_id
+    // -> entries form a legitimate two-way accounting link. Unlink both sides
+    // explicitly inside this all-or-nothing reset before deleting either table.
+    await client.query('UPDATE entries SET link_receipt_id = NULL WHERE link_receipt_id IS NOT NULL');
+    await client.query('UPDATE project_receipts SET entry_id = NULL WHERE entry_id IS NOT NULL');
     for (const table of [
       'attachments',
       'entry_revisions',
       'effects',
-      'project_receipts',
       'pending_transfers',
       'approval_requests',
       'notifications',
       'user_accounts',
       'entries',
+      'project_receipts',
       'reminders',
       'loans',
       'people',
