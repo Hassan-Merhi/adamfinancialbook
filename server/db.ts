@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { randomBytes } from 'node:crypto';
 import { TLSSocket } from 'node:tls';
 import pg from 'pg';
 
@@ -70,5 +71,7 @@ export async function query<T = any>(text: string, params: unknown[] = []): Prom
 }
 
 export function newId(prefix: string): string {
-  return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+  // IDs can become authorization/session references, so they must not be
+  // predictable. 96 random bits is ample for this application's identifier space.
+  return `${prefix}_${randomBytes(12).toString('base64url')}`;
 }
