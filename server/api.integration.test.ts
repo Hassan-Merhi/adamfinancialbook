@@ -131,7 +131,7 @@ describe.skipIf(!DATABASE_URL)('real PostgreSQL API', () => {
   }, 15_000);
 
   it('migrates legacy schema, protects mutations, and bootstraps one owner', async () => {
-    expect((await db<{ version: string }>('SELECT version FROM schema_migrations ORDER BY version')).map((x) => Number(x.version))).toEqual([1, 2, 3]);
+    expect((await db<{ version: string }>('SELECT version FROM schema_migrations ORDER BY version')).map((x) => Number(x.version))).toEqual([1, 2, 3, 4]);
     const columns = (await db<{ column_name: string }>(
       `SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='users'`,
     )).map((x) => x.column_name);
@@ -139,7 +139,15 @@ describe.skipIf(!DATABASE_URL)('real PostgreSQL API', () => {
     const entryColumns = (await db<{ column_name: string }>(
       `SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='entries'`,
     )).map((x) => x.column_name);
-    expect(entryColumns).toEqual(expect.arrayContaining(['review_category', 'reviewed_by', 'reviewed_at']));
+    expect(entryColumns).toEqual(expect.arrayContaining([
+      'review_category', 'reviewed_by', 'reviewed_at', 'transaction_id',
+      'corrected_at', 'corrected_by', 'correction_reason', 'voided_at', 'voided_by',
+    ]));
+    const effectColumns = (await db<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='effects'`,
+    )).map((x) => x.column_name);
+    expect(effectColumns).toEqual(expect.arrayContaining(['active', 'superseded_at', 'superseded_by']));
+    expect((await db<{ name: string | null }>(`SELECT to_regclass('public.entry_revisions')::text AS name`))[0].name).toBe('entry_revisions');
     expect((await request('/api/book')).response.status).toBe(401);
     expect((await request('/api/me')).data.needsFirstOwner).toBe(true);
 
@@ -237,6 +245,11 @@ describe.skipIf(!DATABASE_URL)('real PostgreSQL API', () => {
     expect((await request(`/api/delegation/transfers/${handoff.data.id}/confirm`, {
       method: 'POST', session: delegate, body: {},
     })).response.status).toBe(409);
+    const confirmed = (await db<{ status: string; entry_id: string | null }>(
+      'SELECT status, entry_id FROM pending_transfers WHERE id = $1', [handoff.data.id],
+    ))[0];
+    expect(confirmed.status).toBe('confirmed');
+    expect(confirmed.entry_id).toBeTruthy();
     full = await request('/api/book', { session: owner });
     expect(full.data.balances.accounts[ownerCash]).toBe(4500);
     expect(full.data.balances.accounts[wallet]).toBe(500);
@@ -262,6 +275,14 @@ describe.skipIf(!DATABASE_URL)('real PostgreSQL API', () => {
     expect(a.data.id).toBe(b.data.id);
     delegatedEntry = a.data.id;
     expect(Number((await db<{ n: string }>(`SELECT count(*) AS n FROM entries WHERE client_ref='phase3-spend-once'`))[0].n)).toBe(1);
+    const postedMeta = (await db<{ transaction_id: string }>(
+      'SELECT transaction_id FROM entries WHERE id = $1', [delegatedEntry],
+    ))[0];
+    expect(postedMeta.transaction_id).toMatch(/^txn_/);
+    expect(Number((await db<{ n: string }>(
+      `SELECT count(*) AS n FROM audit WHERE subject = $1 AND action = 'financial entry posted' AND transaction_id = $2`,
+      [delegatedEntry, postedMeta.transaction_id],
+    ))[0].n)).toBe(1);
     expect((await request('/api/book', { session: delegate })).data.balances.accounts[wallet]).toBe(400);
     expect((await request('/api/entries', {
       method: 'POST', session: delegate, body: { ...spend, amount: 401, clientRef: 'phase3-overdraft' },
@@ -298,6 +319,14 @@ describe.skipIf(!DATABASE_URL)('real PostgreSQL API', () => {
     ))[0];
     expect(reviewRow.review_category).toBe('Materials');
     expect(reviewRow.reviewed_at).not.toBeNull();
+    const historicalEffects = await db<{ active: boolean; superseded_at: Date | null }>(
+      'SELECT active, superseded_at FROM effects WHERE entry_id = $1 ORDER BY id', [delegatedEntry],
+    );
+    expect(historicalEffects.some((row) => row.active === false && row.superseded_at !== null)).toBe(true);
+    expect(historicalEffects.some((row) => row.active === true)).toBe(true);
+    expect(Number((await db<{ n: string }>(
+      `SELECT count(*) AS n FROM entry_revisions WHERE entry_id = $1 AND revision_type = 'classification'`, [delegatedEntry],
+    ))[0].n)).toBe(1);
     expect((await request('/api/delegation/expense-reviews', { session: owner })).data.items).toHaveLength(0);
     expect((await request('/api/delegation/expense-reviews/assign', {
       method: 'POST', session: owner,
@@ -422,7 +451,24 @@ describe.skipIf(!DATABASE_URL)('real PostgreSQL API', () => {
     })).response.status).toBe(200);
     book = await request('/api/book', { session: owner });
     expect(book.data.balances.accounts[ownerCash]).toBe(4330);
-    expect(book.data.entries.find((x: any) => x.id === wrong.data.id).correctedFrom).toBe(200);
+    const corrected = book.data.entries.find((x: any) => x.id === wrong.data.id);
+    expect(corrected.correctedFrom).toBe(200);
+    expect(corrected.correctedAt).toBeTruthy();
+    expect(corrected.correctedBy).toBe(ownerId);
+    expect(corrected.correctionReason).toContain('200.00');
+    const correctedEffects = await db<{ active: boolean; superseded_at: Date | null }>(
+      'SELECT active, superseded_at FROM effects WHERE entry_id = $1 ORDER BY id', [wrong.data.id],
+    );
+    expect(correctedEffects.some((row) => row.active === false && row.superseded_at !== null)).toBe(true);
+    expect(correctedEffects.some((row) => row.active === true)).toBe(true);
+    const correctionRevision = (await db<{ transaction_id: string }>(
+      `SELECT transaction_id FROM entry_revisions WHERE entry_id = $1 AND revision_type = 'correction'`, [wrong.data.id],
+    ))[0];
+    expect(correctionRevision.transaction_id).toMatch(/^txn_/);
+    expect(Number((await db<{ n: string }>(
+      `SELECT count(*) AS n FROM audit WHERE subject = $1 AND action = 'financial entry corrected' AND transaction_id = $2`,
+      [wrong.data.id, correctionRevision.transaction_id],
+    ))[0].n)).toBe(1);
 
     expect((await request(`/api/entries/${wrong.data.id}/void`, {
       method: 'POST', session: owner, body: { reason: 'Not a real expense' },
@@ -432,6 +478,16 @@ describe.skipIf(!DATABASE_URL)('real PostgreSQL API', () => {
     const kept = book.data.entries.find((x: any) => x.id === wrong.data.id);
     expect(kept.voided).toBe(true);
     expect(kept.voidReason).toBe('Not a real expense');
+    expect(kept.voidedAt).toBeTruthy();
+    expect(kept.voidedBy).toBe(ownerId);
+    const voidRevision = (await db<{ transaction_id: string }>(
+      `SELECT transaction_id FROM entry_revisions WHERE entry_id = $1 AND revision_type = 'void'`, [wrong.data.id],
+    ))[0];
+    expect(voidRevision.transaction_id).toMatch(/^txn_/);
+    expect(Number((await db<{ n: string }>(
+      `SELECT count(*) AS n FROM audit WHERE subject = $1 AND action = 'financial entry voided' AND transaction_id = $2`,
+      [wrong.data.id, voidRevision.transaction_id],
+    ))[0].n)).toBe(1);
   });
 
   it('keeps critical audit history and protects the last owner', async () => {
@@ -449,6 +505,10 @@ describe.skipIf(!DATABASE_URL)('real PostgreSQL API', () => {
       'password reset',
       'entry corrected',
       'entry voided',
+      'financial entry posted',
+      'financial entry corrected',
+      'financial entry voided',
+      'delegated expense classified',
     ]) expect(actions).toContain(action);
     expect((await request(`/api/users/${ownerId}`, { method: 'DELETE', session: owner, body: {} })).response.status).toBe(400);
   });
