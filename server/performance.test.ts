@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { boundedLimit, decodeAuditCursor, decodePageCursor, encodeCursor, validDate } from './performance.js';
+
+process.env.DATABASE_URL ??= 'postgres://test:test@127.0.0.1:5432/test';
+const { boundedLimit, decodeAuditCursor, decodePageCursor, encodeCursor, validDate } = await import('./performance.js');
 
 describe('Phase 7 performance helpers', () => {
   it('bounds page sizes instead of trusting query input', () => {
