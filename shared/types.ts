@@ -121,11 +121,18 @@ export interface Effect {
 export interface Entry extends EntryInput {
   id: Id;
   effects: Effect[];
-  /** Set when an entry has been corrected, so the original stays visible. */
+  /** Stable database transaction id for the original posting. */
+  transactionId?: string | null;
+  /** Set when an entry has been corrected, so the original amount stays visible. */
   correctedFrom: number | null;
+  correctedAt?: string | null;
+  correctedBy?: string | null;
+  correctionReason?: string;
   /** A wrong entry is voided rather than deleted: it stops counting and says why. */
   voided?: boolean;
   voidReason?: string | null;
+  voidedAt?: string | null;
+  voidedBy?: string | null;
   createdAt: string;
   createdBy?: string | null;
 }
@@ -138,6 +145,7 @@ export interface AuditLine {
   action: string;
   subject: string | null;
   detail: Record<string, unknown>;
+  transactionId?: string | null;
 }
 
 /**
