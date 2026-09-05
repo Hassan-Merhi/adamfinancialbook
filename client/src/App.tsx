@@ -20,6 +20,7 @@ import Access from './views/Access';
 import Files from './views/Files';
 import Approvals from './views/Approvals';
 import Statement, { type Focus } from './views/Statement';
+import type { PromptAction } from '../../shared/prompt-actions';
 import { money } from './ui';
 import './styles.css';
 import './navigation.css';
@@ -205,6 +206,28 @@ export default function App() {
   const visibleMore = MORE_NAV.filter((item) => !item.ownerOnly || me.user!.role === 'owner');
   const moreIsCurrent = !focus && visibleMore.some((item) => item.id === view);
 
+  const handlePromptAction = (action: PromptAction) => {
+    if (action.mode === 'focus') {
+      open(action.target);
+      return;
+    }
+
+    if (action.view === 'more') {
+      setFocus(null);
+      setNote(null);
+      setMoreOpen(true);
+      return;
+    }
+
+    const next = action.view as View;
+    const nav = MORE_NAV.find((item) => item.id === next);
+    if (entryOnly && nav?.ownerOnly) {
+      say(`${nav.label} is owner-only.`, true);
+      return;
+    }
+    go(next);
+  };
+
   return (
     <div className="shell">
       {/* On a phone the rail sits at the bottom, so the name and the figure live up here. */}
@@ -278,7 +301,8 @@ export default function App() {
                   : 'Anything you log now will be sent when you are back.'}
               </div>
             )}
-            <Entry book={book} reload={reload} say={say} onQueued={() => setWaiting(outbox.all().length)} />
+            <Entry book={book} reload={reload} say={say}
+              onQueued={() => setWaiting(outbox.all().length)} onAction={handlePromptAction} />
           </div>
         )}
 

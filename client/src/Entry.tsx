@@ -1,9 +1,8 @@
 /**
  * Say what happened, see what it does, then keep it.
  *
- * The reading always comes back as a draft on screen — every field editable,
- * every consequence shown against the figure it lands on — and nothing reaches
- * the book until the button is pressed.
+ * Safe navigation commands happen immediately. Anything that changes the book
+ * still becomes a draft on screen and reaches the ledger only after confirmation.
  */
 import { useState } from 'react';
 import { api, type LoadedBook, type Reading } from './api';
@@ -11,7 +10,9 @@ import { looksOffline, outbox } from './offline';
 import { describeEffects, withLoanEffects } from '../../shared/engine';
 import type { Draft, SetupDraft } from '../../shared/parse';
 import { read as readHere } from '../../shared/parse';
+import { readPromptAction, type PromptAction } from '../../shared/prompt-actions';
 import type { EntryInput, EntryKind, ProjectReceipt } from '../../shared/types';
+import './entry-review.css';
 
 const money = (v: number) => (v < 0 ? '−' : '') + '$' + Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
 const signed = (v: number) => (v > 0 ? '+' : v < 0 ? '−' : '') + '$' + Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
@@ -34,33 +35,44 @@ const SETUP_LABEL: Record<SetupDraft['kind'], string> = {
 
 const EXAMPLES = [
   '$900 STS chargeuse construction cash',
-  '$250 filming for the bikes from construction cash',
-  '$12000 withdrawn from the agent into construction cash',
   'move $5,000 from construction cash to STS cash',
   'i bought 1 ton of steel from Dani',
   'add supplier Dani under Construction',
+  'show construction cash',
+  'open day report',
 ];
 
-export default function Entry({ book, reload, say, onQueued }: {
+export default function Entry({ book, reload, say, onQueued, onAction }: {
   book: LoadedBook;
   reload: () => Promise<unknown>;
   say: (text: string, bad?: boolean) => void;
   onQueued?: () => void;
+  onAction?: (action: PromptAction) => void;
 }) {
   const [text, setText] = useState('');
   const [reading, setReading] = useState<Reading | null>(null);
   const [busy, setBusy] = useState(false);
 
   const readIt = async () => {
-    if (!text.trim()) return;
+    const said = text.trim();
+    if (!said) return;
+
+    const action = readPromptAction(said, book);
+    if (action && onAction) {
+      setReading(null);
+      setText('');
+      onAction(action);
+      return;
+    }
+
     setBusy(true);
     try {
-      setReading(await api.read(text.trim(), new Date().toISOString().slice(0, 10)));
+      setReading(await api.read(said, new Date().toISOString().slice(0, 10)));
       setText('');
     } catch (e) {
       // With no signal the reader is out of reach, so read it here instead.
       if (looksOffline(e)) {
-        setReading({ draft: readHere(text.trim(), book, new Date().toISOString().slice(0, 10)), source: 'rules', duplicate: null });
+        setReading({ draft: readHere(said, book, new Date().toISOString().slice(0, 10)), source: 'rules', duplicate: null });
         setText('');
       } else say((e as Error).message, true);
     }
@@ -75,10 +87,10 @@ export default function Entry({ book, reload, say, onQueued }: {
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') readIt(); }}
-            placeholder="Say what happened —  $900 STS chargeuse construction cash"
+            placeholder="Say what happened or where you want to go"
           />
           <button className="btn" onClick={readIt} disabled={busy || !text.trim()}>
-            {busy ? 'Reading…' : 'Read it'}
+            {busy ? 'Reading…' : 'Go'}
           </button>
         </div>
         <div className="examples">
@@ -125,6 +137,7 @@ function EntryCard({ draft, duplicate, source, book, done, cancel, fail, onQueue
   const [input, setInput] = useState<EntryInput>(draft.input);
   const [linked, setLinked] = useState(!!duplicate);
   const [busy, setBusy] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(!!draft.input.historical);
   const set = (patch: Partial<EntryInput>) => setInput({ ...input, ...patch });
 
   const withLink: EntryInput = {
@@ -134,10 +147,12 @@ function EntryCard({ draft, duplicate, source, book, done, cancel, fail, onQueue
   };
   const lines = input.amount > 0 ? describeEffects(withLoanEffects(withLink, book), book) : [];
 
-  const needsPerson = input.kind === 'credit_purchase' && !input.personId;
+  const personKind = input.kind === 'credit_purchase' || input.kind === 'person_loan' || input.kind === 'salary' || input.kind === 'supplier_payment';
+  const needsPerson = personKind && !input.personId;
   const needsAccount = input.kind !== 'credit_purchase' && !input.accountId;
   const needsSecond = input.kind === 'transfer' && !input.toAccountId;
-  const blocked = !input.amount || needsPerson || needsAccount || needsSecond;
+  const needsProject = input.kind === 'receipt' && !input.projectId;
+  const blocked = !input.amount || needsPerson || needsAccount || needsSecond || needsProject;
 
   const save = async () => {
     setBusy(true);
@@ -166,12 +181,17 @@ function EntryCard({ draft, duplicate, source, book, done, cancel, fail, onQueue
 
   return (
     <div className="review">
-      <header>
-        <span className="eyebrow">What I heard</span>
-        <span className="said">{input.raw}{source === 'rules' ? '' : ' · read by Claude'}</span>
+      <header className="reviewhead">
+        <div className="reviewheadline">
+          <span className="eyebrow">Check before saving</span>
+          <strong className="reviewtitle">
+            {input.amount ? money(input.amount) : 'Amount needed'} · {input.purpose || KINDS[input.kind]}
+          </strong>
+        </div>
+        <span className="reviewsource">{input.raw}{source === 'rules' ? '' : ' · read by Claude'}</span>
       </header>
 
-      <div className="rgrid">
+      <div className="rgrid core">
         <Field label="Type">
           <select value={input.kind} onChange={(e) => {
             const kind = e.target.value as EntryKind;
@@ -205,37 +225,61 @@ function EntryCard({ draft, duplicate, source, book, done, cancel, fail, onQueue
           </Field>
         )}
 
-        <Field label={input.kind === 'credit_purchase' ? 'Owed to' : 'Person'} flag={needsPerson}>
-          <select value={input.personId ?? ''} onChange={(e) => set({ personId: e.target.value || null })}>
-            <option value="">—</option>
-            {book.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </Field>
-
-        <Field label="Project">
-          <select value={input.projectId ?? ''} onChange={(e) => set({ projectId: e.target.value || null })}>
-            <option value="">—</option>
-            {book.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </Field>
-
-        {input.kind !== 'transfer' && (
-          <Field label="On behalf of">
-            <select value={input.forBusiness ?? ''} onChange={(e) => set({ forBusiness: e.target.value || null })}>
-              <option value="">— same business —</option>
-              {book.businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        {(personKind || input.personId) && (
+          <Field label={input.kind === 'credit_purchase' ? 'Owed to' : 'Person'} flag={needsPerson}>
+            <select value={input.personId ?? ''} onChange={(e) => set({ personId: e.target.value || null })}>
+              <option value="">—</option>
+              {book.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </Field>
         )}
 
-        <Field label="Date">
-          <input type="date" value={input.occurredOn} onChange={(e) => set({ occurredOn: e.target.value })} />
-        </Field>
-
-        <Field label="Purpose" wide>
-          <input value={input.purpose} onChange={(e) => set({ purpose: e.target.value })} />
-        </Field>
+        {input.kind === 'receipt' && (
+          <Field label="Project" flag={needsProject}>
+            <select value={input.projectId ?? ''} onChange={(e) => set({ projectId: e.target.value || null })}>
+              <option value="">—</option>
+              {book.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </Field>
+        )}
       </div>
+
+      {detailsOpen && (
+        <div className="reviewdetails">
+          <div className="rgrid">
+            {input.kind !== 'receipt' && (
+              <Field label="Project">
+                <select value={input.projectId ?? ''} onChange={(e) => set({ projectId: e.target.value || null })}>
+                  <option value="">—</option>
+                  {book.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </Field>
+            )}
+
+            {input.kind !== 'transfer' && (
+              <Field label="On behalf of">
+                <select value={input.forBusiness ?? ''} onChange={(e) => set({ forBusiness: e.target.value || null })}>
+                  <option value="">— same business —</option>
+                  {book.businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </Field>
+            )}
+
+            <Field label="Date">
+              <input type="date" value={input.occurredOn} onChange={(e) => set({ occurredOn: e.target.value })} />
+            </Field>
+
+            <Field label="Purpose" wide>
+              <input value={input.purpose} onChange={(e) => set({ purpose: e.target.value })} />
+            </Field>
+          </div>
+          <label className="check">
+            <input type="checkbox" checked={!!input.historical}
+              onChange={(e) => set({ historical: e.target.checked })} />
+            Historical — don't touch today's cash
+          </label>
+        </div>
+      )}
 
       {!input.amount && (
         <div className="warn">
@@ -245,7 +289,10 @@ function EntryCard({ draft, duplicate, source, book, done, cancel, fail, onQueue
         </div>
       )}
       {needsPerson && (
-        <div className="warn"><b>Who is it owed to?</b> The balance needs a name to sit against.</div>
+        <div className="warn"><b>Who is it for?</b> Pick the person whose balance should change.</div>
+      )}
+      {needsProject && (
+        <div className="warn"><b>Which project?</b> A receipt needs a project so it is counted once in the right place.</div>
       )}
       {draft.guessed.includes('account') && input.accountId && (
         <div className="warn">
@@ -255,46 +302,46 @@ function EntryCard({ draft, duplicate, source, book, done, cancel, fail, onQueue
       )}
       {input.kind === 'transfer' && input.accountId && input.toAccountId && (
         <div className="warn">
-          <b>Money move.</b> Check the source and destination above. If the destination is controlled by a delegated user,
-          this will wait for that person to confirm the cash actually arrived before the ledger changes.
+          <b>Money move.</b> Check the source and destination. A delegated destination waits for the recipient to confirm the cash arrived before the ledger changes.
         </div>
       )}
       {duplicate && (
         <>
           <div className="warn">
-            <b>Careful.</b> This project already has a {money(duplicate.amount)} receipt recorded
-            {duplicate.occurredOn ? ` on ${duplicate.occurredOn}` : ''}. If this is that same money finally
-            reaching an account, keep the box ticked — otherwise untick it and it will be recorded as a second receipt.
+            <b>Possible duplicate receipt.</b> This project already has {money(duplicate.amount)} recorded
+            {duplicate.occurredOn ? ` on ${duplicate.occurredOn}` : ''}. Keep this checked if it is that same money now reaching cash.
           </div>
           <label className="check">
             <input type="checkbox" checked={linked} onChange={(e) => setLinked(e.target.checked)} />
-            The same money arriving, not new money
+            Same money arriving, not new money
           </label>
         </>
       )}
 
       {lines.length > 0 && (
-        <div className="effects">
-          {lines.map((l, i) => (
-            <div className="eff" key={i}>
-              <span className="who">{l.label}</span>
-              {l.delta !== null && <span className={`num ${cls(l.delta)}`}>{signed(l.delta)}</span>}
-              {l.after !== null && <span className="num muted">→ {l.signed ? money(l.after) : money(l.after)}</span>}
-            </div>
-          ))}
-        </div>
+        <>
+          <div className="effectstitle">What changes</div>
+          <div className="effects">
+            {lines.map((l, i) => (
+              <div className="eff" key={i}>
+                <span className="who">{l.label}</span>
+                {l.delta !== null && <span className={`num ${cls(l.delta)}`}>{signed(l.delta)}</span>}
+                {l.after !== null && <span className="num muted">→ {money(l.after)}</span>}
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       <div className="ractions">
         <button className="btn" onClick={save} disabled={blocked || busy}>
-          {busy ? 'Saving…' : input.kind === 'transfer' ? 'Move it' : 'Log it'}
+          {busy ? 'Saving…' : input.kind === 'transfer' ? 'Confirm move' : 'Confirm & save'}
         </button>
         <button className="btn ghost" onClick={cancel}>Discard</button>
-        <label className="check" style={{ marginLeft: 'auto' }}>
-          <input type="checkbox" checked={!!input.historical}
-            onChange={(e) => set({ historical: e.target.checked })} />
-          Historical — don't touch today's cash
-        </label>
+        <button className="reviewdetails-toggle" aria-expanded={detailsOpen}
+          onClick={() => setDetailsOpen((open) => !open)}>
+          {detailsOpen ? 'Hide details' : 'More details'}
+        </button>
       </div>
     </div>
   );
@@ -322,11 +369,11 @@ function SetupCard({ draft, book, done, cancel, fail }: {
     : 'Opening balance';
 
   const preview = kind === 'business'
-    ? `A new business "${name || '—'}", with its own accounts and its own loan positions.`
-    : kind === 'account' ? `A cash account "${name || '—'}" under ${book.businesses.find((b) => b.id === businessId)?.name}, starting at ${money(amount)}. Selectable on every entry from now on.`
-    : kind === 'project' ? `A project "${name || '—'}", ${money(amount)} received before the cut-off.`
-    : kind === 'payroll' ? `"${name || '—'}" on payroll, salary ${money(amount)}, nothing taken yet.`
-    : kind === 'supplier' ? `Supplier "${name || '—'}", you owe ${money(-amount)} to start.`
+    ? `A new business "${name || '—'}", with its own accounts and loan positions.`
+    : kind === 'account' ? `Cash account "${name || '—'}" under ${book.businesses.find((b) => b.id === businessId)?.name}, starting at ${money(amount)}.`
+    : kind === 'project' ? `Project "${name || '—'}", ${money(amount)} received before the cut-off.`
+    : kind === 'payroll' ? `"${name || '—'}" on payroll at ${money(amount)} per month.`
+    : kind === 'supplier' ? `Supplier "${name || '—'}", opening amount owed ${money(amount)}.`
     : `"${name || '—'}" owes you ${money(amount)}.`;
 
   const save = async () => {
@@ -351,11 +398,14 @@ function SetupCard({ draft, book, done, cancel, fail }: {
 
   return (
     <div className="review">
-      <header>
-        <span className="eyebrow">Setting up the book</span>
-        <span className="said">{draft.raw}</span>
+      <header className="reviewhead">
+        <div className="reviewheadline">
+          <span className="eyebrow">Check before creating</span>
+          <strong className="reviewtitle">{SETUP_LABEL[kind]} · {name || 'Name needed'}</strong>
+        </div>
+        <span className="reviewsource">{draft.raw}</span>
       </header>
-      <div className="rgrid">
+      <div className="rgrid core">
         <Field label="Create">
           <select value={kind} onChange={(e) => setKind(e.target.value as SetupDraft['kind'])}>
             {Object.entries(SETUP_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
@@ -371,15 +421,17 @@ function SetupCard({ draft, book, done, cancel, fail }: {
             </select>
           </Field>
         )}
-        <Field label={amountLabel}>
-          <input inputMode="decimal" value={amount || ''} placeholder="0"
-            onChange={(e) => setAmount(Number(e.target.value.replace(/[^0-9.]/g, '')) || 0)} />
-        </Field>
+        {kind !== 'business' && (
+          <Field label={amountLabel}>
+            <input inputMode="decimal" value={amount || ''} placeholder="0"
+              onChange={(e) => setAmount(Number(e.target.value.replace(/[^0-9.]/g, '')) || 0)} />
+          </Field>
+        )}
       </div>
       {!name && <div className="warn"><b>What is it called?</b> Give it a name and it gets created.</div>}
-      <div className="effects"><div className="eff"><span className="who">{preview}</span></div></div>
+      <div className="setupsummary">{preview}</div>
       <div className="ractions">
-        <button className="btn" onClick={save} disabled={!name || busy}>{busy ? 'Creating…' : 'Create it'}</button>
+        <button className="btn" onClick={save} disabled={!name || busy}>{busy ? 'Creating…' : 'Confirm & create'}</button>
         <button className="btn ghost" onClick={cancel}>Discard</button>
       </div>
     </div>
