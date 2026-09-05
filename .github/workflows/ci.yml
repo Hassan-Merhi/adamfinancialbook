@@ -5,12 +5,17 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
@@ -18,3 +23,42 @@ jobs:
       - run: npm run typecheck
       - run: npm test -- --passWithNoTests
       - run: npm run build
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: book
+          POSTGRES_PASSWORD: book
+          POSTGRES_DB: book_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U book -d book_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      TEST_DATABASE_URL: postgres://book:book@127.0.0.1:5432/book_test
+      DATABASE_URL: postgres://book:book@127.0.0.1:5432/book_test
+      PGSSL: off
+      SESSION_SECRET: ci-only-session-secret-that-is-at-least-32-characters
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run migrations once
+        run: npm run db:migrate
+      - name: Prove migrations are idempotent
+        run: npm run db:migrate
+      - name: Verify migration status is clean
+        run: npm run db:status
+      - run: npm run test:integration

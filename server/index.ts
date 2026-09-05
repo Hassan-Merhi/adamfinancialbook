@@ -11,13 +11,12 @@ import { readSentence } from './read.js';
 import { translateTexts } from './translate.js';
 import {
   createUser, findUser, getUser, listUsers, ownerCount, ownerOnly, removeUser,
-  requireLogin, setPassword, setRole, userCount, verifyPassword, type Role,
+  requireLogin, setPassword, setRole, setUsername, userCount, usernameKey, verifyPassword, type Role,
 } from './auth.js';
 import {
   checkPassword, cookieHeader, passwordComplaint, signSession, suggestPassword, SESSION_DAYS,
 } from './session.js';
 import { dayReport } from './report.js';
-import { allocationGate } from './allocation.js';
 import { delegationGate } from './delegation.js';
 import {
   accountBalance, businessCash, loanBalance, personBalance,
@@ -39,25 +38,17 @@ app.use((_req, res, next) => {
   next();
 });
 
-// Nothing behind /api opens without a session.
 if (!process.env.SESSION_SECRET) {
   throw new Error('SESSION_SECRET is not set — the book would be open to anyone. Set it in .env.');
 }
 app.use('/api', requireLogin);
 
-// Browsers send cookies on cross-site form posts too, so a state-changing call
-// must also carry a header a form cannot set.
 app.use('/api', (req, res, next) => {
   if (req.method === 'GET' || req.path === '/login' || req.path === '/first-owner') return next();
   if (req.get('x-book') === '1') return next();
   res.status(403).json({ error: 'Refused: that request did not come from the app.' });
 });
 
-// Owner-only post-spend allocation sits beside the delegated wallet workflow.
-app.use('/api', allocationGate);
-
-// Delegated-account rules sit in front of the normal book routes. Owners fall
-// through to the original behavior; entry-only users receive a restricted book.
 app.use('/api', delegationGate);
 
 const wrap = (fn: express.RequestHandler): express.RequestHandler =>
@@ -69,7 +60,6 @@ app.get('/api/me', wrap(async (req, res) => {
   res.json({ user: req.user ?? null, needsFirstOwner: (await userCount()) === 0 });
 }));
 
-/** A handful of wrong guesses and the door stops answering for a while. */
 const attempts = new Map<string, { count: number; until: number }>();
 const MAX_TRIES = 8;
 const LOCK_MS = 15 * 60_000;
@@ -87,18 +77,31 @@ function noteFailure(key: string): void {
   attempts.set(key, { count, until: Date.now() + LOCK_MS });
 }
 
+const usernameFields = {
+  username: z.string().optional(),
+  email: z.string().optional(),
+};
+const loginBody = z.object({
+  ...usernameFields,
+  password: z.string(),
+}).refine((value) => !!(value.username ?? value.email)?.trim(), { message: 'Enter a username.' });
+const firstOwnerBody = z.object({
+  ...usernameFields,
+  password: z.string().min(8),
+}).refine((value) => !!(value.username ?? value.email)?.trim(), { message: 'Enter a username.' });
+
 app.post('/api/login', wrap(async (req, res) => {
-  const { email, password } = z.object({ email: z.string(), password: z.string() }).parse(req.body);
-  const key = `${req.ip}|${email.toLowerCase().trim()}`;
+  const body = loginBody.parse(req.body);
+  const username = body.username ?? body.email ?? '';
+  const key = `${req.ip}|${usernameKey(username)}`;
   if (tooManyTries(key)) {
     return res.status(429).json({ error: 'Too many tries. Wait fifteen minutes and try again.' });
   }
-  const user = await findUser(email);
-  // the same answer either way, so a wrong email cannot be told from a wrong password
-  if (!user || !(await checkPassword(password, user.passwordHash))) {
+  const user = await findUser(username);
+  if (!user || !(await checkPassword(body.password, user.passwordHash))) {
     noteFailure(key);
-    await record(req, 'sign-in refused', email, { ip: req.ip });
-    return res.status(401).json({ error: 'That email and password do not match.' });
+    await record(req, 'sign-in refused', usernameKey(username), { ip: req.ip });
+    return res.status(401).json({ error: 'That username and password do not match.' });
   }
   attempts.delete(key);
   res.setHeader('Set-Cookie', cookieHeader(signSession(user.id, user.tokenVersion), SESSION_DAYS * 86_400));
@@ -112,13 +115,11 @@ app.post('/api/logout', wrap(async (_req, res) => {
   res.json({ ok: true });
 }));
 
-/** The very first owner, once, on an empty book. After that it is closed. */
 app.post('/api/first-owner', wrap(async (req, res) => {
   if ((await userCount()) > 0) return res.status(403).json({ error: 'The book already has an owner.' });
-  const { email, password } = z.object({
-    email: z.string().email(), password: z.string().min(8),
-  }).parse(req.body);
-  const user = await createUser(email, password, 'owner');
+  const body = firstOwnerBody.parse(req.body);
+  const username = body.username ?? body.email ?? '';
+  const user = await createUser(username, body.password, 'owner');
   res.setHeader('Set-Cookie', cookieHeader(signSession(user.id, 0), SESSION_DAYS * 86_400));
   req.user = user;
   await record(req, 'book opened', user.email);
@@ -140,33 +141,40 @@ app.get('/api/users', ownerOnly, wrap(async (_req, res) => {
 }));
 
 app.post('/api/users', ownerOnly, wrap(async (req, res) => {
-  const { email, password, role } = z.object({
-    email: z.string().email(),
+  const body = z.object({
+    ...usernameFields,
     password: z.string(),
     role: z.enum(['owner', 'entry']),
-  }).parse(req.body);
+  }).refine((value) => !!(value.username ?? value.email)?.trim(), { message: 'Enter a username.' }).parse(req.body);
+  const username = body.username ?? body.email ?? '';
 
-  const complaint = passwordComplaint(password);
+  const complaint = passwordComplaint(body.password);
   if (complaint) return res.status(400).json({ error: complaint });
-  if (await findUser(email)) return res.status(409).json({ error: 'That email can already open the book.' });
+  if (await findUser(username)) return res.status(409).json({ error: 'That username can already open the book.' });
 
-  const user = await createUser(email, password, role);
-  await record(req, 'person given access', user.id, { email: user.email, role });
+  const user = await createUser(username, body.password, body.role);
+  await record(req, 'person given access', user.id, { username: user.email, role: body.role });
   res.status(201).json({ user });
 }));
 
-/** The owner sets someone a new password and tells them what it is. */
+app.post('/api/users/:id/username', ownerOnly, wrap(async (req, res) => {
+  const { username } = z.object({ username: z.string().min(1).max(100) }).parse(req.body);
+  const target = await getUser(String(req.params.id));
+  if (!target) return res.status(404).json({ error: 'No such person.' });
+  const next = await setUsername(target.id, username);
+  await record(req, 'username changed', target.id, { from: target.email, to: next });
+  if (target.id === req.user!.id) req.user!.email = next;
+  res.json({ ok: true, username: next });
+}));
+
 app.post('/api/users/:id/password', ownerOnly, wrap(async (req, res) => {
   const { password } = z.object({ password: z.string() }).parse(req.body);
   const complaint = passwordComplaint(password);
   if (complaint) return res.status(400).json({ error: complaint });
-
   const target = await getUser(String(req.params.id));
   if (!target) return res.status(404).json({ error: 'No such person.' });
-
   const version = await setPassword(target.id, password);
-  await record(req, 'password reset', target.id, { email: target.email });
-  // resetting your own password would otherwise sign you out of this very tab
+  await record(req, 'password reset', target.id, { username: target.email });
   if (target.id === req.user!.id) {
     res.setHeader('Set-Cookie', cookieHeader(signSession(target.id, version), SESSION_DAYS * 86_400));
   }
@@ -177,12 +185,11 @@ app.post('/api/users/:id/role', ownerOnly, wrap(async (req, res) => {
   const { role } = z.object({ role: z.enum(['owner', 'entry']) }).parse(req.body);
   const target = await getUser(String(req.params.id));
   if (!target) return res.status(404).json({ error: 'No such person.' });
-  // the book must never be left with nobody who can change it
   if (target.role === 'owner' && role !== 'owner' && (await ownerCount()) === 1) {
     return res.status(400).json({ error: 'This is the only owner — make someone else an owner first.' });
   }
   await setRole(target.id, role as Role);
-  await record(req, 'role changed', target.id, { email: target.email, role });
+  await record(req, 'role changed', target.id, { username: target.email, role });
   res.json({ ok: true });
 }));
 
@@ -194,11 +201,10 @@ app.delete('/api/users/:id', ownerOnly, wrap(async (req, res) => {
     return res.status(400).json({ error: 'This is the only owner.' });
   }
   await removeUser(target.id);
-  await record(req, 'access removed', target.id, { email: target.email });
+  await record(req, 'access removed', target.id, { username: target.email });
   res.json({ ok: true });
 }));
 
-/** Anyone signed in can change their own password, knowing the old one. */
 app.post('/api/password', wrap(async (req, res) => {
   const { current, next } = z.object({ current: z.string(), next: z.string() }).parse(req.body);
   const complaint = passwordComplaint(next);
@@ -207,9 +213,58 @@ app.post('/api/password', wrap(async (req, res) => {
     return res.status(401).json({ error: 'That is not your current password.' });
   }
   const version = await setPassword(req.user!.id, next);
-  await record(req, 'password changed', req.user!.id, { email: req.user!.email });
-  // this tab stays open; everywhere else the old session dies
+  await record(req, 'password changed', req.user!.id, { username: req.user!.email });
   res.setHeader('Set-Cookie', cookieHeader(signSession(req.user!.id, version), SESSION_DAYS * 86_400));
+  res.json({ ok: true });
+}));
+
+/**
+ * Clears financial/operational data without deleting the people who can sign in.
+ * The transaction first unlinks the intentionally two-way receipt/entry
+ * relationship, then deletes dependent history before the ledger rows.
+ */
+app.post('/api/reset-book', ownerOnly, wrap(async (req, res) => {
+  const { password } = z.object({ confirmation: z.literal('RESET'), password: z.string().min(1) }).parse(req.body);
+  if (!(await verifyPassword(req.user!.id, password))) {
+    return res.status(401).json({ error: 'That is not your current password.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // entries.link_receipt_id -> project_receipts and project_receipts.entry_id
+    // -> entries form a legitimate two-way accounting link. Unlink both sides
+    // explicitly inside this all-or-nothing reset before deleting either table.
+    await client.query('UPDATE entries SET link_receipt_id = NULL WHERE link_receipt_id IS NOT NULL');
+    await client.query('UPDATE project_receipts SET entry_id = NULL WHERE entry_id IS NOT NULL');
+    for (const table of [
+      'attachments',
+      'entry_revisions',
+      'effects',
+      'pending_transfers',
+      'approval_requests',
+      'notifications',
+      'user_accounts',
+      'entries',
+      'project_receipts',
+      'reminders',
+      'loans',
+      'people',
+      'projects',
+      'accounts',
+      'businesses',
+      'audit',
+    ]) {
+      await client.query(`DELETE FROM ${table}`);
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+  await record(req, 'book reset', null, { preservedUsers: await userCount() });
   res.json({ ok: true });
 }));
 
@@ -249,21 +304,13 @@ app.get('/api/statement', wrap(async (req, res) => {
 
 /* ---------------- reading and translating sentences ---------------- */
 
-/**
- * Turns what he typed into a draft. Nothing is saved here — the draft goes back
- * to the screen, he confirms or corrects it, and only then is it logged.
- */
 app.post('/api/read', wrap(async (req, res) => {
   const { text, today } = z.object({
     text: z.string().min(1).max(500),
     today: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   }).parse(req.body);
-
   const book = await loadBook();
   const { draft, source } = await readSentence(text, book, today ?? new Date().toISOString().slice(0, 10));
-
-  // A receipt the same size as one already recorded: is this new money, or that
-  // money finally arriving? The screen asks rather than deciding.
   let duplicate = null;
   if (draft.mode === 'entry' && draft.input.kind === 'receipt' && draft.input.projectId && draft.input.amount) {
     duplicate = possibleDuplicateReceipt(book, draft.input.projectId, draft.input.amount);
@@ -271,10 +318,6 @@ app.post('/api/read', wrap(async (req, res) => {
   res.json({ draft, source, duplicate });
 }));
 
-/**
- * Visible text is translated for display only. Database values are never
- * rewritten, so changing language cannot change accounting records or comments.
- */
 app.post('/api/translate', wrap(async (req, res) => {
   const { language, texts } = z.object({
     language: z.enum(['en', 'fr', 'ar']),
@@ -289,13 +332,13 @@ app.post('/api/translate', wrap(async (req, res) => {
 /* ---------------- setting the book up ---------------- */
 
 const nameOnly = z.object({ name: z.string().min(1).max(80) });
+const accountInput = nameOnly.extend({ businessId: z.string().nullish(), opening: z.number().default(0) });
 const under = nameOnly.extend({ businessId: z.string().min(1), opening: z.number().default(0) });
 
 app.post('/api/businesses', ownerOnly, wrap(async (req, res) => {
   const { name } = nameOnly.parse(req.body);
   const id = newId('biz');
   await query('INSERT INTO businesses (id, name) VALUES ($1,$2)', [id, name]);
-  // every pair of businesses can end up owing each other; open the positions now
   const others = await query<{ id: string }>('SELECT id FROM businesses WHERE id <> $1', [id]);
   for (const other of others) await ensureLoanPair(id, other.id);
   await record(req, 'business created', id, { name });
@@ -303,12 +346,12 @@ app.post('/api/businesses', ownerOnly, wrap(async (req, res) => {
 }));
 
 app.post('/api/accounts', ownerOnly, wrap(async (req, res) => {
-  const { name, businessId, opening } = under.parse(req.body);
+  const { name, businessId, opening } = accountInput.parse(req.body);
   const id = newId('acc');
   await query('INSERT INTO accounts (id, name, business_id, opening) VALUES ($1,$2,$3,$4)',
-    [id, name, businessId, opening]);
-  await record(req, 'account created', id, { name, opening });
-  res.status(201).json({ id, name, businessId, opening });
+    [id, name, businessId ?? null, opening]);
+  await record(req, 'account created', id, { name, opening, businessId: businessId ?? null });
+  res.status(201).json({ id, name, businessId: businessId ?? null, opening });
 }));
 
 app.post('/api/projects', ownerOnly, wrap(async (req, res) => {
@@ -316,7 +359,6 @@ app.post('/api/projects', ownerOnly, wrap(async (req, res) => {
   const id = newId('prj');
   await query('INSERT INTO projects (id, name, scope, business_id) VALUES ($1,$2,$3,$4)',
     [id, body.name, body.scope, body.businessId]);
-  // anything already received before the cut-off is one opening line, not history to re-enter
   if (body.opening > 0) {
     await query(`INSERT INTO project_receipts (id, project_id, occurred_on, amount, in_cash, entry_id)
                  VALUES ($1,$2,NULL,$3,true,NULL)`, [newId('rcp'), id, body.opening]);
@@ -339,11 +381,8 @@ app.post('/api/people', ownerOnly, wrap(async (req, res) => {
   res.status(201).json({ id, ...body });
 }));
 
-/** The opening position between two businesses, as of the cut-off. */
 app.put('/api/loans', ownerOnly, wrap(async (req, res) => {
-  const body = z.object({
-    fromBusiness: z.string(), toBusiness: z.string(), opening: z.number(),
-  }).parse(req.body);
+  const body = z.object({ fromBusiness: z.string(), toBusiness: z.string(), opening: z.number() }).parse(req.body);
   await ensureLoanPair(body.fromBusiness, body.toBusiness);
   await query(
     `UPDATE loans SET opening = CASE WHEN from_business = $1 THEN $3::numeric ELSE -($3::numeric) END
@@ -353,13 +392,10 @@ app.put('/api/loans', ownerOnly, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-/** A promise to pay, kept beside the book so it is not forgotten — never a movement. */
 app.post('/api/reminders', ownerOnly, wrap(async (req, res) => {
   const body = z.object({
-    what: z.string().min(1).max(120),
-    amount: z.number().default(0),
-    accountId: z.string().nullish(),
-    note: z.string().default(''),
+    what: z.string().min(1).max(120), amount: z.number().default(0),
+    accountId: z.string().nullish(), note: z.string().default(''),
   }).parse(req.body);
   const id = newId('rem');
   await query('INSERT INTO reminders (id, what, amount, account_id, note) VALUES ($1,$2,$3,$4,$5)',
@@ -377,24 +413,15 @@ app.delete('/api/reminders/:id', ownerOnly, wrap(async (req, res) => {
 const entryInput = z.object({
   occurredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   kind: z.enum(['expense', 'credit_purchase', 'receipt', 'transfer', 'person_loan', 'salary', 'supplier_payment']),
-  amount: z.number().positive(),
-  purpose: z.string().default(''),
-  raw: z.string().default(''),
-  accountId: z.string().nullish(),
-  toAccountId: z.string().nullish(),
-  projectId: z.string().nullish(),
-  personId: z.string().nullish(),
-  forBusiness: z.string().nullish(),
-  historical: z.boolean().default(false),
-  linkReceiptId: z.string().nullish(),
-  clientRef: z.string().max(80).nullish(),
+  amount: z.number().positive(), purpose: z.string().default(''), raw: z.string().default(''),
+  accountId: z.string().nullish(), toAccountId: z.string().nullish(), projectId: z.string().nullish(),
+  personId: z.string().nullish(), forBusiness: z.string().nullish(), historical: z.boolean().default(false),
+  linkReceiptId: z.string().nullish(), clientRef: z.string().max(80).nullish(),
 });
 
 app.post('/api/entries', wrap(async (req, res) => {
   const input = entryInput.parse(req.body);
   const book = await loadBook();
-
-  // Guardrails the API enforces, so a wrong entry can never reach the book.
   if (input.kind === 'credit_purchase' && !input.personId) {
     return res.status(400).json({ error: 'A purchase on credit needs someone to owe.' });
   }
@@ -413,17 +440,12 @@ app.post('/api/entries', wrap(async (req, res) => {
     const to = book.accounts.find((a) => a.id === input.toAccountId)?.businessId;
     if (from && to && from !== to) await ensureLoanPair(from, to);
   }
-
   const entry = await saveEntry(input, await loadBook(), req.user?.id);
   await record(req, 'entry logged', entry.id,
     { amount: entry.amount, kind: entry.kind, purpose: entry.purpose, on: entry.occurredOn });
   res.status(201).json(entry);
 }));
 
-/**
- * Asked before a receipt is saved: is this new money, or money already counted
- * that is only now arriving?
- */
 app.get('/api/receipt-check', wrap(async (req, res) => {
   const { projectId, amount } = req.query as Record<string, string>;
   const book = await loadBook();
@@ -440,7 +462,6 @@ app.patch('/api/entries/:id', ownerOnly, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-/** A wrong entry stops counting but stays on the record, with its reason. */
 app.post('/api/entries/:id/void', ownerOnly, wrap(async (req, res) => {
   const { reason } = z.object({ reason: z.string().min(1).max(200) }).parse(req.body);
   const id = String(req.params.id);
@@ -470,7 +491,6 @@ app.get('/api/backup.json', ownerOnly, wrap(async (req, res) => {
   res.send(backup(book));
 }));
 
-/** The day report as plain text — the same words that arrive on your phone. */
 app.get('/api/report', wrap(async (req, res) => {
   const on = typeof req.query.on === 'string' ? req.query.on : new Date().toISOString().slice(0, 10);
   const book = await loadBook();
@@ -492,13 +512,9 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 const port = Number(process.env.PORT ?? 5000);
 const server = app.listen(port, () => console.log(`Book API on http://localhost:${port}`));
 
-// Finish what is in flight before the process goes away, so no entry is lost
-// mid-write when Render restarts or redeploys.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.on(signal, () => {
-    server.close(() => {
-      pool.end().finally(() => process.exit(0));
-    });
+    server.close(() => { pool.end().finally(() => process.exit(0)); });
     setTimeout(() => process.exit(0), 10_000).unref();
   });
 }

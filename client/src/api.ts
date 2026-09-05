@@ -42,6 +42,7 @@ function safeParse(text: string) {
   try { return JSON.parse(text); } catch { return null; }
 }
 
+/** `email` is the legacy wire-field name; the product now presents it as username. */
 export interface Me { user: { id: string; email: string; role: 'owner' | 'entry' } | null; needsFirstOwner: boolean }
 
 export interface Keyholder {
@@ -114,32 +115,43 @@ export interface EvidenceActivity {
   created_at?: string;
 }
 
-export interface EvidenceDashboard {
-  mode: 'owner' | 'entry';
-  approvals: EvidenceApproval[];
-  pendingTransfers: EvidencePendingTransfer[];
-  recentActivity: EvidenceActivity[];
-  notifications: EvidenceNotification[];
+export interface DelegationAccount {
+  id: string;
+  name: string;
+  businessId: string;
+  opening: number;
+  balance: number;
 }
 
-export interface DelegatedSpendItem {
+export interface DelegationDelegate {
+  id: string;
+  email: string;
+  accountIds: string[];
+}
+
+export interface DelegatedExpenseReview {
   id: string;
   occurred_on: string;
   amount: number;
   purpose: string;
+  raw: string;
   account_id: string;
   account_name: string;
   payer_business_id: string;
-  project_id: string | null;
-  for_business: string | null;
-  spender_email: string;
+  payer_business_name: string;
+  actor_email: string;
   created_at: string;
 }
 
-export interface DelegatedSpendAllocationResult {
-  ok: true;
-  count: number;
-  total: number;
+export interface EvidenceDashboard {
+  mode: 'owner' | 'entry';
+  accounts?: DelegationAccount[];
+  delegates?: DelegationDelegate[];
+  approvals: EvidenceApproval[];
+  pendingTransfers: EvidencePendingTransfer[];
+  recentActivity: EvidenceActivity[];
+  notifications: EvidenceNotification[];
+  expenseReviews: DelegatedExpenseReview[];
 }
 
 /**
@@ -194,15 +206,23 @@ async function uploadEvidence(entryId: string, file: File): Promise<void> {
   if (!res.ok) throw new Error(data?.error || `Upload failed (${res.status})`);
 }
 
+async function evidenceDashboard(): Promise<EvidenceDashboard> {
+  const [dashboard, reviewQueue] = await Promise.all([
+    send<Omit<EvidenceDashboard, 'expenseReviews'>>('/delegation/dashboard', 'GET'),
+    send<{ items: DelegatedExpenseReview[] }>('/delegation/expense-reviews', 'GET'),
+  ]);
+  return { ...dashboard, expenseReviews: reviewQueue.items };
+}
+
 export const api = {
   me: () => send<Me>('/me', 'GET'),
-  login: (email: string, password: string) => send<Me>('/login', 'POST', { email, password }),
-  firstOwner: (email: string, password: string) => send<Me>('/first-owner', 'POST', { email, password }),
+  login: (username: string, password: string) => send<Me>('/login', 'POST', { username, password }),
+  firstOwner: (username: string, password: string) => send<Me>('/first-owner', 'POST', { username, password }),
   logout: () => send('/logout', 'POST'),
   book: () => send<LoadedBook>('/book', 'GET'),
   read: (text: string, today: string) => send<Reading>('/read', 'POST', { text, today }),
   addBusiness: (name: string) => send('/businesses', 'POST', { name }),
-  addAccount: (b: { name: string; businessId: string; opening: number }) => send('/accounts', 'POST', b),
+  addAccount: (b: { name: string; businessId?: string | null; opening: number }) => send('/accounts', 'POST', b),
   addProject: (b: { name: string; businessId: string; opening: number; scope?: string }) => send('/projects', 'POST', b),
   addPerson: (b: { name: string; businessId: string; kind: string; opening: number; salary: number; role: string }) =>
     send('/people', 'POST', b),
@@ -215,15 +235,16 @@ export const api = {
   voidEntry: (id: string, reason: string) => send(`/entries/${id}/void`, 'POST', { reason }),
   history: () => send<{ lines: AuditLine[] }>('/history', 'GET'),
   users: () => send<{ users: Keyholder[]; suggestion: string }>('/users', 'GET'),
-  addUser: (b: { email: string; password: string; role: string }) => send('/users', 'POST', b),
+  addUser: (b: { username?: string; email?: string; password: string; role: string }) => send('/users', 'POST', b),
+  setUsername: (id: string, username: string) => send(`/users/${id}/username`, 'POST', { username }),
   resetPassword: (id: string, password: string) => send(`/users/${id}/password`, 'POST', { password }),
   setRole: (id: string, role: string) => send(`/users/${id}/role`, 'POST', { role }),
   removeUser: (id: string) => send(`/users/${id}`, 'DELETE'),
   changePassword: (current: string, next: string) => send('/password', 'POST', { current, next }),
-  evidenceDashboard: () => send<EvidenceDashboard>('/delegation/dashboard', 'GET'),
-  delegatedSpending: () => send<{ items: DelegatedSpendItem[] }>('/allocation/spending', 'GET'),
-  allocateDelegatedSpending: (entryIds: string[], businessId: string, projectId: string | null) =>
-    send<DelegatedSpendAllocationResult>('/allocation/spending', 'POST', { entryIds, businessId, projectId }),
+  resetBook: (password: string, confirmation: 'RESET') => send('/reset-book', 'POST', { password, confirmation }),
+  evidenceDashboard,
+  setUserAccounts: (id: string, accountIds: string[]) =>
+    send(`/delegation/users/${encodeURIComponent(id)}/accounts`, 'PUT', { accountIds }),
   evidenceForEntry: (entryId: string) => evidenceQuery(entryId, undefined),
   evidenceForRequest: (requestId: string) => evidenceQuery(undefined, requestId),
   uploadEvidence,
@@ -231,6 +252,10 @@ export const api = {
   rejectTransfer: (id: string) => send(`/delegation/transfers/${id}/reject`, 'POST'),
   decideApproval: (id: string, status: 'approved' | 'rejected', note = '') =>
     send(`/delegation/approvals/${id}/decision`, 'POST', { status, note }),
+  assignExpenseReviews: (entryIds: string[], businessId: string, projectId: string | null, category = '') =>
+    send<{ ok: true; count: number }>('/delegation/expense-reviews/assign', 'POST', {
+      entryIds, businessId, projectId, category,
+    }),
   markNotificationRead: (id: string) => send(`/delegation/notifications/${id}/read`, 'POST'),
   markAllNotificationsRead: () => send('/delegation/notifications/read-all', 'POST'),
   evidenceUrl: (id: string) => `/api/delegation/attachments/${encodeURIComponent(id)}`,

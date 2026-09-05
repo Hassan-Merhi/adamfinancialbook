@@ -31,4 +31,19 @@ console.log(JSON.stringify({
   latestMigration: status.latest,
 }));
 
+// Extra delegation workflows are registered on the same router before the app
+// mounts it, keeping owner review logic isolated from the core ledger routes.
+const [{ delegationGate }, { expenseReviewRouter }] = await Promise.all([
+  import('./delegation.js'),
+  import('./expense-review.js'),
+]);
+delegationGate.use(expenseReviewRouter);
+
 await import('./index.js');
+
+// A low-frequency production check independently verifies that stored effects,
+// client references, handoffs, and relationship targets still agree with the
+// economic meaning of every live entry. The timer is unref'd and never blocks
+// shutdown or tests.
+const { startIntegrityMonitor } = await import('./integrity.js');
+startIntegrityMonitor();

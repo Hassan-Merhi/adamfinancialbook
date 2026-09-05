@@ -32,17 +32,23 @@ const dashboard: EvidenceDashboard = {
   }],
   recentActivity: [],
   notifications: [],
+  expenseReviews: [{
+    id: 'e-review', occurred_on: '2026-09-05', amount: 40, purpose: 'Fuel', raw: 'fuel',
+    account_id: 'a1', account_name: 'Cash', payer_business_id: 'b1', payer_business_name: 'Construction',
+    actor_email: 'delegate@example.com', created_at: '2026-09-05T10:00:00Z',
+  }],
 };
 
 describe('unified needs-attention count', () => {
   it('counts only unresolved work across all sources', () => {
     expect(attentionCounts(book, dashboard, 2)).toEqual({
+      reviews: 1,
       approvals: 1,
       transfers: 1,
       reminders: 1,
       receiptsWaiting: 1,
       missingEvidence: 2,
-      total: 6,
+      total: 7,
     });
   });
 

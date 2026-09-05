@@ -4,24 +4,13 @@
  * Say what happened in the box at the top; everything below is the answer to
  * "where do I stand". Any figure opens into the entries behind it.
  */
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { api, NotSignedIn, type EvidenceDashboard, type LoadedBook, type Me } from './api';
 import SignIn from './views/SignIn';
 import { flushOutbox, lastUser, looksOffline, outbox, snapshot } from './offline';
 import Entry from './Entry';
 import Today from './views/Today';
-import Money from './views/Money';
-import Projects from './views/Projects';
-import People from './views/People';
-import Attention from './views/Attention';
-import Report from './views/Report';
-import Setup from './views/Setup';
-import History from './views/History';
-import Access from './views/Access';
-import Files from './views/Files';
-import Approvals from './views/Approvals';
-import Statement, { type Focus } from './views/Statement';
-import GlobalSearch from './GlobalSearch';
+import type { Focus } from './views/Statement';
 import LanguageControl from './LanguageControl';
 import LoadingSkeleton from './LoadingSkeleton';
 import { attentionCounts } from './attention';
@@ -31,49 +20,94 @@ import { money } from './ui';
 import './styles.css';
 import './navigation.css';
 import './ux6.css';
+import './mobile-core.css';
+import './daily-mobile.css';
+import './performance-mobile.css';
 
 type View = 'today' | 'money' | 'projects' | 'people' | 'attention' | 'report' | 'files' | 'history' | 'access' | 'setup' | 'approvals';
+type NavItem = { id: View; label: string; short: string; icon: string; ownerOnly?: boolean };
 
-type NavItem = {
-  id: View;
-  label: string;
-  short: string;
-  icon: string;
-  ownerOnly?: boolean;
-};
+/*
+ * Today + the prompt are the only signed-in experience needed for startup.
+ * Everything else is split into a route-sized chunk and fetched only when the
+ * user actually asks for it. Keeping the loader functions lets taps begin the
+ * download before React renders the Suspense boundary.
+ */
+const loadMoney = () => import('./views/Money');
+const loadProjects = () => import('./views/Projects');
+const loadPeople = () => import('./views/People');
+const loadAttention = () => import('./views/Attention');
+const loadReport = () => import('./views/Report');
+const loadSetup = () => import('./views/Setup');
+const loadHistory = () => import('./views/History');
+const loadAccess = () => import('./views/Access');
+const loadFiles = () => import('./views/Files');
+const loadApprovals = () => import('./views/Approvals');
+const loadStatement = () => import('./views/Statement');
+const loadGlobalSearch = () => import('./GlobalSearch');
+
+const Money = lazy(loadMoney);
+const Projects = lazy(loadProjects);
+const People = lazy(loadPeople);
+const Attention = lazy(loadAttention);
+const Report = lazy(loadReport);
+const Setup = lazy(loadSetup);
+const History = lazy(loadHistory);
+const Access = lazy(loadAccess);
+const Files = lazy(loadFiles);
+const Approvals = lazy(loadApprovals);
+const Statement = lazy(loadStatement);
+const GlobalSearch = lazy(loadGlobalSearch);
 
 const PRIMARY_NAV: NavItem[] = [
-  { id: 'today', label: 'Today', short: 'Today',
-    icon: 'M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
-  { id: 'money', label: 'Accounts & loans', short: 'Money',
-    icon: 'M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z' },
-  { id: 'projects', label: 'Projects', short: 'Projects',
-    icon: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' },
-  { id: 'people', label: 'People', short: 'People',
-    icon: 'M9 4.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4zM3 20c0-3.3 2.7-5 6-5s6 1.7 6 5M16 6.5a3 3 0 0 1 0 6M17.5 20c0-2.2-.7-3.7-2-4.6' },
+  { id: 'today', label: 'Today', short: 'Today', icon: 'M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
+  { id: 'money', label: 'Accounts & loans', short: 'Money', icon: 'M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z' },
+  { id: 'projects', label: 'Projects', short: 'Projects', icon: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' },
+  { id: 'people', label: 'People', short: 'People', icon: 'M9 4.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4zM3 20c0-3.3 2.7-5 6-5s6 1.7 6 5M16 6.5a3 3 0 0 1 0 6M17.5 20c0-2.2-.7-3.7-2-4.6' },
 ];
 
 const MORE_NAV: NavItem[] = [
-  { id: 'attention', label: 'Needs attention', short: 'Attention',
-    icon: 'M12 3 2.8 19h18.4L12 3zM12 9v4M12 16.5h.01' },
-  { id: 'report', label: 'Day report', short: 'Report',
-    icon: 'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM8 8h8M8 12h8M8 16h5' },
-  { id: 'approvals', label: 'Approvals', short: 'Approvals',
-    icon: 'M5 12.5 9.2 17 19 7' },
-  { id: 'files', label: 'Receipts & files', short: 'Files', ownerOnly: true,
-    icon: 'M6 3h8l4 4v14H6zM14 3v5h5M9 13h6M9 17h4' },
-  { id: 'history', label: 'History', short: 'History', ownerOnly: true,
-    icon: 'M12 7v5l3 2M3.5 12a8.5 8.5 0 1 0 2.2-5.7M3 4v4h4' },
-  { id: 'access', label: 'Access', short: 'Access',
-    icon: 'M15.5 5a4.5 4.5 0 1 0-2.2 3.9L18 13.4V17h3.5v-3.5l-6-6A4.5 4.5 0 0 0 15.5 5zM11 5.6a1.4 1.4 0 1 1-2.8 0 1.4 1.4 0 0 1 2.8 0z' },
-  { id: 'setup', label: 'Set it up', short: 'Setup', ownerOnly: true,
-    icon: 'M4 7h16M4 12h16M4 17h16M9 5v4M15 10v4M7 15v4' },
+  { id: 'attention', label: 'Needs attention', short: 'Attention', icon: 'M12 3 2.8 19h18.4L12 3zM12 9v4M12 16.5h.01' },
+  { id: 'report', label: 'Day report', short: 'Report', icon: 'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM8 8h8M8 12h8M8 16h5' },
+  { id: 'approvals', label: 'Approvals', short: 'Approvals', icon: 'M5 12.5 9.2 17 19 7' },
+  { id: 'files', label: 'Receipts & files', short: 'Files', ownerOnly: true, icon: 'M6 3h8l4 4v14H6zM14 3v5h5M9 13h6M9 17h4' },
+  { id: 'history', label: 'History', short: 'History', ownerOnly: true, icon: 'M12 7v5l3 2M3.5 12a8.5 8.5 0 1 0 2.2-5.7M3 4v4h4' },
+  { id: 'access', label: 'Access', short: 'Access', icon: 'M15.5 5a4.5 4.5 0 1 0-2.2 3.9L18 13.4V17h3.5v-3.5l-6-6A4.5 4.5 0 0 0 15.5 5zM11 5.6a1.4 1.4 0 1 1-2.8 0 1.4 1.4 0 0 1 2.8 0z' },
+  { id: 'setup', label: 'Set it up', short: 'Setup', ownerOnly: true, icon: 'M4 7h16M4 12h16M4 17h16M9 5v4M15 10v4M7 15v4' },
 ];
 
 const MORE_ICON = 'M5 12h.01M12 12h.01M19 12h.01';
 const SEARCH_ICON = 'm21 21-4.2-4.2M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4z';
-const LOOKS = [['assistant', 'Assistant'], ['ledger', 'Ledger']] as const;
-const DASHBOARD_REFRESH_MS = 45_000;
+const DASHBOARD_REFRESH_DESKTOP_MS = 60_000;
+const DASHBOARD_REFRESH_MOBILE_MS = 120_000;
+const DASHBOARD_WAKE_DELAY_MS = 850;
+const DASHBOARD_DEDUPE_MS = 10_000;
+
+function loadViewModule(view: View): Promise<unknown> | null {
+  switch (view) {
+    case 'money': return loadMoney();
+    case 'projects': return loadProjects();
+    case 'people': return loadPeople();
+    case 'attention': return loadAttention();
+    case 'report': return loadReport();
+    case 'files': return loadFiles();
+    case 'history': return loadHistory();
+    case 'access': return loadAccess();
+    case 'setup': return loadSetup();
+    case 'approvals': return loadApprovals();
+    default: return null;
+  }
+}
+
+function ViewLoading() {
+  return (
+    <div className="view-loading" role="status" aria-live="polite" aria-label="Loading page">
+      <span className="view-loading-title" />
+      <span className="view-loading-block" />
+      <span className="view-loading-block short" />
+    </div>
+  );
+}
 
 export default function App() {
   const [me, setMe] = useState<Me | null>(null);
@@ -84,23 +118,16 @@ export default function App() {
   const [note, setNote] = useState<{ text: string; bad?: boolean } | null>(null);
   const [waiting, setWaiting] = useState(outbox.all().length);
   const [offline, setOffline] = useState(!navigator.onLine);
-  const [look, setLook] = useState(0);
   const [moreOpen, setMoreOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [missingReceiptCount, setMissingReceiptCount] = useState(0);
+  const dashboardRefreshing = useRef(false);
+  const lastDashboardRefresh = useRef(0);
 
   useEffect(() => {
-    try {
-      const kept = localStorage.getItem('book.look');
-      const found = LOOKS.findIndex(([id]) => id === kept);
-      if (found > 0) setLook(found);
-    } catch { /* private mode: the default look is fine */ }
+    document.documentElement.setAttribute('data-vibe', 'assistant');
+    try { localStorage.removeItem('book.look'); } catch { /* private mode */ }
   }, []);
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-vibe', LOOKS[look][0]);
-    try { localStorage.setItem('book.look', LOOKS[look][0]); } catch { /* nothing to do */ }
-  }, [look]);
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -114,11 +141,25 @@ export default function App() {
     return () => window.removeEventListener('keydown', close);
   }, [moreOpen]);
 
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        void loadGlobalSearch();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener('keydown', shortcut);
+    return () => window.removeEventListener('keydown', shortcut);
+  }, []);
+
   const flipTheme = () => {
     const now = document.documentElement.getAttribute('data-theme');
     const dark = now ? now === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
     document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
   };
+
+  const say = (text: string, bad?: boolean) => setNote({ text, bad });
 
   const reload = async () => {
     try {
@@ -127,25 +168,46 @@ export default function App() {
       snapshot.save(fresh);
       setOffline(false);
     } catch (e) {
-      if (e instanceof NotSignedIn) { setMe({ user: null, needsFirstOwner: false }); return; }
+      if (e instanceof NotSignedIn) {
+        setMe({ user: null, needsFirstOwner: false });
+        return;
+      }
       const kept = snapshot.load<LoadedBook>();
-      if (kept) { setBook(kept); setOffline(true); }
-      else say((e as Error).message, true);
+      if (kept) {
+        setBook(kept);
+        setOffline(true);
+      } else {
+        say((e as Error).message, true);
+      }
     }
   };
 
-  const refreshDashboard = async () => {
+  const refreshDashboard = async (force = false) => {
     if (!me?.user || !navigator.onLine || document.visibilityState === 'hidden') return;
+    const now = Date.now();
+    if (dashboardRefreshing.current || (!force && now - lastDashboardRefresh.current < DASHBOARD_DEDUPE_MS)) return;
+    dashboardRefreshing.current = true;
     try {
       setDashboard(await api.evidenceDashboard());
+      lastDashboardRefresh.current = Date.now();
     } catch {
-      /* The book remains usable offline; keep the last attention snapshot. */
+      /* Keep the last attention snapshot while offline or temporarily unavailable. */
+    } finally {
+      dashboardRefreshing.current = false;
     }
   };
 
   useEffect(() => {
     api.me()
-      .then((m) => { setMe(m); if (m.user) { lastUser.save(m.user); void reload(); } else lastUser.clear(); })
+      .then((next) => {
+        setMe(next);
+        if (next.user) {
+          lastUser.save(next.user);
+          void reload();
+        } else {
+          lastUser.clear();
+        }
+      })
       .catch((e) => {
         const kept = snapshot.load<LoadedBook>();
         const who = lastUser.load<NonNullable<Me['user']>>();
@@ -153,7 +215,9 @@ export default function App() {
           setMe({ user: who, needsFirstOwner: false });
           setBook(kept);
           setOffline(true);
-        } else setMe({ user: null, needsFirstOwner: false });
+        } else {
+          setMe({ user: null, needsFirstOwner: false });
+        }
       });
   }, []);
 
@@ -162,7 +226,10 @@ export default function App() {
     try {
       const sent = await flushOutbox((input) => api.addEntry(input));
       setWaiting(outbox.all().length);
-      if (sent) { await reload(); say(`${sent} ${sent === 1 ? 'entry' : 'entries'} logged from the outbox.`); }
+      if (sent) {
+        await reload();
+        say(`${sent} ${sent === 1 ? 'entry' : 'entries'} logged from the outbox.`);
+      }
     } catch (e) {
       setWaiting(outbox.all().length);
       say(`One queued entry was refused: ${(e as Error).message}`, true);
@@ -170,16 +237,17 @@ export default function App() {
   };
 
   useEffect(() => {
-    const online = () => { setOffline(false); void flush(); void refreshDashboard(); };
+    const online = () => { setOffline(false); void flush(); void refreshDashboard(true); };
     const gone = () => setOffline(true);
     window.addEventListener('online', online);
     window.addEventListener('offline', gone);
     if (navigator.onLine) void flush();
-    return () => { window.removeEventListener('online', online); window.removeEventListener('offline', gone); };
+    return () => {
+      window.removeEventListener('online', online);
+      window.removeEventListener('offline', gone);
+    };
   }, [me?.user?.id]);
 
-  // Attention data no longer wakes hidden tabs every 15 seconds. Refresh when
-  // visible/focused, then at a relaxed cadence while the app is actively used.
   useEffect(() => {
     if (!me?.user) {
       setDashboard(null);
@@ -187,19 +255,28 @@ export default function App() {
       return;
     }
     let timer: number | null = null;
+    let wakeTimer: number | null = null;
+    const mobile = window.matchMedia('(max-width: 760px)').matches;
+    const refreshMs = mobile ? DASHBOARD_REFRESH_MOBILE_MS : DASHBOARD_REFRESH_DESKTOP_MS;
     const stopTimer = () => {
       if (timer !== null) window.clearInterval(timer);
+      if (wakeTimer !== null) window.clearTimeout(wakeTimer);
       timer = null;
+      wakeTimer = null;
     };
     const startTimer = () => {
-      stopTimer();
+      if (timer !== null) window.clearInterval(timer);
       if (document.visibilityState === 'visible') {
-        timer = window.setInterval(() => { void refreshDashboard(); }, DASHBOARD_REFRESH_MS);
+        timer = window.setInterval(() => { void refreshDashboard(); }, refreshMs);
       }
     };
     const resume = () => {
-      if (document.visibilityState !== 'visible') { stopTimer(); return; }
-      void refreshDashboard();
+      if (document.visibilityState !== 'visible') {
+        stopTimer();
+        return;
+      }
+      if (wakeTimer !== null) window.clearTimeout(wakeTimer);
+      wakeTimer = window.setTimeout(() => { void refreshDashboard(); }, DASHBOARD_WAKE_DELAY_MS);
       startTimer();
     };
     resume();
@@ -212,32 +289,54 @@ export default function App() {
     };
   }, [me?.user?.id]);
 
-  const say = (text: string, bad?: boolean) => setNote({ text, bad });
   const run = async (work: () => Promise<unknown>, done: string) => {
-    try { await work(); await reload(); say(done); }
-    catch (e) { say((e as Error).message, true); }
+    try {
+      await work();
+      await reload();
+      say(done);
+    } catch (e) {
+      say((e as Error).message, true);
+    }
   };
-  const refreshAll = async () => { await Promise.all([reload(), refreshDashboard()]); };
+
+  const refreshAll = async () => { await Promise.all([reload(), refreshDashboard(true)]); };
+  const signOut = async () => {
+    await api.logout();
+    lastUser.clear();
+    snapshot.save(null);
+    setMe({ user: null, needsFirstOwner: false });
+    setBook(null);
+    setDashboard(null);
+    setMissingReceiptCount(0);
+    setMoreOpen(false);
+    setSearchOpen(false);
+  };
   const go = (next: View) => {
+    const pending = loadViewModule(next);
+    if (pending) void pending;
+    if (next === 'attention' || next === 'approvals') void refreshDashboard(true);
     setView(next);
     setFocus(null);
     setNote(null);
     setMoreOpen(false);
   };
-  const open = (f: Focus) => {
-    setFocus(f);
+  const open = (nextFocus: Focus) => {
+    void loadStatement();
+    setFocus(nextFocus);
     setNote(null);
     setMoreOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+  const openSearch = () => {
+    void loadGlobalSearch();
+    setSearchOpen(true);
+  };
 
   if (!me) return <LoadingSkeleton />;
-
   if (!me.user) {
     return <SignIn needsFirstOwner={me.needsFirstOwner}
       done={(next) => { setMe(next); lastUser.save(next.user); void reload(); }} />;
   }
-
   if (!book) {
     return (
       <>
@@ -256,7 +355,10 @@ export default function App() {
   const attention = attentionCounts(book, dashboard, missingReceiptCount);
 
   const handlePromptAction = (action: PromptAction) => {
-    if (action.mode === 'focus') { open(action.target); return; }
+    if (action.mode === 'focus') {
+      open(action.target);
+      return;
+    }
     if (action.view === 'more') {
       setFocus(null);
       setNote(null);
@@ -280,12 +382,11 @@ export default function App() {
   return (
     <div className="shell">
       <a className="skip-link" href="#main-content">Skip to content</a>
+
       <header className="topbar">
         <b>Financial Book</b>
         <div className="topbar-search-wrap">
-          <span className="num">{money(book.balances.totalCash)}</span>
-          <LanguageControl compact />
-          <button className="search-trigger mobile" onClick={() => setSearchOpen(true)} aria-label="Search">
+          <button className="search-trigger mobile" onClick={openSearch} aria-label="Search">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SEARCH_ICON} /></svg>
             <span>Search</span>
           </button>
@@ -296,7 +397,7 @@ export default function App() {
         <div className="brand">
           <b>Financial Book</b>
           <span>{money(book.balances.totalCash)} on hand</span>
-          <button className="search-trigger desktop" onClick={() => setSearchOpen(true)} aria-label="Search everything">
+          <button className="search-trigger desktop" onClick={openSearch} aria-label="Search everything">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SEARCH_ICON} /></svg>
             <span>Search everything</span>
             <kbd>⌘K</kbd>
@@ -305,6 +406,7 @@ export default function App() {
 
         {PRIMARY_NAV.map((item) => (
           <button key={item.id} className="navbtn" aria-current={!focus && view === item.id ? 'page' : undefined}
+            onPointerDown={() => { const pending = loadViewModule(item.id); if (pending) void pending; }}
             onClick={() => go(item.id)} aria-label={item.label}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.icon} /></svg>
             <span className="long">{item.label}</span>
@@ -313,40 +415,78 @@ export default function App() {
         ))}
 
         <div className="moregroup">
-          <button className="navbtn morebtn" aria-current={moreIsCurrent ? 'page' : undefined} aria-expanded={moreOpen}
-            aria-haspopup="menu" aria-label="More pages" onClick={() => setMoreOpen((openNow) => !openNow)}>
+          <button className="navbtn morebtn" aria-current={moreIsCurrent ? 'page' : undefined}
+            aria-expanded={moreOpen} aria-haspopup="dialog" aria-label="More pages"
+            onClick={() => setMoreOpen((openNow) => !openNow)}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={MORE_ICON} /></svg>
             <span className="long">More</span>
             <span className="short">More</span>
-            {attention.total > 0 && <span className="navbadge" aria-label={`${attention.total} items need attention`}>{attention.total > 99 ? '99+' : attention.total}</span>}
+            {attention.total > 0 && (
+              <span className="navbadge" aria-label={`${attention.total} items need attention`}>
+                {attention.total > 99 ? '99+' : attention.total}
+              </span>
+            )}
           </button>
 
           {moreOpen && (
-            <div className="moremenu" role="menu" aria-label="More pages">
-              {visibleMore.map((item) => {
-                const label = item.id === 'approvals' && entryOnly ? 'My wallet' : item.label;
-                return (
-                  <button key={item.id} className="moreitem" role="menuitem"
-                    aria-current={!focus && view === item.id ? 'page' : undefined} onClick={() => go(item.id)}>
-                    <span>{label}</span>
-                    {item.id === 'attention' && attention.total > 0 && (
-                      <span className="navbadge inline">{attention.total > 99 ? '99+' : attention.total}</span>
-                    )}
+            <>
+              <button type="button" className="morebackdrop" onClick={() => setMoreOpen(false)} aria-label="Close More" />
+              <section className="moremenu" role="dialog" aria-modal="true" aria-label="More pages and settings">
+                <header className="moremenu-head">
+                  <span className="moremenu-head-copy">
+                    <b>More</b>
+                    <span>Pages and settings</span>
+                  </span>
+                  <button type="button" className="moremenu-close" onClick={() => setMoreOpen(false)} aria-label="Close More">×</button>
+                </header>
+
+                <div className="moremenu-pages">
+                  {visibleMore.map((item) => {
+                    const label = item.id === 'approvals' && entryOnly ? 'My wallet' : item.label;
+                    return (
+                      <button key={item.id} className="moreitem"
+                        aria-current={!focus && view === item.id ? 'page' : undefined}
+                        onPointerDown={() => { const pending = loadViewModule(item.id); if (pending) void pending; }}
+                        onClick={() => go(item.id)}>
+                        <span className="moreitem-main">
+                          <svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.icon} /></svg>
+                          <span>{label}</span>
+                        </span>
+                        {item.id === 'attention' && attention.total > 0 && (
+                          <span className="navbadge inline">{attention.total > 99 ? '99+' : attention.total}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="moremobile">
+                  <span className="moremobile-title">Settings</span>
+                  <div className="morelanguage">
+                    <span className="moretool-label">Language</span>
+                    <LanguageControl compact />
+                  </div>
+                  <button type="button" className="moreutility" onClick={flipTheme}>
+                    <span>Appearance</span>
+                    <strong>Light / dark</strong>
                   </button>
-                );
-              })}
-            </div>
+                  <div className="moreaccount">
+                    <span className="moreaccount-copy">
+                      <b>{entryOnly ? 'Entry user' : 'Account'}</b>
+                      <span>{me.user.email}</span>
+                    </span>
+                    <button type="button" className="more-signout" onClick={() => { void signOut(); }}>Sign out</button>
+                  </div>
+                </div>
+              </section>
+            </>
           )}
         </div>
 
         <div className="railfoot">
-          <span className="muted">{me.user.email}{me.user.role === 'entry' ? ' · can enter only' : ''}</span>
+          <span className="muted">{me.user.email}{entryOnly ? ' · can enter only' : ''}</span>
           <div className="language-desktop"><LanguageControl /></div>
-          <button className="linkbtn" onClick={async () => {
-            await api.logout(); lastUser.clear(); snapshot.save(null);
-            setMe({ user: null, needsFirstOwner: false });
-            setBook(null); setDashboard(null); setMissingReceiptCount(0); setSearchOpen(false);
-          }}>Sign out</button>
+          <button className="linkbtn" onClick={() => { void signOut(); }}>Sign out</button>
         </div>
       </nav>
 
@@ -369,7 +509,11 @@ export default function App() {
         {(!entryLanding || note) && (
           <main id="main-content" tabIndex={-1}>
             <div className="wrap">
-              {note && <div className={`note ${note.bad ? 'err' : 'ok'}`} role={note.bad ? 'alert' : 'status'} aria-live="polite">{note.text}</div>}
+              {note && (
+                <div className={`note ${note.bad ? 'err' : 'ok'}`} role={note.bad ? 'alert' : 'status'} aria-live="polite">
+                  {note.text}
+                </div>
+              )}
 
               {!entryLanding && (
                 <>
@@ -380,36 +524,30 @@ export default function App() {
                     </div>
                   )}
 
-                  {focus
-                    ? <Statement book={book} focus={focus} back={() => setFocus(null)} run={run} />
-                    : view === 'today' ? <Today book={book} open={open} goto={go} attentionCount={attention.total} />
-                    : view === 'money' ? <Money book={book} open={open} />
-                    : view === 'projects' ? <Projects book={book} open={open} reload={reload} />
-                    : view === 'people' ? <People book={book} open={open} />
-                    : view === 'attention' ? <Attention
-                        book={book}
-                        dashboard={dashboard}
-                        role={me.user.role}
-                        open={open}
-                        goto={go}
-                        refresh={refreshAll}
-                        say={say}
-                        onMissingCount={setMissingReceiptCount}
-                      />
-                    : view === 'report' ? <Report book={book} run={run} />
-                    : view === 'files' ? <Files book={book} />
-                    : view === 'history' ? <History book={book} />
-                    : view === 'access' ? <Access me={me.user!} say={say} />
-                    : view === 'approvals' ? <Approvals me={me.user!} say={say} />
-                    : <Setup book={book} run={run} />}
-
-                  <div className="lookrow">
-                    <span className="lab">Look</span>
-                    {LOOKS.map(([id, label], i) => (
-                      <button key={id} className="tab" aria-pressed={look === i} onClick={() => setLook(i)}>{label}</button>
-                    ))}
-                    <button className="tab" onClick={flipTheme}>Light / dark</button>
-                  </div>
+                  <Suspense fallback={<ViewLoading />}>
+                    {focus
+                      ? <Statement book={book} focus={focus} back={() => setFocus(null)} run={run} />
+                      : view === 'today' ? <Today book={book} open={open} goto={go} attentionCount={attention.total} />
+                      : view === 'money' ? <Money book={book} open={open} />
+                      : view === 'projects' ? <Projects book={book} open={open} />
+                      : view === 'people' ? <People book={book} open={open} />
+                      : view === 'attention' ? <Attention
+                          book={book}
+                          dashboard={dashboard}
+                          role={me.user.role}
+                          open={open}
+                          goto={go}
+                          refresh={refreshAll}
+                          say={say}
+                          onMissingCount={setMissingReceiptCount}
+                        />
+                      : view === 'report' ? <Report book={book} run={run} />
+                      : view === 'files' ? <Files book={book} />
+                      : view === 'history' ? <History book={book} />
+                      : view === 'access' ? <Access me={me.user} say={say} />
+                      : view === 'approvals' ? <Approvals me={me.user} say={say} />
+                      : <Setup book={book} run={run} />}
+                  </Suspense>
                 </>
               )}
             </div>
@@ -417,22 +555,19 @@ export default function App() {
         )}
       </div>
 
-      <GlobalSearch
-        open={searchOpen}
-        onOpen={() => setSearchOpen(true)}
-        onClose={() => setSearchOpen(false)}
-        book={book}
-        dashboard={dashboard}
-        owner={!entryOnly}
-        onChoose={handleSearchAction}
-      />
-
-      <div className="toggles">
-        <button className="toggle" onClick={() => setLook((look + 1) % LOOKS.length)}>
-          Look · {LOOKS[look][1]}
-        </button>
-        <button className="toggle" onClick={flipTheme}>Theme</button>
-      </div>
+      {searchOpen && (
+        <Suspense fallback={null}>
+          <GlobalSearch
+            open
+            onOpen={openSearch}
+            onClose={() => setSearchOpen(false)}
+            book={book}
+            dashboard={dashboard}
+            owner={!entryOnly}
+            onChoose={handleSearchAction}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
