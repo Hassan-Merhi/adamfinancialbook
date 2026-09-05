@@ -61,6 +61,36 @@ export interface PendingTransferSave {
 }
 export type EntrySaveResult = Entry | PendingTransferSave;
 
+export interface EvidenceFile {
+  id: string;
+  filename: string;
+  mime_type: string;
+  byte_size: number;
+  created_at: string;
+}
+
+export interface EvidenceApproval {
+  id: string;
+  request_text: string;
+  amount: number | null;
+  status: 'pending' | 'approved' | 'rejected';
+  requester_email?: string;
+  account_name?: string;
+  created_at: string;
+}
+
+export interface EvidenceActivity {
+  id: string;
+  actor_email?: string;
+  account_name?: string;
+}
+
+export interface EvidenceDashboard {
+  mode: 'owner' | 'entry';
+  approvals: EvidenceApproval[];
+  recentActivity: EvidenceActivity[];
+}
+
 /**
  * The prompt uses the ordinary entry endpoint for every transaction. When the
  * destination is a delegated wallet, the server intentionally refuses a direct
@@ -89,6 +119,13 @@ async function addEntry(input: EntryInput): Promise<EntrySaveResult> {
   }
 }
 
+function evidenceQuery(entryId?: string, requestId?: string) {
+  const params = new URLSearchParams();
+  if (entryId) params.set('entryId', entryId);
+  if (requestId) params.set('requestId', requestId);
+  return send<{ files: EvidenceFile[] }>(`/delegation/attachments?${params.toString()}`, 'GET');
+}
+
 export const api = {
   me: () => send<Me>('/me', 'GET'),
   login: (email: string, password: string) => send<Me>('/login', 'POST', { email, password }),
@@ -115,4 +152,8 @@ export const api = {
   setRole: (id: string, role: string) => send(`/users/${id}/role`, 'POST', { role }),
   removeUser: (id: string) => send(`/users/${id}`, 'DELETE'),
   changePassword: (current: string, next: string) => send('/password', 'POST', { current, next }),
+  evidenceDashboard: () => send<EvidenceDashboard>('/delegation/dashboard', 'GET'),
+  evidenceForEntry: (entryId: string) => evidenceQuery(entryId, undefined),
+  evidenceForRequest: (requestId: string) => evidenceQuery(undefined, requestId),
+  evidenceUrl: (id: string) => `/api/delegation/attachments/${encodeURIComponent(id)}`,
 };

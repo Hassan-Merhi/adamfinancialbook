@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import './delegation';
 
 // Installed to the home screen, the app must still open with no signal.
 // This lives here rather than inline in the page: the Content-Security-Policy
