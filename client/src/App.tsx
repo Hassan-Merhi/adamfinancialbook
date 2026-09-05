@@ -153,6 +153,9 @@ export default function App() {
   }
 
   const empty = book.businesses.length === 0;
+  const entryOnly = me.user.role === 'entry';
+  const entryLanding = entryOnly && view === 'today' && !focus;
+  const showPrompt = !entryOnly || view === 'today';
 
   return (
     <div className="shell">
@@ -184,53 +187,62 @@ export default function App() {
         </div>
       </nav>
 
-      {/* The box you type in and the views are one column: on a desktop the box
-          sits at the top of it, on a phone it drops to the bottom, by your thumb. */}
+      {/* Owners keep the fast-entry box on every view. Entry-only users get one
+          dedicated Today landing page for the prompt, so pages they are allowed
+          to open stay focused on that page's own content. */}
       <div className="content">
-        <div className="dockable">
-          {(offline || waiting > 0) && (
-            <div className="note docknote">
-              {offline ? 'No signal — these are the figures from the last time the book loaded. ' : ''}
-              {waiting > 0
-                ? `${waiting} ${waiting === 1 ? 'entry is' : 'entries are'} waiting to be sent, and will go the moment there is a network.`
-                : 'Anything you log now will be sent when you are back.'}
-            </div>
-          )}
-          <Entry book={book} reload={reload} say={say} onQueued={() => setWaiting(outbox.all().length)} />
-        </div>
-
-        <main>
-          <div className="wrap">
-            {note && <div className={`note ${note.bad ? 'err' : 'ok'}`}>{note.text}</div>}
-
-            {empty && view === 'today' && !focus && (
-              <div className="note">
-                The book is empty. Say <b>create a business called …</b> in the box, then
-                <b> add account … under … with $…</b> — opening balances go in as you create each one.
+        {showPrompt && (
+          <div className="dockable">
+            {(offline || waiting > 0) && (
+              <div className="note docknote">
+                {offline ? 'No signal — these are the figures from the last time the book loaded. ' : ''}
+                {waiting > 0
+                  ? `${waiting} ${waiting === 1 ? 'entry is' : 'entries are'} waiting to be sent, and will go the moment there is a network.`
+                  : 'Anything you log now will be sent when you are back.'}
               </div>
             )}
-
-            {focus
-              ? <Statement book={book} focus={focus} back={() => setFocus(null)} run={run} />
-              : view === 'today' ? <Today book={book} open={open} goto={go} />
-              : view === 'money' ? <Money book={book} open={open} />
-              : view === 'projects' ? <Projects book={book} open={open} />
-              : view === 'people' ? <People book={book} open={open} />
-              : view === 'report' ? <Report book={book} run={run} />
-              : view === 'history' ? <History book={book} />
-              : view === 'access' ? <Access me={me.user!} say={say} />
-              : <Setup book={book} run={run} />}
-
-            {/* the same two switches as the toggles, for a screen with no room for them */}
-            <div className="lookrow">
-              <span className="lab">Look</span>
-              {LOOKS.map(([id, label], i) => (
-                <button key={id} className="tab" aria-pressed={look === i} onClick={() => setLook(i)}>{label}</button>
-              ))}
-              <button className="tab" onClick={flipTheme}>Light / dark</button>
-            </div>
+            <Entry book={book} reload={reload} say={say} onQueued={() => setWaiting(outbox.all().length)} />
           </div>
-        </main>
+        )}
+
+        {(!entryLanding || note) && (
+          <main>
+            <div className="wrap">
+              {note && <div className={`note ${note.bad ? 'err' : 'ok'}`}>{note.text}</div>}
+
+              {!entryLanding && (
+                <>
+                  {empty && view === 'today' && !focus && (
+                    <div className="note">
+                      The book is empty. Say <b>create a business called …</b> in the box, then
+                      <b> add account … under … with $…</b> — opening balances go in as you create each one.
+                    </div>
+                  )}
+
+                  {focus
+                    ? <Statement book={book} focus={focus} back={() => setFocus(null)} run={run} />
+                    : view === 'today' ? <Today book={book} open={open} goto={go} />
+                    : view === 'money' ? <Money book={book} open={open} />
+                    : view === 'projects' ? <Projects book={book} open={open} />
+                    : view === 'people' ? <People book={book} open={open} />
+                    : view === 'report' ? <Report book={book} run={run} />
+                    : view === 'history' ? <History book={book} />
+                    : view === 'access' ? <Access me={me.user!} say={say} />
+                    : <Setup book={book} run={run} />}
+
+                  {/* the same two switches as the toggles, for a screen with no room for them */}
+                  <div className="lookrow">
+                    <span className="lab">Look</span>
+                    {LOOKS.map(([id, label], i) => (
+                      <button key={id} className="tab" aria-pressed={look === i} onClick={() => setLook(i)}>{label}</button>
+                    ))}
+                    <button className="tab" onClick={flipTheme}>Light / dark</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </main>
+        )}
       </div>
 
       <div className="toggles">
