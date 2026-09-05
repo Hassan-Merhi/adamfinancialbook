@@ -4,24 +4,13 @@
  * Say what happened in the box at the top; everything below is the answer to
  * "where do I stand". Any figure opens into the entries behind it.
  */
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { api, NotSignedIn, type EvidenceDashboard, type LoadedBook, type Me } from './api';
 import SignIn from './views/SignIn';
 import { flushOutbox, lastUser, looksOffline, outbox, snapshot } from './offline';
 import Entry from './Entry';
 import Today from './views/Today';
-import Money from './views/Money';
-import Projects from './views/Projects';
-import People from './views/People';
-import Attention from './views/Attention';
-import Report from './views/Report';
-import Setup from './views/Setup';
-import History from './views/History';
-import Access from './views/Access';
-import Files from './views/Files';
-import Approvals from './views/Approvals';
-import Statement, { type Focus } from './views/Statement';
-import GlobalSearch from './GlobalSearch';
+import type { Focus } from './views/Statement';
 import LanguageControl from './LanguageControl';
 import LoadingSkeleton from './LoadingSkeleton';
 import { attentionCounts } from './attention';
@@ -33,9 +22,42 @@ import './navigation.css';
 import './ux6.css';
 import './mobile-core.css';
 import './daily-mobile.css';
+import './performance-mobile.css';
 
 type View = 'today' | 'money' | 'projects' | 'people' | 'attention' | 'report' | 'files' | 'history' | 'access' | 'setup' | 'approvals';
 type NavItem = { id: View; label: string; short: string; icon: string; ownerOnly?: boolean };
+
+/*
+ * Today + the prompt are the only signed-in experience needed for startup.
+ * Everything else is split into a route-sized chunk and fetched only when the
+ * user actually asks for it. Keeping the loader functions lets taps begin the
+ * download before React renders the Suspense boundary.
+ */
+const loadMoney = () => import('./views/Money');
+const loadProjects = () => import('./views/Projects');
+const loadPeople = () => import('./views/People');
+const loadAttention = () => import('./views/Attention');
+const loadReport = () => import('./views/Report');
+const loadSetup = () => import('./views/Setup');
+const loadHistory = () => import('./views/History');
+const loadAccess = () => import('./views/Access');
+const loadFiles = () => import('./views/Files');
+const loadApprovals = () => import('./views/Approvals');
+const loadStatement = () => import('./views/Statement');
+const loadGlobalSearch = () => import('./GlobalSearch');
+
+const Money = lazy(loadMoney);
+const Projects = lazy(loadProjects);
+const People = lazy(loadPeople);
+const Attention = lazy(loadAttention);
+const Report = lazy(loadReport);
+const Setup = lazy(loadSetup);
+const History = lazy(loadHistory);
+const Access = lazy(loadAccess);
+const Files = lazy(loadFiles);
+const Approvals = lazy(loadApprovals);
+const Statement = lazy(loadStatement);
+const GlobalSearch = lazy(loadGlobalSearch);
 
 const PRIMARY_NAV: NavItem[] = [
   { id: 'today', label: 'Today', short: 'Today', icon: 'M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
@@ -56,7 +78,36 @@ const MORE_NAV: NavItem[] = [
 
 const MORE_ICON = 'M5 12h.01M12 12h.01M19 12h.01';
 const SEARCH_ICON = 'm21 21-4.2-4.2M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4z';
-const DASHBOARD_REFRESH_MS = 45_000;
+const DASHBOARD_REFRESH_DESKTOP_MS = 60_000;
+const DASHBOARD_REFRESH_MOBILE_MS = 120_000;
+const DASHBOARD_WAKE_DELAY_MS = 850;
+const DASHBOARD_DEDUPE_MS = 10_000;
+
+function loadViewModule(view: View): Promise<unknown> | null {
+  switch (view) {
+    case 'money': return loadMoney();
+    case 'projects': return loadProjects();
+    case 'people': return loadPeople();
+    case 'attention': return loadAttention();
+    case 'report': return loadReport();
+    case 'files': return loadFiles();
+    case 'history': return loadHistory();
+    case 'access': return loadAccess();
+    case 'setup': return loadSetup();
+    case 'approvals': return loadApprovals();
+    default: return null;
+  }
+}
+
+function ViewLoading() {
+  return (
+    <div className="view-loading" role="status" aria-live="polite" aria-label="Loading page">
+      <span className="view-loading-title" />
+      <span className="view-loading-block" />
+      <span className="view-loading-block short" />
+    </div>
+  );
+}
 
 export default function App() {
   const [me, setMe] = useState<Me | null>(null);
@@ -70,6 +121,8 @@ export default function App() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [missingReceiptCount, setMissingReceiptCount] = useState(0);
+  const dashboardRefreshing = useRef(false);
+  const lastDashboardRefresh = useRef(0);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-vibe', 'assistant');
@@ -87,6 +140,18 @@ export default function App() {
     window.addEventListener('keydown', close);
     return () => window.removeEventListener('keydown', close);
   }, [moreOpen]);
+
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        void loadGlobalSearch();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener('keydown', shortcut);
+    return () => window.removeEventListener('keydown', shortcut);
+  }, []);
 
   const flipTheme = () => {
     const now = document.documentElement.getAttribute('data-theme');
@@ -117,12 +182,18 @@ export default function App() {
     }
   };
 
-  const refreshDashboard = async () => {
+  const refreshDashboard = async (force = false) => {
     if (!me?.user || !navigator.onLine || document.visibilityState === 'hidden') return;
+    const now = Date.now();
+    if (dashboardRefreshing.current || (!force && now - lastDashboardRefresh.current < DASHBOARD_DEDUPE_MS)) return;
+    dashboardRefreshing.current = true;
     try {
       setDashboard(await api.evidenceDashboard());
+      lastDashboardRefresh.current = Date.now();
     } catch {
       /* Keep the last attention snapshot while offline or temporarily unavailable. */
+    } finally {
+      dashboardRefreshing.current = false;
     }
   };
 
@@ -166,7 +237,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    const online = () => { setOffline(false); void flush(); void refreshDashboard(); };
+    const online = () => { setOffline(false); void flush(); void refreshDashboard(true); };
     const gone = () => setOffline(true);
     window.addEventListener('online', online);
     window.addEventListener('offline', gone);
@@ -184,14 +255,19 @@ export default function App() {
       return;
     }
     let timer: number | null = null;
+    let wakeTimer: number | null = null;
+    const mobile = window.matchMedia('(max-width: 760px)').matches;
+    const refreshMs = mobile ? DASHBOARD_REFRESH_MOBILE_MS : DASHBOARD_REFRESH_DESKTOP_MS;
     const stopTimer = () => {
       if (timer !== null) window.clearInterval(timer);
+      if (wakeTimer !== null) window.clearTimeout(wakeTimer);
       timer = null;
+      wakeTimer = null;
     };
     const startTimer = () => {
-      stopTimer();
+      if (timer !== null) window.clearInterval(timer);
       if (document.visibilityState === 'visible') {
-        timer = window.setInterval(() => { void refreshDashboard(); }, DASHBOARD_REFRESH_MS);
+        timer = window.setInterval(() => { void refreshDashboard(); }, refreshMs);
       }
     };
     const resume = () => {
@@ -199,7 +275,8 @@ export default function App() {
         stopTimer();
         return;
       }
-      void refreshDashboard();
+      if (wakeTimer !== null) window.clearTimeout(wakeTimer);
+      wakeTimer = window.setTimeout(() => { void refreshDashboard(); }, DASHBOARD_WAKE_DELAY_MS);
       startTimer();
     };
     resume();
@@ -222,7 +299,7 @@ export default function App() {
     }
   };
 
-  const refreshAll = async () => { await Promise.all([reload(), refreshDashboard()]); };
+  const refreshAll = async () => { await Promise.all([reload(), refreshDashboard(true)]); };
   const signOut = async () => {
     await api.logout();
     lastUser.clear();
@@ -235,16 +312,24 @@ export default function App() {
     setSearchOpen(false);
   };
   const go = (next: View) => {
+    const pending = loadViewModule(next);
+    if (pending) void pending;
+    if (next === 'attention' || next === 'approvals') void refreshDashboard(true);
     setView(next);
     setFocus(null);
     setNote(null);
     setMoreOpen(false);
   };
   const open = (nextFocus: Focus) => {
+    void loadStatement();
     setFocus(nextFocus);
     setNote(null);
     setMoreOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+  const openSearch = () => {
+    void loadGlobalSearch();
+    setSearchOpen(true);
   };
 
   if (!me) return <LoadingSkeleton />;
@@ -301,7 +386,7 @@ export default function App() {
       <header className="topbar">
         <b>Financial Book</b>
         <div className="topbar-search-wrap">
-          <button className="search-trigger mobile" onClick={() => setSearchOpen(true)} aria-label="Search">
+          <button className="search-trigger mobile" onClick={openSearch} aria-label="Search">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SEARCH_ICON} /></svg>
             <span>Search</span>
           </button>
@@ -312,7 +397,7 @@ export default function App() {
         <div className="brand">
           <b>Financial Book</b>
           <span>{money(book.balances.totalCash)} on hand</span>
-          <button className="search-trigger desktop" onClick={() => setSearchOpen(true)} aria-label="Search everything">
+          <button className="search-trigger desktop" onClick={openSearch} aria-label="Search everything">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SEARCH_ICON} /></svg>
             <span>Search everything</span>
             <kbd>⌘K</kbd>
@@ -321,6 +406,7 @@ export default function App() {
 
         {PRIMARY_NAV.map((item) => (
           <button key={item.id} className="navbtn" aria-current={!focus && view === item.id ? 'page' : undefined}
+            onPointerDown={() => { const pending = loadViewModule(item.id); if (pending) void pending; }}
             onClick={() => go(item.id)} aria-label={item.label}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.icon} /></svg>
             <span className="long">{item.label}</span>
@@ -360,6 +446,7 @@ export default function App() {
                     return (
                       <button key={item.id} className="moreitem"
                         aria-current={!focus && view === item.id ? 'page' : undefined}
+                        onPointerDown={() => { const pending = loadViewModule(item.id); if (pending) void pending; }}
                         onClick={() => go(item.id)}>
                         <span className="moreitem-main">
                           <svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.icon} /></svg>
@@ -437,28 +524,30 @@ export default function App() {
                     </div>
                   )}
 
-                  {focus
-                    ? <Statement book={book} focus={focus} back={() => setFocus(null)} run={run} />
-                    : view === 'today' ? <Today book={book} open={open} goto={go} attentionCount={attention.total} />
-                    : view === 'money' ? <Money book={book} open={open} />
-                    : view === 'projects' ? <Projects book={book} open={open} />
-                    : view === 'people' ? <People book={book} open={open} />
-                    : view === 'attention' ? <Attention
-                        book={book}
-                        dashboard={dashboard}
-                        role={me.user.role}
-                        open={open}
-                        goto={go}
-                        refresh={refreshAll}
-                        say={say}
-                        onMissingCount={setMissingReceiptCount}
-                      />
-                    : view === 'report' ? <Report book={book} run={run} />
-                    : view === 'files' ? <Files book={book} />
-                    : view === 'history' ? <History book={book} />
-                    : view === 'access' ? <Access me={me.user} say={say} />
-                    : view === 'approvals' ? <Approvals me={me.user} say={say} />
-                    : <Setup book={book} run={run} />}
+                  <Suspense fallback={<ViewLoading />}>
+                    {focus
+                      ? <Statement book={book} focus={focus} back={() => setFocus(null)} run={run} />
+                      : view === 'today' ? <Today book={book} open={open} goto={go} attentionCount={attention.total} />
+                      : view === 'money' ? <Money book={book} open={open} />
+                      : view === 'projects' ? <Projects book={book} open={open} />
+                      : view === 'people' ? <People book={book} open={open} />
+                      : view === 'attention' ? <Attention
+                          book={book}
+                          dashboard={dashboard}
+                          role={me.user.role}
+                          open={open}
+                          goto={go}
+                          refresh={refreshAll}
+                          say={say}
+                          onMissingCount={setMissingReceiptCount}
+                        />
+                      : view === 'report' ? <Report book={book} run={run} />
+                      : view === 'files' ? <Files book={book} />
+                      : view === 'history' ? <History book={book} />
+                      : view === 'access' ? <Access me={me.user} say={say} />
+                      : view === 'approvals' ? <Approvals me={me.user} say={say} />
+                      : <Setup book={book} run={run} />}
+                  </Suspense>
                 </>
               )}
             </div>
@@ -466,15 +555,19 @@ export default function App() {
         )}
       </div>
 
-      <GlobalSearch
-        open={searchOpen}
-        onOpen={() => setSearchOpen(true)}
-        onClose={() => setSearchOpen(false)}
-        book={book}
-        dashboard={dashboard}
-        owner={!entryOnly}
-        onChoose={handleSearchAction}
-      />
+      {searchOpen && (
+        <Suspense fallback={null}>
+          <GlobalSearch
+            open
+            onOpen={openSearch}
+            onClose={() => setSearchOpen(false)}
+            book={book}
+            dashboard={dashboard}
+            owner={!entryOnly}
+            onChoose={handleSearchAction}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
