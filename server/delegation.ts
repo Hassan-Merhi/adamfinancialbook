@@ -511,8 +511,26 @@ router.post('/delegation/approvals/:id/decision', wrap(async (req, res) => {
 /* Receipt and evidence storage.                                               */
 /* -------------------------------------------------------------------------- */
 
+type AttachmentMime = 'image/jpeg' | 'image/png' | 'image/webp' | 'application/pdf';
+
+function sniffAttachmentMime(data: Buffer): AttachmentMime | null {
+  if (data.length >= 5 && data.subarray(0, 5).toString('ascii') === '%PDF-') return 'application/pdf';
+  if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return 'image/jpeg';
+  if (
+    data.length >= 8
+    && data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47
+    && data[4] === 0x0d && data[5] === 0x0a && data[6] === 0x1a && data[7] === 0x0a
+  ) return 'image/png';
+  if (
+    data.length >= 12
+    && data.subarray(0, 4).toString('ascii') === 'RIFF'
+    && data.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) return 'image/webp';
+  return null;
+}
+
 const imageBody = express.raw({
-  type: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
+  type: () => true,
   limit: '6mb',
 });
 
@@ -533,12 +551,7 @@ router.post('/delegation/attachments', imageBody, wrap(async (req, res) => {
   const data = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
   if (!data.length) return res.status(400).json({ error: 'Choose a receipt or photo first.' });
 
-  const requestedMime = req.get('content-type');
-  const mime = requestedMime === 'image/jpeg' ? 'image/jpeg'
-    : requestedMime === 'image/png' ? 'image/png'
-    : requestedMime === 'image/webp' ? 'image/webp'
-    : requestedMime === 'application/pdf' ? 'application/pdf'
-    : null;
+  const mime = sniffAttachmentMime(data);
   if (!mime) return res.status(415).json({ error: 'Use a JPG, PNG, WebP or PDF.' });
 
   const id = newId('att');
