@@ -25,6 +25,9 @@ CREATE INDEX IF NOT EXISTS entries_created_by_recent_idx
   ON entries (created_by, created_at DESC, id DESC)
   WHERE created_by IS NOT NULL;
 
+CREATE INDEX IF NOT EXISTS entries_search_idx
+  ON entries USING GIN (to_tsvector('simple', COALESCE(purpose,'') || ' ' || COALESCE(raw,'')));
+
 CREATE INDEX IF NOT EXISTS effects_active_target_entry_idx
   ON effects (type, target_id, entry_id)
   WHERE active = true AND target_id IS NOT NULL;
