@@ -131,11 +131,15 @@ describe.skipIf(!DATABASE_URL)('real PostgreSQL API', () => {
   }, 15_000);
 
   it('migrates legacy schema, protects mutations, and bootstraps one owner', async () => {
-    expect((await db<{ version: string }>('SELECT version FROM schema_migrations')).map((x) => Number(x.version))).toEqual([1]);
+    expect((await db<{ version: string }>('SELECT version FROM schema_migrations ORDER BY version')).map((x) => Number(x.version))).toEqual([1, 2]);
     const columns = (await db<{ column_name: string }>(
       `SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='users'`,
     )).map((x) => x.column_name);
     expect(columns).toEqual(expect.arrayContaining(['language', 'token_version']));
+    const entryColumns = (await db<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='entries'`,
+    )).map((x) => x.column_name);
+    expect(entryColumns).toEqual(expect.arrayContaining(['review_category', 'reviewed_by', 'reviewed_at']));
     expect((await request('/api/book')).response.status).toBe(401);
     expect((await request('/api/me')).data.needsFirstOwner).toBe(true);
 
@@ -155,7 +159,7 @@ describe.skipIf(!DATABASE_URL)('real PostgreSQL API', () => {
     expect(noCsrfHeader.response.status).toBe(403);
   });
 
-  it('enforces delegated wallets, confirmed handoffs, funds limits, and idempotency', async () => {
+  it('enforces delegated wallets, confirmed handoffs, funds limits, idempotency, and owner assignment', async () => {
     alpha = (await request('/api/businesses', { method: 'POST', session: owner, body: { name: 'Alpha Construction' } })).data.id;
     beta = (await request('/api/businesses', { method: 'POST', session: owner, body: { name: 'Beta Trading' } })).data.id;
     ownerCash = (await request('/api/accounts', {
@@ -265,6 +269,40 @@ describe.skipIf(!DATABASE_URL)('real PostgreSQL API', () => {
     expect((await request('/api/entries', {
       method: 'POST', session: delegate, body: { ...spend, accountId: ownerCash, amount: 1, clientRef: 'phase3-hidden' },
     })).response.status).toBe(403);
+
+    const queue = await request('/api/delegation/expense-reviews', { session: owner });
+    expect(queue.response.status).toBe(200);
+    expect(queue.data.items.map((item: any) => item.id)).toContain(delegatedEntry);
+    expect((await request('/api/delegation/expense-reviews', { session: delegate })).data.items).toEqual([]);
+
+    const beforeAssign = await request('/api/book', { session: owner });
+    const assigned = await request('/api/delegation/expense-reviews/assign', {
+      method: 'POST', session: owner,
+      body: { entryIds: [delegatedEntry], businessId: alpha, projectId: project, category: 'Materials' },
+    });
+    expect(assigned.response.status).toBe(200);
+    expect(assigned.data.count).toBe(1);
+
+    const afterAssign = await request('/api/book', { session: owner });
+    expect(afterAssign.data.balances.accounts[wallet]).toBe(beforeAssign.data.balances.accounts[wallet]);
+    const reviewed = afterAssign.data.entries.find((entry: any) => entry.id === delegatedEntry);
+    expect(reviewed.projectId).toBe(project);
+    expect(reviewed.forBusiness).toBe(alpha);
+    expect(reviewed.effects.filter((effect: any) => effect.type === 'account')).toHaveLength(1);
+    expect(reviewed.effects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'account', targetId: wallet, delta: -100 }),
+      expect.objectContaining({ type: 'cost', targetId: project, delta: 100 }),
+    ]));
+    const reviewRow = (await db<{ review_category: string; reviewed_at: Date | null }>(
+      'SELECT review_category, reviewed_at FROM entries WHERE id = $1', [delegatedEntry],
+    ))[0];
+    expect(reviewRow.review_category).toBe('Materials');
+    expect(reviewRow.reviewed_at).not.toBeNull();
+    expect((await request('/api/delegation/expense-reviews', { session: owner })).data.items).toHaveLength(0);
+    expect((await request('/api/delegation/expense-reviews/assign', {
+      method: 'POST', session: owner,
+      body: { entryIds: [delegatedEntry], businessId: alpha, projectId: project, category: 'Again' },
+    })).response.status).toBe(409);
   });
 
   it('covers approvals, evidence privacy, language persistence, and session revocation', async () => {
@@ -404,6 +442,7 @@ describe.skipIf(!DATABASE_URL)('real PostgreSQL API', () => {
       'delegated transfer confirmed',
       'delegated transfer rejected',
       'delegated expense logged',
+      'delegated expense assigned',
       'approval approved',
       'approval rejected',
       'evidence attached',

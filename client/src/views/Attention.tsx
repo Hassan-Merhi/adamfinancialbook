@@ -3,6 +3,7 @@ import { api, type EvidenceActivity, type EvidenceDashboard, type LoadedBook } f
 import { receiptsNotInCash } from '../../../shared/engine';
 import { Card, Empty, money, shortDate } from '../ui';
 import type { Focus } from './Statement';
+import ExpenseReviewQueue from './ExpenseReviewQueue';
 import './Attention.css';
 
 const RECEIPT_BATCH = 30;
@@ -26,6 +27,7 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
 
   const pendingApprovals = dashboard?.approvals.filter((item) => item.status === 'pending') ?? [];
   const transfers = dashboard?.pendingTransfers ?? [];
+  const expenseReviews = dashboard?.expenseReviews ?? [];
   const reminders = book.reminders.filter((item) => !item.settled);
   const receiptsWaiting = book.projects.flatMap((project) => receiptsNotInCash(book, project.id));
   const unread = dashboard?.notifications.filter((item) => !item.read_at) ?? [];
@@ -89,7 +91,7 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
 
   useEffect(() => onMissingCount(missingEvidence.length), [missingEvidence.length, onMissingCount]);
 
-  const total = pendingApprovals.length + transfers.length + reminders.length + receiptsWaiting.length + missingEvidence.length;
+  const total = expenseReviews.length + pendingApprovals.length + transfers.length + reminders.length + receiptsWaiting.length + missingEvidence.length;
   const checkedEvidence = Math.min(evidenceLimit, allEvidenceCandidates.length);
   const hasOlderEvidence = checkedEvidence < allEvidenceCandidates.length;
 
@@ -145,7 +147,7 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
       <div className="dhead attention-head">
         <div>
           <h2>Needs attention</h2>
-          <p className="muted">One place for decisions, handoffs, missing proof, reminders, and money still in limbo.</p>
+          <p className="muted">One place for expense assignment, decisions, handoffs, missing proof, reminders, and money still in limbo.</p>
         </div>
         <button className="btn ghost small" disabled={busy === 'refresh'} onClick={() => void refreshHub()}>
           {busy === 'refresh' ? 'Refreshing…' : 'Refresh'}
@@ -154,6 +156,7 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
 
       <div className="attention-summary" aria-label="Attention summary">
         <Summary label="Open" value={total} strong />
+        <Summary label="To assign" value={expenseReviews.length} />
         <Summary label="Approvals" value={pendingApprovals.length} />
         <Summary label="Transfers" value={transfers.length} />
         <Summary label="Missing receipts" value={missingEvidence.length} loading={checkingEvidence} />
@@ -162,6 +165,10 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
 
       {total === 0 && !checkingEvidence && (
         <Card><div className="attention-clear"><b>All clear.</b><span>Nothing currently needs a decision or follow-up.</span></div></Card>
+      )}
+
+      {role === 'owner' && expenseReviews.length > 0 && (
+        <ExpenseReviewQueue items={expenseReviews} book={book} refresh={refresh} say={say} />
       )}
 
       {(pendingApprovals.length > 0 || dashboard === null) && (

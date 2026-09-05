@@ -2,6 +2,7 @@ import type { EvidenceDashboard, LoadedBook } from './api';
 import { receiptsNotInCash } from '../../shared/engine';
 
 export interface AttentionCounts {
+  reviews: number;
   approvals: number;
   transfers: number;
   reminders: number;
@@ -20,6 +21,7 @@ export function attentionCounts(
   dashboard: EvidenceDashboard | null,
   missingEvidence = 0,
 ): AttentionCounts {
+  const reviews = dashboard?.expenseReviews.length ?? 0;
   const approvals = dashboard?.approvals.filter((item) => item.status === 'pending').length ?? 0;
   const transfers = dashboard?.pendingTransfers.length ?? 0;
   const reminders = book.reminders.filter((item) => !item.settled).length;
@@ -29,11 +31,12 @@ export function attentionCounts(
   );
 
   return {
+    reviews,
     approvals,
     transfers,
     reminders,
     receiptsWaiting,
     missingEvidence,
-    total: approvals + transfers + reminders + receiptsWaiting + missingEvidence,
+    total: reviews + approvals + transfers + reminders + receiptsWaiting + missingEvidence,
   };
 }

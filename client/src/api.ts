@@ -128,6 +128,20 @@ export interface DelegationDelegate {
   accountIds: string[];
 }
 
+export interface DelegatedExpenseReview {
+  id: string;
+  occurred_on: string;
+  amount: number;
+  purpose: string;
+  raw: string;
+  account_id: string;
+  account_name: string;
+  payer_business_id: string;
+  payer_business_name: string;
+  actor_email: string;
+  created_at: string;
+}
+
 export interface EvidenceDashboard {
   mode: 'owner' | 'entry';
   accounts?: DelegationAccount[];
@@ -136,6 +150,7 @@ export interface EvidenceDashboard {
   pendingTransfers: EvidencePendingTransfer[];
   recentActivity: EvidenceActivity[];
   notifications: EvidenceNotification[];
+  expenseReviews: DelegatedExpenseReview[];
 }
 
 /**
@@ -190,6 +205,14 @@ async function uploadEvidence(entryId: string, file: File): Promise<void> {
   if (!res.ok) throw new Error(data?.error || `Upload failed (${res.status})`);
 }
 
+async function evidenceDashboard(): Promise<EvidenceDashboard> {
+  const [dashboard, reviewQueue] = await Promise.all([
+    send<Omit<EvidenceDashboard, 'expenseReviews'>>('/delegation/dashboard', 'GET'),
+    send<{ items: DelegatedExpenseReview[] }>('/delegation/expense-reviews', 'GET'),
+  ]);
+  return { ...dashboard, expenseReviews: reviewQueue.items };
+}
+
 export const api = {
   me: () => send<Me>('/me', 'GET'),
   login: (email: string, password: string) => send<Me>('/login', 'POST', { email, password }),
@@ -216,7 +239,7 @@ export const api = {
   setRole: (id: string, role: string) => send(`/users/${id}/role`, 'POST', { role }),
   removeUser: (id: string) => send(`/users/${id}`, 'DELETE'),
   changePassword: (current: string, next: string) => send('/password', 'POST', { current, next }),
-  evidenceDashboard: () => send<EvidenceDashboard>('/delegation/dashboard', 'GET'),
+  evidenceDashboard,
   setUserAccounts: (id: string, accountIds: string[]) =>
     send(`/delegation/users/${encodeURIComponent(id)}/accounts`, 'PUT', { accountIds }),
   evidenceForEntry: (entryId: string) => evidenceQuery(entryId, undefined),
@@ -226,6 +249,10 @@ export const api = {
   rejectTransfer: (id: string) => send(`/delegation/transfers/${id}/reject`, 'POST'),
   decideApproval: (id: string, status: 'approved' | 'rejected', note = '') =>
     send(`/delegation/approvals/${id}/decision`, 'POST', { status, note }),
+  assignExpenseReviews: (entryIds: string[], businessId: string, projectId: string | null, category = '') =>
+    send<{ ok: true; count: number }>('/delegation/expense-reviews/assign', 'POST', {
+      entryIds, businessId, projectId, category,
+    }),
   markNotificationRead: (id: string) => send(`/delegation/notifications/${id}/read`, 'POST'),
   markAllNotificationsRead: () => send('/delegation/notifications/read-all', 'POST'),
   evidenceUrl: (id: string) => `/api/delegation/attachments/${encodeURIComponent(id)}`,
