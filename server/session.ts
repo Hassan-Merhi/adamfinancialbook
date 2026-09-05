@@ -1,14 +1,39 @@
 /**
  * Passwords and the cookie that carries a session.
  *
- * Deliberately knows nothing about the database, so it can be tested on its own
- * and reasoned about without a book in front of you.
+ * Database-backed session state lives in security.ts. This file owns only the
+ * password primitive and the signed cookie format, so the crypto stays easy to
+ * test and reason about in isolation.
  */
-import { createHmac, randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
-import { promisify } from 'node:util';
+import {
+  createHmac,
+  randomBytes,
+  randomInt,
+  scrypt as scryptCb,
+  timingSafeEqual,
+  type ScryptOptions,
+} from 'node:crypto';
 
-const scrypt = promisify(scryptCb) as (secret: string, salt: Buffer, len: number) => Promise<Buffer>;
+const STRONG_SCRYPT: ScryptOptions = {
+  N: 1 << 17,
+  r: 8,
+  p: 1,
+  maxmem: 192 * 1024 * 1024,
+};
 
+function deriveScrypt(secret: string, salt: Buffer, len: number, options?: ScryptOptions): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const done = (error: Error | null, derivedKey: Buffer) => {
+      if (error) reject(error);
+      else resolve(derivedKey);
+    };
+    if (options) scryptCb(secret, salt, len, options, done);
+    else scryptCb(secret, salt, len, done);
+  });
+}
+
+// Kept for backward compatibility with pre-Phase-6 cookies. New sessions use a
+// role-specific lifetime from security.ts and always carry a persistent session id.
 const DAYS = 30;
 export const SESSION_DAYS = DAYS;
 
@@ -18,64 +43,104 @@ function secret(): string {
   return value;
 }
 
-/* ---------------- passwords ---------------- */
-
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
-  const key = await scrypt(password, salt, 64);
-  return `scrypt$${salt.toString('base64')}$${key.toString('base64')}`;
+  const key = await deriveScrypt(password, salt, 64, STRONG_SCRYPT);
+  return `scrypt-v2$${STRONG_SCRYPT.N}$${STRONG_SCRYPT.r}$${STRONG_SCRYPT.p}$${salt.toString('base64')}$${key.toString('base64')}`;
 }
 
 export async function checkPassword(password: string, stored: string): Promise<boolean> {
-  const [scheme, saltB64, keyB64] = stored.split('$');
-  if (scheme !== 'scrypt' || !saltB64 || !keyB64) return false;
-  const key = await scrypt(password, Buffer.from(saltB64, 'base64'), 64);
-  const expected = Buffer.from(keyB64, 'base64');
+  const parts = stored.split('$');
+  let key: Buffer;
+  let expected: Buffer;
+
+  if (parts[0] === 'scrypt-v2' && parts.length === 6) {
+    const [, nRaw, rRaw, pRaw, saltB64, keyB64] = parts;
+    const N = Number(nRaw);
+    const r = Number(rRaw);
+    const p = Number(pRaw);
+    if (!Number.isInteger(N) || N < (1 << 14) || N > (1 << 20)) return false;
+    if (!Number.isInteger(r) || r < 1 || r > 32) return false;
+    if (!Number.isInteger(p) || p < 1 || p > 16) return false;
+    key = await deriveScrypt(password, Buffer.from(saltB64, 'base64'), 64, {
+      N,
+      r,
+      p,
+      maxmem: Math.max(192 * 1024 * 1024, 128 * N * r + 32 * 1024 * 1024),
+    });
+    expected = Buffer.from(keyB64, 'base64');
+  } else if (parts[0] === 'scrypt' && parts.length === 3) {
+    // Legacy hashes used Node's historical defaults. Keep verification so
+    // existing users are not locked out; newly set passwords use scrypt-v2.
+    const [, saltB64, keyB64] = parts;
+    key = await deriveScrypt(password, Buffer.from(saltB64, 'base64'), 64);
+    expected = Buffer.from(keyB64, 'base64');
+  } else {
+    return false;
+  }
+
   return key.length === expected.length && timingSafeEqual(key, expected);
 }
 
-/** Long enough to be worth having, short enough that people will use it. */
 export function passwordComplaint(password: string): string | null {
-  if (password.length < 8) return 'A password needs at least 8 characters.';
+  if (password.length < 12) return 'A password needs at least 12 characters.';
   if (password.length > 200) return 'That password is too long.';
+  const classes = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((rule) => rule.test(password)).length;
+  if (password.length < 18 && classes < 3) {
+    return 'Use at least three of: lowercase, uppercase, numbers and symbols — or use an 18+ character passphrase.';
+  }
   return null;
 }
 
-/** Something you can read down the phone: no l, 1, O or 0 to argue about. */
 export function suggestPassword(): string {
-  const letters = 'abcdefghijkmnpqrstuvwxyz23456789';
-  const bytes = randomBytes(14);
-  return Array.from(bytes, (b) => letters[b % letters.length]).join('').replace(/(.{5})(.{5})/, '$1-$2-');
+  const letters = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const body = Array.from({ length: 14 }, () => letters[randomInt(letters.length)]).join('');
+  return `A7!${body.slice(0, 5)}-${body.slice(5, 10)}-${body.slice(10)}`;
 }
 
-/* ---------------- the cookie ---------------- */
-
-/**
- * The session carries the user, which version of their credentials it belongs
- * to, and when it dies — signed, so none of the three can be edited.
- *
- * The version is what makes "sign everyone else out" possible: change a
- * password and the number moves, and every cookie issued before it stops
- * working, wherever it is.
- */
-export function signSession(userId: string, version: number): string {
-  const expires = Date.now() + DAYS * 86_400_000;
-  const body = `${userId}.${version}.${expires}`;
+export function signSession(
+  userId: string,
+  version: number,
+  sessionId?: string,
+  expiresAtMs = Date.now() + DAYS * 86_400_000,
+): string {
+  const body = sessionId
+    ? `${userId}.${version}.${sessionId}.${expiresAtMs}`
+    : `${userId}.${version}.${expiresAtMs}`;
   return `${body}.${sign(body)}`;
 }
 
-export interface Session { userId: string; version: number }
+export interface Session {
+  userId: string;
+  version: number;
+  sessionId?: string;
+  expiresAt: number;
+}
 
 export function readSession(cookie: string | undefined): Session | null {
   if (!cookie) return null;
   const parts = cookie.split('.');
-  if (parts.length !== 4) return null;
-  const [userId, version, expires, mac] = parts;
-  const expected = sign(`${userId}.${version}.${expires}`);
-  if (mac.length !== expected.length) return null;
+  if (parts.length !== 4 && parts.length !== 5) return null;
+
+  const legacy = parts.length === 4;
+  const userId = parts[0];
+  const version = parts[1];
+  const sessionId = legacy ? undefined : parts[2];
+  const expires = legacy ? parts[2] : parts[3];
+  const mac = legacy ? parts[3] : parts[4];
+  const body = legacy
+    ? `${userId}.${version}.${expires}`
+    : `${userId}.${version}.${sessionId}.${expires}`;
+  const expected = sign(body);
+
+  if (!mac || mac.length !== expected.length) return null;
   if (!timingSafeEqual(Buffer.from(mac), Buffer.from(expected))) return null;
-  if (!Number.isFinite(Number(expires)) || Number(expires) < Date.now()) return null;
-  return { userId, version: Number(version) };
+  const expiresAt = Number(expires);
+  if (!Number.isFinite(expiresAt) || expiresAt < Date.now()) return null;
+  const parsedVersion = Number(version);
+  if (!Number.isInteger(parsedVersion) || parsedVersion < 0) return null;
+  if (!userId || (!legacy && !sessionId)) return null;
+  return { userId, version: parsedVersion, sessionId, expiresAt };
 }
 
 function sign(body: string): string {

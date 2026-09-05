@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { extname, join, relative } from 'node:path';
 
 const root = process.cwd();
@@ -51,9 +51,10 @@ async function walk(dir) {
     }
 
     if (!textExtensions.has(extname(entry.name).toLowerCase())) continue;
-    const info = await stat(absolute);
-    if (info.size > 1_000_000) continue;
+    // Read once and make all decisions from the bytes we actually scanned. This
+    // avoids a check-then-read race where a file could change between stat/read.
     const text = await readFile(absolute, 'utf8');
+    if (Buffer.byteLength(text, 'utf8') > 1_000_000) continue;
     for (const [label, pattern] of detectors) {
       if (pattern.test(text)) findings.push(`${repoPath}: possible ${label}`);
     }

@@ -12,28 +12,35 @@ export interface Balances {
 }
 export type LoadedBook = Book & { balances: Balances };
 
-/** Thrown when the session is gone, so the app can show the door rather than an error. */
+/** Thrown when an ordinary app request discovers that the session is gone. */
 export class NotSignedIn extends Error {
   constructor() { super('Sign in to open the book.'); }
+}
+
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
 }
 
 async function send<T>(path: string, method: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method,
-    // the cookie is the session; the header is what a cross-site form cannot send
     headers: { 'content-type': 'application/json', 'x-book': '1' },
     credentials: 'same-origin',
-    body: body ? JSON.stringify(body) : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
   const data = text ? safeParse(text) : null;
-  if (res.status === 401) throw new NotSignedIn();
+  const authAction = path === '/login' || path === '/security/reauth' || path === '/password';
+  if (res.status === 401 && !authAction) throw new NotSignedIn();
   if (!res.ok) {
-    // When the answer is not the app's own JSON, show the first words of what
-    // did answer — Express, a proxy and a service that is still starting all
-    // say 404 in their own words, and the words are what tell them apart.
     const said = data?.error ?? (text ? text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) : '');
-    throw new Error(said ? `${said} (${res.status})` : `Request failed (${res.status})`);
+    throw new ApiError(said || `Request failed (${res.status})`, res.status, data?.code);
   }
   return data as T;
 }
@@ -43,14 +50,43 @@ function safeParse(text: string) {
 }
 
 /** `email` is the legacy wire-field name; the product now presents it as username. */
-export interface Me { user: { id: string; email: string; role: 'owner' | 'entry' } | null; needsFirstOwner: boolean }
+export interface Me {
+  user: { id: string; email: string; role: 'owner' | 'entry'; language?: 'en' | 'fr' | 'ar' } | null;
+  needsFirstOwner: boolean;
+}
 
 export interface Keyholder {
   id: string;
   email: string;
   role: 'owner' | 'entry';
+  active: boolean;
   createdAt: string;
+  disabledAt: string | null;
+  mfaEnabled: boolean;
   lastSeen: string | null;
+}
+
+export interface SecuritySessionView {
+  id: string;
+  current: boolean;
+  createdAt: string;
+  authenticatedAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  userAgent: string;
+}
+
+export interface SecurityState {
+  mfaEnabled: boolean;
+  recentlyAuthenticated: boolean;
+  recentAuthExpiresAt: string | null;
+  sessions: SecuritySessionView[];
+}
+
+export interface MfaSetup {
+  secret: string;
+  uri: string;
 }
 
 export interface Reading { draft: Draft; source: 'claude' | 'rules'; duplicate: ProjectReceipt | null }
@@ -203,7 +239,7 @@ async function uploadEvidence(entryId: string, file: File): Promise<void> {
   const text = await res.text();
   const data = text ? safeParse(text) : null;
   if (res.status === 401) throw new NotSignedIn();
-  if (!res.ok) throw new Error(data?.error || `Upload failed (${res.status})`);
+  if (!res.ok) throw new ApiError(data?.error || `Upload failed (${res.status})`, res.status, data?.code);
 }
 
 async function evidenceDashboard(): Promise<EvidenceDashboard> {
@@ -216,7 +252,7 @@ async function evidenceDashboard(): Promise<EvidenceDashboard> {
 
 export const api = {
   me: () => send<Me>('/me', 'GET'),
-  login: (username: string, password: string) => send<Me>('/login', 'POST', { username, password }),
+  login: (username: string, password: string, totp?: string) => send<Me>('/login', 'POST', { username, password, totp }),
   firstOwner: (username: string, password: string) => send<Me>('/first-owner', 'POST', { username, password }),
   logout: () => send('/logout', 'POST'),
   book: () => send<LoadedBook>('/book', 'GET'),
@@ -240,7 +276,16 @@ export const api = {
   resetPassword: (id: string, password: string) => send(`/users/${id}/password`, 'POST', { password }),
   setRole: (id: string, role: string) => send(`/users/${id}/role`, 'POST', { role }),
   removeUser: (id: string) => send(`/users/${id}`, 'DELETE'),
+  restoreUser: (id: string) => send(`/users/${id}/restore`, 'POST'),
   changePassword: (current: string, next: string) => send('/password', 'POST', { current, next }),
+  security: () => send<SecurityState>('/security', 'GET'),
+  reauthenticate: (password: string, totp?: string) =>
+    send<{ ok: true; recentAuthSeconds: number }>('/security/reauth', 'POST', { password, totp }),
+  setupMfa: () => send<MfaSetup>('/security/mfa/setup', 'POST'),
+  enableMfa: (code: string) => send('/security/mfa/enable', 'POST', { code }),
+  disableMfa: (code: string) => send('/security/mfa/disable', 'POST', { code }),
+  revokeSession: (id: string) => send<{ ok: true; signedOut: boolean }>(`/security/sessions/${id}`, 'DELETE'),
+  revokeAllSessions: () => send<{ ok: true; count: number; signedOut: boolean }>('/security/sessions/revoke-all', 'POST'),
   resetBook: (password: string, confirmation: 'RESET') => send('/reset-book', 'POST', { password, confirmation }),
   evidenceDashboard,
   setUserAccounts: (id: string, accountIds: string[]) =>
