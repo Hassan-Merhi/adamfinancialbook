@@ -10,9 +10,10 @@ import { checkPassword, hashPassword, readCookie, readSession } from './session.
 
 export type Role = 'owner' | 'entry';
 export type UserLanguage = 'en' | 'fr' | 'ar';
-export interface User { id: string; email: string; role: Role; language: UserLanguage }
+export interface User { id: string; email: string; role: Role; language?: UserLanguage }
 
 export interface UserRow extends User {
+  language: UserLanguage;
   passwordHash: string;
   tokenVersion: number;
   createdAt: string;
