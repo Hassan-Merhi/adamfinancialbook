@@ -5,12 +5,17 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -37,11 +42,23 @@ jobs:
           --health-retries=5
     env:
       TEST_DATABASE_URL: postgres://book:book@127.0.0.1:5432/book_test
+      DATABASE_URL: postgres://book:book@127.0.0.1:5432/book_test
+      PGSSL: off
+      SESSION_SECRET: ci-only-session-secret-that-is-at-least-32-characters
+      NODE_ENV: test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Run migrations once
+        run: npm run db:migrate
+      - name: Prove migrations are idempotent
+        run: npm run db:migrate
+      - name: Verify migration status is clean
+        run: npm run db:status
       - run: npm run test:integration
