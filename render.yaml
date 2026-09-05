@@ -20,10 +20,8 @@ services:
         sync: false          # your Neon connection string (the pooled one)
       - key: SESSION_SECRET
         generateValue: true      # signs the login cookie; Render makes one
-      - key: GOOGLE_TRANSLATE_API_KEY
-        sync: false          # recommended: Cloud Translation API key for EN / FR / AR auto-translation
       - key: ANTHROPIC_API_KEY
-        sync: false          # optional: Claude reads sentences and is a translation fallback
+        sync: false          # optional: Claude reads sentences; desktop Chrome translation needs no key
       - key: NODE_VERSION
         value: "22"
 
