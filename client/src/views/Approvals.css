@@ -58,9 +58,6 @@
   line-height:1;
 }
 
-/* Match the language picker to the approvals launcher so both read as one
-   modern top-right control group. The extra html selector intentionally wins
-   over the provider's base styles. */
 html .language-switch {
   top:14px;
   right:16px;
@@ -177,25 +174,73 @@ html[dir="rtl"] .approval-launcher { right:auto; left:144px; }
 .approval-evidence a { color:inherit; text-decoration:underline; }
 
 @media (max-width:760px) {
-  .approval-launcher {
-    top:calc(8px + env(safe-area-inset-top));
-    right:10px;
-    left:auto;
-    min-height:34px;
-    padding:0 11px;
-    font-size:11.5px;
+  .approval-launcher,
+  html .language-switch { display:none !important; }
+
+  .approvals-head { align-items:flex-start; gap:8px; margin-bottom:10px; }
+  .approvals-head h2 { font-size:21px; }
+  .approvals-head p { margin-top:2px; font-size:11.5px; line-height:1.35; }
+  .approvals-head > .btn { flex:none; min-height:40px; padding-inline:11px; }
+
+  .approval-card-note { padding:0 12px 9px; font-size:11.5px; }
+  .approval-user-list { gap:8px; padding:0 8px 8px; }
+  .approval-user-card { padding:10px; border-radius:14px; }
+  .approval-user-head { gap:8px; }
+  .approval-avatar { width:32px; height:32px; flex-basis:32px; }
+  .approval-user-copy b { font-size:12.5px; }
+  .approval-user-copy small { font-size:10.5px; }
+  .approval-user-head .btn { min-height:40px; padding-inline:11px; }
+  .approval-checks {
+    grid-template-columns:1fr;
+    gap:6px;
+    margin-top:8px;
+    max-height:220px;
+    overflow:auto;
+    overscroll-behavior:contain;
   }
-  .approval-launcher::before { width:6px; height:6px; flex-basis:6px; }
-  html .language-switch {
-    top:calc(58px + env(safe-area-inset-top));
-    right:10px;
-    left:auto;
-    min-height:36px;
+  .approval-checks label { min-height:46px; padding:8px 10px; border-radius:12px; }
+  .approval-checks label input { width:19px; height:19px; }
+  .approval-checks label span { font-size:12.5px; }
+  .approval-checks label small { font-size:11px; }
+
+  .approval-row {
+    margin:7px 8px;
+    padding:11px;
+    align-items:flex-start;
+    flex-direction:row;
+    flex-wrap:wrap;
+    gap:7px 9px;
+    border:1px solid var(--line-soft);
+    border-radius:14px;
+    background:var(--sunk);
   }
-  html[dir="rtl"] .approval-launcher { right:auto; left:10px; }
-  html[dir="rtl"] .language-switch { right:auto; left:10px; }
-  .approval-row { align-items:flex-start; flex-direction:column; }
-  .approval-actions { justify-content:flex-start; }
-  .approval-balance { font-size:17px; }
-  .approval-checks { grid-template-columns:1fr; }
+  .approval-row:last-child { border-bottom:1px solid var(--line-soft); }
+  .approval-main { flex:1 1 calc(100% - 90px); }
+  .approval-main b { font-size:13.5px; line-height:1.3; }
+  .approval-main span { font-size:12px; line-height:1.35; }
+  .approval-main small { font-size:10.5px; line-height:1.35; overflow-wrap:anywhere; }
+  .approval-balance { margin-left:auto; font-size:15px; }
+  .approval-actions {
+    width:100%;
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:7px;
+    justify-content:stretch;
+  }
+  .approval-actions > .btn { width:100%; min-height:44px; }
+  .approval-actions > :only-child { grid-column:1 / -1; }
+  .approval-note { padding:2px 12px 11px; font-size:11px; }
+  .approval-toolbar { padding:8px 10px; }
+  .approval-toolbar .btn { width:100%; min-height:44px; }
+
+  .approval-form { padding:10px 12px; gap:9px; }
+  .approval-form textarea { min-height:88px; font-size:16px; }
+  .approval-file { width:100%; min-width:0; }
+  .approval-file input { width:100%; min-height:44px; }
+  .approval-file-btn { width:100%; min-height:44px; justify-content:center; }
+}
+
+@media (max-width:390px) {
+  .approval-actions { grid-template-columns:1fr; }
+  .approval-actions > * { grid-column:1 !important; }
 }

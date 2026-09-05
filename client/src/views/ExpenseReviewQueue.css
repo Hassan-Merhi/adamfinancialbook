@@ -94,11 +94,72 @@
 }
 
 @media (max-width:640px) {
-  .expense-review-note { align-items:flex-start; flex-direction:column; }
-  .expense-review-controls { grid-template-columns:1fr; }
-  .expense-review-commit { align-items:stretch; flex-direction:column; }
-  .expense-review-commit > span { max-width:none; text-align:left; }
-  .expense-review-commit .btn { width:100%; }
+  .expense-review-note {
+    margin:0 8px 8px;
+    padding:10px 11px;
+    align-items:flex-start;
+    flex-direction:column;
+    gap:2px;
+    border:0;
+    border-radius:13px;
+  }
+  .expense-review-note b { font-size:12.5px; }
+  .expense-review-note span { font-size:11px; line-height:1.35; }
+
+  .expense-review-controls {
+    grid-template-columns:1fr;
+    gap:8px;
+    padding:8px 10px 10px;
+    border-bottom:0;
+  }
+  .expense-review-controls label > span { margin-bottom:3px; font-size:9px; }
+  .expense-review-controls select,
+  .expense-review-controls input { min-height:46px; font-size:16px; }
+
+  .expense-review-commit {
+    margin-top:2px;
+    padding:8px;
+    align-items:stretch;
+    flex-direction:column;
+    gap:6px;
+    border:1px solid var(--line-soft);
+    border-radius:13px;
+    background:var(--sunk);
+  }
+  .expense-review-commit > span { max-width:none; text-align:left; font-size:11.5px; }
+  .expense-review-commit .btn { width:100%; min-height:46px; }
+
+  .expense-review-selectbar {
+    padding:8px 10px;
+    align-items:center;
+    flex-direction:row;
+    gap:8px;
+  }
+  .expense-review-selectbar .btn { flex:none; min-height:42px; }
+  .expense-review-selectbar .muted { font-size:10.5px; line-height:1.25; }
+
+  .expense-review-list {
+    max-height:min(45dvh,390px);
+    padding:0 8px 8px;
+    overscroll-behavior:contain;
+  }
+  .expense-review-row {
+    margin-bottom:7px;
+    padding:11px;
+    align-items:flex-start;
+    gap:9px;
+    border:1px solid var(--line-soft);
+    border-radius:13px;
+    background:var(--paper);
+  }
+  .expense-review-row:last-child { border-bottom:1px solid var(--line-soft); }
+  .expense-review-row input[type="checkbox"] { width:20px; height:20px; margin-top:1px; }
+  .expense-review-copy b { white-space:normal; font-size:13px; line-height:1.3; }
+  .expense-review-copy small { font-size:10.5px; line-height:1.3; }
+  .expense-review-row strong { font-size:13.5px; }
+}
+
+@media (max-width:390px) {
   .expense-review-selectbar { align-items:flex-start; flex-direction:column; }
-  .expense-review-row { align-items:flex-start; padding:12px 14px; }
+  .expense-review-selectbar .btn { width:100%; }
 }
