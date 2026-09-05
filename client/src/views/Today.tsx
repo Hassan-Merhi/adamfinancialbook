@@ -1,18 +1,18 @@
 import type { LoadedBook } from '../api';
 import { ordered } from '../../../shared/engine';
-import { Card, Empty, KINDS, Row, Tile, longDate, money, shortDate, signed, today, tone } from '../ui';
+import { Card, Empty, KINDS, Row, longDate, money, shortDate, signed, today, tone } from '../ui';
 import type { Focus } from './Statement';
 
 export default function Today({ book, open, goto, attentionCount }: {
   book: LoadedBook;
   open: (f: Focus) => void;
-  goto: (view: 'attention') => void;
+  goto: (view: 'attention' | 'money') => void;
   attentionCount: number;
 }) {
   const date = today();
   const activity = ordered(book.entries);
   const enteredToday = activity.filter((entry) => entry.occurredOn === date);
-  const recent = [...activity].reverse().slice(0, 5);
+  const recent = [...activity].reverse().slice(0, 6);
 
   const accountMoves = enteredToday.flatMap((entry) =>
     entry.effects.filter((effect) => effect.type === 'account'),
@@ -25,29 +25,53 @@ export default function Today({ book, open, goto, attentionCount }: {
     accountId ? book.accounts.find((account) => account.id === accountId)?.name : undefined;
 
   return (
-    <>
-      <div className="tiles">
-        <Tile
-          label="Cash on hand"
-          value={money(book.balances.totalCash)}
-          note={`${longDate(date)} · ${book.accounts.length} ${book.accounts.length === 1 ? 'account' : 'accounts'} across ${book.businesses.length} ${book.businesses.length === 1 ? 'business' : 'businesses'}`}
-        />
+    <div className="today-page daily-page">
+      <section className="today-hero" aria-label="Today overview">
+        <div className="today-hero-copy">
+          <span className="daily-eyebrow">Today · {longDate(date)}</span>
+          <span className="today-cash-label">Cash on hand</span>
+          <strong className="today-cash num">{money(book.balances.totalCash)}</strong>
+          <span className="today-cash-meta">
+            {book.accounts.length} {book.accounts.length === 1 ? 'account' : 'accounts'} · {book.businesses.length} {book.businesses.length === 1 ? 'business' : 'businesses'}
+          </span>
+        </div>
+        <button className="daily-hero-action" type="button" onClick={() => goto('money')}>View money</button>
+      </section>
+
+      <div className="today-pulse" aria-label="Today's cash movement">
+        <div className="today-pulse-item">
+          <span>In</span>
+          <b className="num pos">{money(moneyIn)}</b>
+        </div>
+        <div className="today-pulse-item">
+          <span>Out</span>
+          <b className="num neg">{money(moneyOut)}</b>
+        </div>
+        <div className="today-pulse-item">
+          <span>Net</span>
+          <b className={`num ${tone(netMovement)}`}>{signed(netMovement)}</b>
+        </div>
       </div>
 
-      <Card title="Needs attention" aside={attentionCount ? `${attentionCount} open` : 'all clear'}>
-        {attentionCount === 0
-          ? <Empty>Nothing needs your attention right now.</Empty>
-          : <Row
-              title={`${attentionCount} ${attentionCount === 1 ? 'item needs' : 'items need'} a decision or follow-up`}
-              sub="Approvals, cash handoffs, missing receipts, reminders, and money still in limbo — all in one place."
-              value="Open"
-              onOpen={() => goto('attention')}
-            />}
-      </Card>
+      {attentionCount > 0 ? (
+        <button className="today-attention" type="button" onClick={() => goto('attention')}>
+          <span className="today-attention-icon" aria-hidden="true">!</span>
+          <span className="today-attention-copy">
+            <b>{attentionCount} {attentionCount === 1 ? 'item needs' : 'items need'} attention</b>
+            <small>Approvals, cash handoffs, receipts, reminders, and money in limbo.</small>
+          </span>
+          <span className="chev" aria-hidden="true">›</span>
+        </button>
+      ) : (
+        <div className="today-clear" role="status">
+          <span aria-hidden="true">✓</span>
+          <span><b>All clear</b><small>Nothing needs a decision right now.</small></span>
+        </div>
+      )}
 
-      <Card title="Recent activity" aside={recent.length ? 'latest 5' : undefined}>
+      <Card title="Recent activity" aside={recent.length ? `${recent.length} latest` : undefined}>
         {recent.length === 0
-          ? <Empty>No activity yet. Say what happened in the prompt above.</Empty>
+          ? <Empty>No activity yet. Say what happened in the prompt below.</Empty>
           : recent.map((entry) => {
               const cashDelta = entry.effects
                 .filter((effect) => effect.type === 'account')
@@ -66,11 +90,11 @@ export default function Today({ book, open, goto, attentionCount }: {
             })}
       </Card>
 
-      <Card title="Today's movement" aside={enteredToday.length ? `${enteredToday.length} ${enteredToday.length === 1 ? 'entry' : 'entries'}` : 'no entries'}>
-        <Row title="Money in" sub="cash that entered accounts today" value={money(moneyIn)} valueTone={moneyIn ? 'pos' : ''} />
-        <Row title="Money out" sub="cash that left accounts today" value={money(moneyOut)} valueTone={moneyOut ? 'neg' : ''} />
-        <Row title="Net cash movement" sub="money in minus money out" value={signed(netMovement)} valueTone={tone(netMovement)} />
-      </Card>
-    </>
+      {enteredToday.length > 0 && (
+        <div className="today-footnote">
+          {enteredToday.length} {enteredToday.length === 1 ? 'entry' : 'entries'} recorded today · net cash movement {signed(netMovement)}
+        </div>
+      )}
+    </div>
   );
 }
