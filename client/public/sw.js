@@ -1,21 +1,21 @@
 /**
- * Enough service worker to open with no signal.
+ * Offline shell + fast repeat launches.
  *
- * The app shell is cached as it is used, and served from the cache when the
- * network is unreachable. API calls are never cached — the book's figures come
- * from the snapshot the app itself keeps, so nothing stale is ever presented as
- * if it were live.
+ * API calls are never cached. Vite's hashed /assets/* files are safe to serve
+ * cache-first because a new build gets a new filename; navigation remains
+ * network-first so users receive the newest index whenever a connection exists.
  */
-const CACHE = 'book-shell-v1';
+const CACHE = 'book-shell-v2';
+const SHELL = ['/', '/index.html', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/index.html'])).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
       .then(() => self.clients.claim()),
   );
 });
@@ -26,15 +26,37 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith('/api')) return;   // the book is never served from a cache
+  if (url.pathname.startsWith('/api')) return;
+
+  if (url.pathname.startsWith('/assets/')) {
+    const update = fetch(request).then(async (response) => {
+      if (response.ok) {
+        const cache = await caches.open(CACHE);
+        await cache.put(request, response.clone());
+      }
+      return response;
+    });
+    event.respondWith(
+      caches.match(request).then((cached) => cached ?? update).catch(() => caches.match(request)),
+    );
+    event.waitUntil(update.then(() => undefined).catch(() => undefined));
+    return;
+  }
 
   event.respondWith(
     fetch(request)
-      .then((response) => {
-        const copy = response.clone();
-        caches.open(CACHE).then((c) => c.put(request, copy));
+      .then(async (response) => {
+        if (response.ok) {
+          const cache = await caches.open(CACHE);
+          await cache.put(request, response.clone());
+        }
         return response;
       })
-      .catch(async () => (await caches.match(request)) ?? caches.match('/index.html')),
+      .catch(async () => {
+        const cached = await caches.match(request);
+        if (cached) return cached;
+        if (request.mode === 'navigate') return (await caches.match('/index.html')) ?? Response.error();
+        return Response.error();
+      }),
   );
 });
