@@ -122,6 +122,26 @@ export interface EvidenceDashboard {
   notifications: EvidenceNotification[];
 }
 
+export interface DelegatedSpendItem {
+  id: string;
+  occurred_on: string;
+  amount: number;
+  purpose: string;
+  account_id: string;
+  account_name: string;
+  payer_business_id: string;
+  project_id: string | null;
+  for_business: string | null;
+  spender_email: string;
+  created_at: string;
+}
+
+export interface DelegatedSpendAllocationResult {
+  ok: true;
+  count: number;
+  total: number;
+}
+
 /**
  * The prompt uses the ordinary entry endpoint for every transaction. When the
  * destination is a delegated wallet, the server intentionally refuses a direct
@@ -201,6 +221,9 @@ export const api = {
   removeUser: (id: string) => send(`/users/${id}`, 'DELETE'),
   changePassword: (current: string, next: string) => send('/password', 'POST', { current, next }),
   evidenceDashboard: () => send<EvidenceDashboard>('/delegation/dashboard', 'GET'),
+  delegatedSpending: () => send<{ items: DelegatedSpendItem[] }>('/allocation/spending', 'GET'),
+  allocateDelegatedSpending: (entryIds: string[], businessId: string, projectId: string | null) =>
+    send<DelegatedSpendAllocationResult>('/allocation/spending', 'POST', { entryIds, businessId, projectId }),
   evidenceForEntry: (entryId: string) => evidenceQuery(entryId, undefined),
   evidenceForRequest: (requestId: string) => evidenceQuery(undefined, requestId),
   uploadEvidence,
