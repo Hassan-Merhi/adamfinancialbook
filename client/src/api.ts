@@ -114,8 +114,24 @@ export interface EvidenceActivity {
   created_at?: string;
 }
 
+export interface DelegationAccount {
+  id: string;
+  name: string;
+  businessId: string;
+  opening: number;
+  balance: number;
+}
+
+export interface DelegationDelegate {
+  id: string;
+  email: string;
+  accountIds: string[];
+}
+
 export interface EvidenceDashboard {
   mode: 'owner' | 'entry';
+  accounts?: DelegationAccount[];
+  delegates?: DelegationDelegate[];
   approvals: EvidenceApproval[];
   pendingTransfers: EvidencePendingTransfer[];
   recentActivity: EvidenceActivity[];
@@ -201,6 +217,8 @@ export const api = {
   removeUser: (id: string) => send(`/users/${id}`, 'DELETE'),
   changePassword: (current: string, next: string) => send('/password', 'POST', { current, next }),
   evidenceDashboard: () => send<EvidenceDashboard>('/delegation/dashboard', 'GET'),
+  setUserAccounts: (id: string, accountIds: string[]) =>
+    send(`/delegation/users/${encodeURIComponent(id)}/accounts`, 'PUT', { accountIds }),
   evidenceForEntry: (entryId: string) => evidenceQuery(entryId, undefined),
   evidenceForRequest: (requestId: string) => evidenceQuery(undefined, requestId),
   uploadEvidence,
