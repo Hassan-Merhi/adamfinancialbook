@@ -1,10 +1,16 @@
 import { Router, type RequestHandler } from 'express';
 import { z } from 'zod';
-import { pool, query } from './db.js';
-import { loadBook } from './book.js';
-import { record } from './audit.js';
+import { newId, pool, query } from './db.js';
+import {
+  captureEntryState,
+  loadBook,
+  supersedeEffects,
+  writeEffects,
+  writeEntryRevision,
+} from './book.js';
+import { record, recordRequired } from './audit.js';
 import { withLoanEffects } from '../shared/engine.js';
-import type { Effect, EntryInput } from '../shared/types.js';
+import type { EntryInput } from '../shared/types.js';
 
 export const expenseReviewRouter = Router();
 
@@ -73,9 +79,8 @@ const assignment = z.object({
 
 /**
  * Classify one or many delegated expenses without posting cash a second time.
- * We replace the original effect set in one transaction: the account effect is
- * recreated exactly once, while project cost / intercompany effects are added
- * from the owner's classification.
+ * The previous effect set stays in history and is marked superseded; the new
+ * active set and its immutable revision are written atomically.
  */
 expenseReviewRouter.post('/delegation/expense-reviews/assign', wrap(async (req, res) => {
   if (req.user?.role !== 'owner') {
@@ -125,6 +130,9 @@ expenseReviewRouter.post('/delegation/expense-reviews/assign', wrap(async (req, 
     }
 
     for (const row of rows) {
+      const before = await captureEntryState(client, row.id, false);
+      if (!before) throw new Error(`Expense ${row.id} disappeared while it was locked.`);
+
       const input: EntryInput = {
         occurredOn: String(row.occurred_on).slice(0, 10),
         kind: 'expense',
@@ -141,6 +149,12 @@ expenseReviewRouter.post('/delegation/expense-reviews/assign', wrap(async (req, 
         clientRef: row.client_ref,
       };
       const effects = withLoanEffects(input, book);
+      const transactionId = newId('txn');
+      const reason = [
+        `Assigned to ${business.name}`,
+        project ? `project ${project.name}` : null,
+        body.category ? `category ${body.category}` : null,
+      ].filter(Boolean).join(' · ');
 
       const updated = await client.query(
         `UPDATE entries
@@ -157,8 +171,26 @@ expenseReviewRouter.post('/delegation/expense-reviews/assign', wrap(async (req, 
         throw Object.assign(new Error('That expense changed while you were assigning it. Refresh and try again.'), { status: 409 });
       }
 
-      await client.query('DELETE FROM effects WHERE entry_id = $1', [row.id]);
+      await supersedeEffects(client, row.id, req.user!.id);
       await writeEffects(client, row.id, effects);
+
+      const after = await captureEntryState(client, row.id, false);
+      if (!after) throw new Error(`Expense ${row.id} disappeared after classification.`);
+      await writeEntryRevision(client, row.id, transactionId, 'classification', reason, before, after);
+      await recordRequired(
+        client,
+        'delegated expense classified',
+        row.id,
+        {
+          businessId: business.id,
+          business: business.name,
+          projectId: project?.id ?? null,
+          project: project?.name ?? null,
+          category: body.category,
+          amount: Number(row.amount),
+        },
+        transactionId,
+      );
     }
 
     await client.query('COMMIT');
@@ -179,6 +211,8 @@ expenseReviewRouter.post('/delegation/expense-reviews/assign', wrap(async (req, 
     [req.user.id, entryIds],
   );
 
+  // Keep one human-friendly batch line in addition to the transaction-bound
+  // per-entry accounting audit rows written above.
   await record(
     req,
     entryIds.length === 1 ? 'delegated expense assigned' : 'delegated expenses assigned',
@@ -196,20 +230,3 @@ expenseReviewRouter.post('/delegation/expense-reviews/assign', wrap(async (req, 
 
   res.json({ ok: true, count: entryIds.length });
 }));
-
-async function writeEffects(client: import('pg').PoolClient, entryId: string, effects: Effect[]) {
-  for (const effect of effects) {
-    await client.query(
-      `INSERT INTO effects (entry_id, type, target_id, from_business, to_business, delta)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
-      [
-        entryId,
-        effect.type,
-        effect.targetId ?? null,
-        effect.fromBusiness ?? null,
-        effect.toBusiness ?? null,
-        effect.delta,
-      ],
-    );
-  }
-}
