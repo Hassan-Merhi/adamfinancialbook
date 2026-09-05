@@ -18,11 +18,12 @@ import Setup from './views/Setup';
 import History from './views/History';
 import Access from './views/Access';
 import Files from './views/Files';
+import Approvals from './views/Approvals';
 import Statement, { type Focus } from './views/Statement';
 import { money } from './ui';
 import './styles.css';
 
-type View = 'today' | 'money' | 'projects' | 'people' | 'report' | 'files' | 'history' | 'access' | 'setup';
+type View = 'today' | 'money' | 'projects' | 'people' | 'report' | 'files' | 'history' | 'access' | 'setup' | 'approvals';
 
 /** The long label is for the rail; the short one and the icon are for the phone. */
 const NAV: { id: View; label: string; short: string; icon: string }[] = [
@@ -57,6 +58,7 @@ export default function App() {
   const [waiting, setWaiting] = useState(outbox.all().length);
   const [offline, setOffline] = useState(!navigator.onLine);
   const [look, setLook] = useState(0);
+  const [approvalUnread, setApprovalUnread] = useState(0);
 
   // The look is only a set of tokens; nothing else in the app knows about it.
   useEffect(() => {
@@ -129,6 +131,28 @@ export default function App() {
     window.addEventListener('offline', gone);
     if (navigator.onLine) flush();
     return () => { window.removeEventListener('online', online); window.removeEventListener('offline', gone); };
+  }, [me?.user?.id]);
+
+  // Keep the launcher useful even when the approvals page is not open. The old
+  // standalone wallet polled in the background; the integrated UI keeps that
+  // behavior without bringing back a second visual system.
+  useEffect(() => {
+    if (!me?.user) { setApprovalUnread(0); return; }
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/delegation/dashboard', {
+          credentials: 'same-origin',
+          headers: { 'x-book': '1' },
+        });
+        if (!res.ok) return;
+        const data = await res.json() as { notifications?: Array<{ read_at: string | null }> };
+        if (!cancelled) setApprovalUnread((data.notifications || []).filter((n) => !n.read_at).length);
+      } catch { /* offline or temporarily unavailable: keep the last count */ }
+    };
+    void poll();
+    const timer = window.setInterval(() => { void poll(); }, 12_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
   }, [me?.user?.id]);
 
   const say = (text: string, bad?: boolean) => setNote({ text, bad });
@@ -232,6 +256,7 @@ export default function App() {
                     : view === 'files' ? <Files book={book} />
                     : view === 'history' ? <History book={book} />
                     : view === 'access' ? <Access me={me.user!} say={say} />
+                    : view === 'approvals' ? <Approvals me={me.user!} say={say} />
                     : <Setup book={book} run={run} />}
 
                   {/* the same two switches as the toggles, for a screen with no room for them */}
@@ -248,6 +273,11 @@ export default function App() {
           </main>
         )}
       </div>
+
+      <button className="approval-launcher" aria-current={!focus && view === 'approvals'} onClick={() => go('approvals')}>
+        {entryOnly ? 'My wallet' : 'Approvals'}
+        {approvalUnread > 0 && <span className="approval-badge">{approvalUnread > 99 ? '99+' : approvalUnread}</span>}
+      </button>
 
       <div className="toggles">
         <button className="toggle" onClick={() => setLook((look + 1) % LOOKS.length)}>
