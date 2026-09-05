@@ -7,6 +7,7 @@ interface ChromeTranslator {
 }
 
 interface TranslatorFactory {
+  availability?: (options: { sourceLanguage: string; targetLanguage: string }) => Promise<string>;
   create(options: { sourceLanguage: string; targetLanguage: string }): Promise<ChromeTranslator>;
 }
 
@@ -27,24 +28,30 @@ function translator(source: Exclude<SupportedLanguage, 'en'>) {
   if (existing) return existing;
   const api = factory();
   if (!api) return Promise.resolve(null);
-  const pending = api.create({ sourceLanguage: source, targetLanguage: 'en' })
-    .catch(() => null);
+  const pending = (async () => {
+    try {
+      if (api.availability) {
+        const status = await api.availability({ sourceLanguage: source, targetLanguage: 'en' });
+        if (status === 'unavailable' || status === 'no') return null;
+      }
+      return await api.create({ sourceLanguage: source, targetLanguage: 'en' });
+    } catch {
+      promptTranslators.delete(key);
+      return null;
+    }
+  })();
   promptTranslators.set(key, pending);
   return pending;
 }
 
-function warmPromptPacks() {
-  // Prompt parsing always happens in English. Starting these from the language
-  // button click means French/Arabic prompts can still be read with no network
-  // later, once Chrome has downloaded the packs.
-  void translator('fr');
-  void translator('ar');
+function warmPromptPack(language: SupportedLanguage) {
+  if (language === 'fr' || language === 'ar') void translator(language);
 }
 
-document.addEventListener('click', (event) => {
-  const button = event.target instanceof Element ? event.target.closest('.language-switch button') : null;
-  if (button) warmPromptPacks();
-}, true);
+window.addEventListener('book:language-change', (event) => {
+  const language = (event as CustomEvent<unknown>).detail;
+  if (isLanguage(language)) warmPromptPack(language);
+});
 
 function snapshot(): (Book & { balances?: unknown }) | null {
   try {
@@ -55,7 +62,8 @@ function snapshot(): (Book & { balances?: unknown }) | null {
   }
 }
 
-function names(book: Book) {
+function names(book: Book | null) {
+  if (!book) return [];
   return [
     ...book.businesses.map((row) => row.name),
     ...book.accounts.map((row) => row.name),
@@ -64,17 +72,35 @@ function names(book: Book) {
   ];
 }
 
-async function toEnglish(text: string, book: Book) {
+async function serverToEnglish(masked: string, source: Exclude<SupportedLanguage, 'en'>): Promise<string | null> {
+  if (!navigator.onLine) return null;
+  try {
+    const response = await previousFetch('/api/translate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-book': '1' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ language: 'en', sourceLanguage: source, texts: [masked] }),
+    });
+    if (!response.ok) return null;
+    const data = await response.json() as { translations?: unknown; available?: unknown };
+    if (data.available === false || !Array.isArray(data.translations) || typeof data.translations[0] !== 'string') return null;
+    return data.translations[0];
+  } catch {
+    return null;
+  }
+}
+
+async function toEnglish(text: string, book: Book | null) {
   const source = heuristicLanguage(text);
   if (source === 'en') return text;
   const protectedText = protectTranslationText(text, names(book));
   const engine = await translator(source);
-  if (!engine) return text;
-  try {
-    return restoreTranslationText(await engine.translate(protectedText.masked), protectedText);
-  } catch {
-    return text;
+  if (engine) {
+    try { return restoreTranslationText(await engine.translate(protectedText.masked), protectedText); }
+    catch { /* provider fallback below */ }
   }
+  const server = await serverToEnglish(protectedText.masked, source);
+  return server ? restoreTranslationText(server, protectedText) : text;
 }
 
 function requestUrl(input: RequestInfo | URL) {
@@ -89,6 +115,17 @@ async function requestJson(input: RequestInfo | URL, init?: RequestInit) {
   return null;
 }
 
+function jsonResponse(payload: unknown, original: Response) {
+  const headers = new Headers(original.headers);
+  headers.set('content-type', 'application/json; charset=utf-8');
+  headers.delete('content-length');
+  return new Response(JSON.stringify(payload), {
+    status: original.status,
+    statusText: original.statusText,
+    headers,
+  });
+}
+
 async function syncLanguageAfterLogin() {
   try {
     const response = await previousFetch('/api/me', { credentials: 'same-origin' });
@@ -96,11 +133,9 @@ async function syncLanguageAfterLogin() {
     const data = await response.json() as { user?: { language?: unknown } | null };
     const language = data.user?.language;
     if (!isLanguage(language)) return;
-    const current = localStorage.getItem('book.language');
-    if (current === language) return;
-    localStorage.setItem('book.language', language);
-    window.location.reload();
-  } catch { /* login still succeeded; preference can sync on next load */ }
+    try { localStorage.setItem('book.language', language); } catch { /* in-memory state can still adopt */ }
+    window.dispatchEvent(new CustomEvent('book:language-preference', { detail: language }));
+  } catch { /* login still succeeded */ }
 }
 
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -109,27 +144,43 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   catch { return previousFetch(input, init); }
   const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
 
-  // The ordinary Entry component already supports offline logging. This branch
-  // makes its reader multilingual too by running the same deterministic parser
-  // against the last saved book after Chrome translates the command locally.
-  if (!navigator.onLine && url.origin === window.location.origin
-      && url.pathname === '/api/read' && method === 'POST') {
+  if (url.origin === window.location.origin && url.pathname === '/api/read' && method === 'POST') {
     try {
       const body = await requestJson(input, init);
       const original = body?.text;
       const book = snapshot();
-      if (typeof original === 'string' && book) {
-        const today = typeof body?.today === 'string' ? body.today : new Date().toISOString().slice(0, 10);
+      if (typeof original === 'string') {
         const normalized = await toEnglish(original, book);
-        const draft = readWithRules(normalized, book, today);
-        if (draft.mode === 'entry') draft.input.raw = original;
-        else draft.raw = original;
-        return new Response(JSON.stringify({ draft, source: 'rules', duplicate: null }), {
-          status: 200,
-          headers: { 'content-type': 'application/json; charset=utf-8' },
+        const today = typeof body?.today === 'string' ? body.today : new Date().toISOString().slice(0, 10);
+
+        if (!navigator.onLine && book) {
+          const draft = readWithRules(normalized, book, today);
+          if (draft.mode === 'entry') draft.input.raw = original;
+          else draft.raw = original;
+          return new Response(JSON.stringify({ draft, source: 'rules', duplicate: null }), {
+            status: 200,
+            headers: { 'content-type': 'application/json; charset=utf-8' },
+          });
+        }
+
+        const response = await previousFetch(input, {
+          ...init,
+          headers: init?.headers,
+          body: JSON.stringify({ ...body, text: normalized }),
         });
+        if (!response.ok || normalized === original) return response;
+        try {
+          const data = await response.clone().json() as {
+            draft?: { mode?: unknown; input?: { raw?: string }; raw?: string };
+          };
+          if (data.draft?.mode === 'entry' && data.draft.input) data.draft.input.raw = original;
+          else if (data.draft?.mode === 'setup') data.draft.raw = original;
+          return jsonResponse(data, response);
+        } catch {
+          return response;
+        }
       }
-    } catch { /* fall through to the normal offline error path */ }
+    } catch { /* normal request/error path below */ }
   }
 
   const response = await previousFetch(input, init);
