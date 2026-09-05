@@ -1,18 +1,10 @@
-/**
- * Everything that touched one thing, with a running balance and the filters to
- * find your way back to a single entry.
- */
-import { useMemo, useState } from 'react';
-import { api, type LoadedBook } from '../api';
-import { deltaFor, ordered, statement } from '../../../shared/engine';
+/** Paginated target statement with server-side filtering and running balances. */
+import { useEffect, useRef, useState } from 'react';
+import { api, type LoadedBook, type StatementRowView, type StatementTarget } from '../api';
 import type { Entry } from '../../../shared/types';
 import { Card, Empty, KINDS, money, shortDate, signed, tone } from '../ui';
 
-export type Focus =
-  | { type: 'account'; id: string }
-  | { type: 'person'; id: string }
-  | { type: 'project'; id: string }
-  | { type: 'loan'; fromBusiness: string; toBusiness: string; view: string };
+export type Focus = StatementTarget;
 
 export default function Statement({ book, focus, back, run }: {
   book: LoadedBook;
@@ -24,25 +16,53 @@ export default function Statement({ book, focus, back, run }: {
   const [kind, setKind] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [rows, setRows] = useState<StatementRowView[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [summary, setSummary] = useState({ total: 0, inSum: 0, outSum: 0 });
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState('');
+  const request = useRef(0);
 
-  const head = describe(book, focus);
-  const rows = useMemo(() => statement(book, focus), [book, focus]);
+  const filters = { q, kind, from, to };
 
-  const matches = (e: Entry) => {
-    if (kind && e.kind !== kind) return false;
-    if (from && e.occurredOn < from) return false;
-    if (to && e.occurredOn > to) return false;
-    if (q) {
-      const person = book.people.find((p) => p.id === e.personId)?.name ?? '';
-      const project = book.projects.find((p) => p.id === e.projectId)?.name ?? '';
-      if (!`${e.purpose} ${e.raw} ${person} ${project}`.toLowerCase().includes(q.toLowerCase())) return false;
+  useEffect(() => {
+    const serial = ++request.current;
+    setLoading(true);
+    setError('');
+    const timer = window.setTimeout(() => {
+      api.statementPage(focus, { ...filters, limit: 50 })
+        .then((page) => {
+          if (serial !== request.current) return;
+          setRows(page.items);
+          setNextCursor(page.nextCursor);
+          setSummary({ total: page.total, inSum: page.inSum, outSum: page.outSum });
+        })
+        .catch((err) => {
+          if (serial === request.current) setError((err as Error).message);
+        })
+        .finally(() => {
+          if (serial === request.current) setLoading(false);
+        });
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [book, focus, q, kind, from, to]);
+
+  const loadMore = async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await api.statementPage(focus, { ...filters, cursor: nextCursor, limit: 50 });
+      setRows((current) => [...current, ...page.items]);
+      setNextCursor(page.nextCursor);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoadingMore(false);
     }
-    return true;
   };
 
-  const shown = rows.filter((r) => matches(r.entry)).reverse();
-  const inSum = shown.filter((r) => r.delta > 0).reduce((s, r) => s + r.delta, 0);
-  const outSum = shown.filter((r) => r.delta < 0).reduce((s, r) => s + r.delta, 0);
+  const head = describe(book, focus);
   const filtered = !!(q || kind || from || to);
 
   return (
@@ -62,7 +82,7 @@ export default function Statement({ book, focus, back, run }: {
 
       <div className="filters">
         <input className="fi grow" value={q} onChange={(e) => setQ(e.target.value)}
-          placeholder="Search purpose, person, project" />
+          placeholder="Search purpose or description" />
         <select className="fi" value={kind} onChange={(e) => setKind(e.target.value)}>
           <option value="">All types</option>
           {Object.entries(KINDS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
@@ -76,9 +96,12 @@ export default function Statement({ book, focus, back, run }: {
 
       <Card
         title="Statement"
-        aside={`${shown.length} of ${rows.length} · in ${money(inSum)} · out ${money(Math.abs(outSum))}`}
+        aside={!loading ? `${summary.total} matching · in ${money(summary.inSum)} · out ${money(Math.abs(summary.outSum))}` : undefined}
       >
-        {shown.length === 0 ? <Empty>Nothing matches these filters.</Empty> : (
+        {error && <Empty>{error}</Empty>}
+        {loading && !error && <Empty>Reading the statement…</Empty>}
+        {!loading && !error && rows.length === 0 && <Empty>Nothing matches these filters.</Empty>}
+        {rows.length > 0 && (
           <div className="tblwrap">
             <table>
               <thead>
@@ -90,7 +113,7 @@ export default function Statement({ book, focus, back, run }: {
                 </tr>
               </thead>
               <tbody>
-                {shown.map((r) => (
+                {rows.map((r) => (
                   <tr key={r.entry.id}>
                     <td className="num small">{shortDate(r.entry.occurredOn)}</td>
                     <td>
@@ -123,6 +146,11 @@ export default function Statement({ book, focus, back, run }: {
             </table>
           </div>
         )}
+        {nextCursor && (
+          <div className="center"><button className="btn ghost" disabled={loadingMore} onClick={() => void loadMore()}>
+            {loadingMore ? 'Loading…' : 'Load older entries'}
+          </button></div>
+        )}
       </Card>
 
       {focus.type === 'project' && (
@@ -141,8 +169,6 @@ export default function Statement({ book, focus, back, run }: {
     </>
   );
 }
-
-/* ------------------------------------------------------------------ */
 
 function describe(book: LoadedBook, focus: Focus) {
   if (focus.type === 'account') {
@@ -181,7 +207,6 @@ function describe(book: LoadedBook, focus: Focus) {
   };
 }
 
-/** What else this entry moved, other than the thing you are looking at. */
 function alsoChanged(book: LoadedBook, entry: Entry, focus: Focus): string {
   const bits: string[] = [];
   for (const e of entry.effects) {
@@ -204,5 +229,3 @@ function alsoChanged(book: LoadedBook, entry: Entry, focus: Focus): string {
   }
   return bits.filter(Boolean).join(' · ');
 }
-
-export { deltaFor, ordered };
