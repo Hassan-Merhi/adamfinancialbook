@@ -600,29 +600,6 @@ router.get('/delegation/attachments/approvals/:requestId', wrap(async (req, res)
   return listAttachments(req, res, { kind: 'approval', id: String(req.params.requestId) });
 }));
 
-function legacyAttachmentTarget(req: Request): AttachmentTarget | null {
-  const params = new URL(req.originalUrl, 'http://localhost').searchParams;
-  const entryIds = params.getAll('entryId');
-  const requestIds = params.getAll('requestId');
-  if (entryIds.length === 1 && requestIds.length === 0) return { kind: 'entry', id: entryIds[0] };
-  if (requestIds.length === 1 && entryIds.length === 0) return { kind: 'approval', id: requestIds[0] };
-  return null;
-}
-
-router.post('/delegation/attachments', imageBody, wrap(async (req, res) => {
-  const target = legacyAttachmentTarget(req);
-  if (!target) return res.status(400).json({ error: 'Attach the file to one expense or one approval request.' });
-  const segment = target.kind === 'entry' ? 'entries' : 'approvals';
-  return res.redirect(307, `/api/delegation/attachments/${segment}/${encodeURIComponent(target.id)}`);
-}));
-
-router.get('/delegation/attachments', wrap(async (req, res) => {
-  const target = legacyAttachmentTarget(req);
-  if (!target) return res.status(400).json({ error: 'Say which expense or request.' });
-  const segment = target.kind === 'entry' ? 'entries' : 'approvals';
-  return res.redirect(307, `/api/delegation/attachments/${segment}/${encodeURIComponent(target.id)}`);
-}));
-
 router.get('/delegation/attachments/:id', wrap(async (req, res) => {
   const id = String(req.params.id);
   const rows = await query<any>(
