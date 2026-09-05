@@ -43,6 +43,7 @@ let statusHideTimer: number | null = null;
 
 const ENGINE_VERSION = 'book.translation-engine.v3';
 const LANGUAGE_KEY = 'book.language';
+const DISPLAY_CONCURRENCY = 6;
 
 // The old cache assumed every source string was English. Throw it away once so
 // Arabic/French originals can be translated correctly in every direction.
@@ -219,9 +220,14 @@ async function getDetector(): Promise<ChromeLanguageDetector | null> {
   }
 }
 
-async function detectSourceLanguage(text: string): Promise<SupportedLanguage> {
+/**
+ * Full model detection is reserved for the one sentence the user is actively
+ * submitting. Running LanguageDetector over every label on every render was the
+ * performance regression: it could start/download a model and then execute
+ * hundreds of detections before the book felt usable.
+ */
+async function detectPromptLanguage(text: string): Promise<SupportedLanguage> {
   const heuristic = heuristicLanguage(text);
-  // Arabic script and strong French bookkeeping vocabulary do not need a model.
   if (heuristic === 'ar' || heuristic === 'fr' || text.trim().length < 8) return heuristic;
 
   const detector = await getDetector();
@@ -265,21 +271,41 @@ async function translateOne(
 
 async function translateInChrome(targetLanguage: SupportedLanguage, texts: string[]) {
   if (!translatorFactory()) return null;
-  setStatus('translating', targetLanguage);
-  const translations: string[] = [];
-  const succeeded: boolean[] = [];
+  if (!texts.length) return { translations: [], succeeded: [] as boolean[] };
 
-  for (const text of texts) {
-    const sourceLanguage = await detectSourceLanguage(text);
-    if (sourceLanguage === targetLanguage) {
-      translations.push(text);
-      succeeded.push(true);
-      continue;
-    }
-    const translated = await translateOne(text, sourceLanguage, targetLanguage);
-    translations.push(translated ?? text);
-    succeeded.push(translated !== null);
+  // UI strings use the cheap deterministic detector. Arabic script is exact,
+  // French bookkeeping vocabulary/accents are scored, and the app's own UI
+  // defaults to English. This keeps normal page loads entirely off the heavier
+  // LanguageDetector model.
+  const sourceLanguages = texts.map(heuristicLanguage);
+  if (sourceLanguages.every((source) => source === targetLanguage)) {
+    return { translations: [...texts], succeeded: texts.map(() => true) };
   }
+
+  setStatus('translating', targetLanguage);
+  const translations = new Array<string>(texts.length);
+  const succeeded = new Array<boolean>(texts.length);
+  let cursor = 0;
+
+  const worker = async () => {
+    while (true) {
+      const index = cursor++;
+      if (index >= texts.length) return;
+      const text = texts[index];
+      const sourceLanguage = sourceLanguages[index];
+      if (sourceLanguage === targetLanguage) {
+        translations[index] = text;
+        succeeded[index] = true;
+        continue;
+      }
+      const translated = await translateOne(text, sourceLanguage, targetLanguage);
+      translations[index] = translated ?? text;
+      succeeded[index] = translated !== null;
+    }
+  };
+
+  const workerCount = Math.min(DISPLAY_CONCURRENCY, texts.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
   if (succeeded.every(Boolean)) setStatus('ready', targetLanguage);
   else setStatus('unavailable', targetLanguage);
@@ -366,7 +392,7 @@ async function translateForDisplay(targetLanguage: SupportedLanguage, texts: str
 }
 
 async function normalisePromptToEnglish(text: string) {
-  const sourceLanguage = await detectSourceLanguage(text);
+  const sourceLanguage = await detectPromptLanguage(text);
   if (sourceLanguage === 'en') return { text, sourceLanguage };
 
   const protectedText = protectTranslationText(text, catalogNames);
@@ -401,22 +427,25 @@ async function persistLanguage(language: SupportedLanguage) {
   } catch { /* local language still works */ }
 }
 
-async function syncSavedUserLanguage() {
-  try {
-    const response = await nativeFetch('/api/me', { credentials: 'same-origin' });
-    if (!response.ok) return;
-    const data = await response.json() as { user?: { language?: unknown } | null };
-    const language = data.user?.language;
-    if (!isLanguage(language)) return;
-    const current = currentLanguage();
-    if (current === language) return;
-    localStorage.setItem(LANGUAGE_KEY, language);
-    window.location.reload();
-  } catch { /* offline/login screen: browser preference remains */ }
+function applySavedUserLanguage(language: SupportedLanguage) {
+  const current = currentLanguage();
+  if (current === language) return;
+  try { localStorage.setItem(LANGUAGE_KEY, language); } catch { /* local preference can remain */ }
+
+  // Reuse the real React language button instead of reloading the entire app.
+  // The old implementation issued a second /api/me request and then did a full
+  // window.reload(), which doubled startup work and made a language mismatch
+  // look like a slow application boot.
+  window.setTimeout(() => {
+    const button = [...document.querySelectorAll<HTMLButtonElement>('.language-switch button')]
+      .find((candidate) => candidate.textContent?.trim().toLowerCase() === language);
+    if (button && button.getAttribute('aria-pressed') !== 'true') button.click();
+  }, 0);
 }
 
 function warmForTarget(targetLanguage: SupportedLanguage) {
-  void createDetectorNow();
+  // Do not warm LanguageDetector here. It is only needed for an ambiguous prompt
+  // and can be loaded lazily when the user actually submits one.
   if (targetLanguage === 'en') {
     void createNow('fr', 'en');
     void createNow('ar', 'en');
@@ -451,6 +480,20 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
   const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
   if (url.origin !== window.location.origin) return nativeFetch(input, init);
+
+  // Piggyback the language preference on the app's existing /api/me request.
+  // This removes the duplicate startup request and the forced full-page reload.
+  if (url.pathname === '/api/me' && method === 'GET') {
+    const response = await nativeFetch(input, init);
+    if (response.ok) {
+      try {
+        const data = await response.clone().json() as { user?: { language?: unknown } | null };
+        const language = data.user?.language;
+        if (isLanguage(language)) applySavedUserLanguage(language);
+      } catch { /* keep the local preference */ }
+    }
+    return response;
+  }
 
   if (url.pathname === '/api/book' && method === 'GET') {
     const response = await nativeFetch(input, init);
@@ -503,9 +546,3 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 
   return nativeFetch(input, init);
 }) as typeof window.fetch;
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => { void syncSavedUserLanguage(); }, { once: true });
-} else {
-  void syncSavedUserLanguage();
-}
