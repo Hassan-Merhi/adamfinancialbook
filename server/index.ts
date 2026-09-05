@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import { rateLimit } from 'express-rate-limit';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
@@ -11,11 +12,14 @@ import { readSentence } from './read.js';
 import { translateTexts } from './translate.js';
 import {
   createUser, findUser, getUser, listUsers, ownerCount, ownerOnly, removeUser,
-  requireLogin, setPassword, setRole, setUsername, userCount, usernameKey, verifyPassword, type Role,
+  setPassword, setRole, setUsername, userCount, usernameKey, verifyPassword, type Role,
 } from './auth.js';
 import {
   checkPassword, cookieHeader, passwordComplaint, signSession, suggestPassword, SESSION_DAYS,
 } from './session.js';
+import {
+  loadSecuritySession, protectedSecurityRouter, publicSecurityRouter, requireAuthenticatedApi,
+} from './security-gate.js';
 import { dayReport } from './report.js';
 import { delegationGate } from './delegation.js';
 import {
@@ -41,14 +45,30 @@ app.use((_req, res, next) => {
 if (!process.env.SESSION_SECRET) {
   throw new Error('SESSION_SECRET is not set — the book would be open to anyone. Set it in .env.');
 }
-app.use('/api', requireLogin);
+
+// Bound every API caller before any database, file, authorization or translation work.
+// Login also has a durable database-backed throttle in security.ts.
+app.use('/api', rateLimit({
+  windowMs: 60_000,
+  limit: 300,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+}));
+
+// Security routing is intentionally ordered. Express resolves the fixed public
+// routes first; every other API call must then have a verified server-side
+// session before it can reach any write or business workflow.
+app.use('/api', loadSecuritySession);
+app.use('/api', publicSecurityRouter);
+app.use('/api', requireAuthenticatedApi);
 
 app.use('/api', (req, res, next) => {
-  if (req.method === 'GET' || req.path === '/login' || req.path === '/first-owner') return next();
+  if (req.method === 'GET' || req.method === 'HEAD') return next();
   if (req.get('x-book') === '1') return next();
   res.status(403).json({ error: 'Refused: that request did not come from the app.' });
 });
 
+app.use('/api', protectedSecurityRouter);
 app.use('/api', delegationGate);
 
 const wrap = (fn: express.RequestHandler): express.RequestHandler =>
