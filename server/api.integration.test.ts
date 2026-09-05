@@ -359,18 +359,20 @@ describe.skipIf(!DATABASE_URL)('real PostgreSQL API', () => {
     })).response.status).toBe(200);
 
     const bytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
-    const upload = await fetch(`${BASE}/api/delegation/attachments?entryId=${delegatedEntry}`, {
+    const upload = await fetch(`${BASE}/api/delegation/attachments/entry/${encodeURIComponent(delegatedEntry)}`, {
       method: 'POST',
       headers: {
         cookie: delegate.cookie,
         'x-book': '1',
         'content-type': 'image/png',
-        'x-file-name': encodeURIComponent('site receipt.png'),
       },
       body: bytes as any,
     });
     expect(upload.status).toBe(201);
     const fileId = ((await upload.json()) as any).id;
+    const listed = await request(`/api/delegation/attachments/entry/${encodeURIComponent(delegatedEntry)}`, { session: delegate });
+    expect(listed.response.status).toBe(200);
+    expect(listed.data.files.map((file: any) => file.id)).toContain(fileId);
     const download = await fetch(`${BASE}/api/delegation/attachments/${fileId}`, { headers: { cookie: delegate.cookie } });
     expect(download.status).toBe(200);
     expect(download.headers.get('cache-control')).toContain('no-store');
