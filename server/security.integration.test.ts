@@ -164,7 +164,7 @@ describe.skipIf(!DATABASE_URL)('Phase 6 real PostgreSQL security', () => {
 
   it('upgrades the schema and creates a tracked owner session while the database protects the last owner', async () => {
     expect((await db<{ version: string }>('SELECT version FROM schema_migrations ORDER BY version')).map((x) => Number(x.version)))
-      .toEqual([1, 2, 3, 4, 5]);
+      .toEqual([1, 2, 3, 4, 5, 6]);
 
     const opened = await request('/api/first-owner', {
       method: 'POST', body: { email: 'secure-owner@example.com', password: 'OwnerSecure!2026' },

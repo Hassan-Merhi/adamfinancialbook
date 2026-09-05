@@ -495,7 +495,9 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return response;
   }
 
-  if (url.pathname === '/api/book' && method === 'GET') {
+  // Both the legacy full-book load and Phase 7's compact startup overview carry
+  // the catalogs needed to protect account/business/person/project names in prompts.
+  if ((url.pathname === '/api/book' || url.pathname === '/api/overview') && method === 'GET') {
     const response = await nativeFetch(input, init);
     if (response.ok) {
       try { rememberCatalog(await response.clone().json()); } catch { /* keep old catalog */ }

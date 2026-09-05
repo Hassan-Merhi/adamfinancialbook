@@ -6,7 +6,7 @@ const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), 'utf8');
 
 describe('mobile performance contract', () => {
-  it('keeps secondary pages out of the initial React dependency graph', () => {
+  it('keeps secondary pages out of the initial React dependency graph and avoids periodic polling', () => {
     const app = read('client/src/App.tsx');
     for (const page of ['Money', 'Projects', 'People', 'Attention', 'Report', 'Setup', 'History', 'Access', 'Files', 'Approvals', 'Statement']) {
       expect(app).not.toMatch(new RegExp(`import ${page} from ['\"]\\./views/${page}['\"]`));
@@ -14,7 +14,19 @@ describe('mobile performance contract', () => {
     }
     expect(app).not.toMatch(/import GlobalSearch from ['"]\.\/GlobalSearch['"]/);
     expect(app).toContain("import('./GlobalSearch')");
-    expect(app).toContain('DASHBOARD_REFRESH_MOBILE_MS = 120_000');
+    expect(app).not.toContain('DASHBOARD_REFRESH_MOBILE_MS');
+    expect(app).not.toContain('DASHBOARD_REFRESH_DESKTOP_MS');
+    expect(app).not.toContain('setInterval(');
+    expect(app).toContain("window.addEventListener('focus', resume)");
+    expect(app).toContain("document.addEventListener('visibilitychange', resume)");
+  });
+
+  it('keeps compact startup compatible with bounded translation work and prompt-name protection', () => {
+    const translation = read('client/src/browser-translation.ts');
+    expect(translation).toContain('const DISPLAY_CONCURRENCY = 6');
+    expect(translation).toContain("url.pathname === '/api/overview'");
+    expect(translation).toContain('rememberCatalog(await response.clone().json())');
+    expect(translation).toContain('Do not warm LanguageDetector here');
   });
 
   it('keeps the phone viewport, safe areas, RTL and reduced-motion contracts', () => {

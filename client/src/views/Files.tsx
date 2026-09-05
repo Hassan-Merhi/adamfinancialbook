@@ -1,27 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { api, type EvidenceFile, type LoadedBook } from '../api';
-
-interface LibraryItem extends EvidenceFile {
-  source: 'entry' | 'approval';
-  relatedId: string;
-  relatedDate: string;
-  description: string;
-  amount: number | null;
-  accountName: string;
-  person: string;
-  status: string;
-}
-
-interface Target {
-  source: LibraryItem['source'];
-  id: string;
-  relatedDate: string;
-  description: string;
-  amount: number | null;
-  accountName: string;
-  person: string;
-  status: string;
-}
+import { useEffect, useRef, useState } from 'react';
+import { api, type Keyholder, type LibraryFile, type LoadedBook } from '../api';
 
 const money = (n: number) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const size = (n: number) => n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
@@ -29,9 +7,11 @@ const day = (s: string) => s ? String(s).slice(0, 10) : '';
 const isImage = (mime: string) => mime.startsWith('image/');
 
 export default function Files({ book }: { book: LoadedBook }) {
-  const [files, setFiles] = useState<LibraryItem[]>([]);
+  const [files, setFiles] = useState<LibraryFile[]>([]);
+  const [users, setUsers] = useState<Keyholder[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [kind, setKind] = useState('all');
@@ -40,122 +20,121 @@ export default function Files({ book }: { book: LoadedBook }) {
   const [person, setPerson] = useState('all');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const request = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      setLoading(true); setError(''); setFiles([]);
-      try {
-        const [dashboard, users] = await Promise.all([api.evidenceDashboard(), api.users()]);
-        if (cancelled) return;
-        const usernames = new Map(users.users.map((user) => [user.id, user.email]));
-        const accountNames = new Map(book.accounts.map((item) => [item.id, item.name]));
-        const targets: Target[] = [];
-
-        for (const entry of book.entries) {
-          if (entry.voided) continue;
-          const accountId = entry.accountId ?? entry.toAccountId ?? null;
-          targets.push({
-            source: 'entry', id: entry.id, relatedDate: entry.occurredOn,
-            description: entry.purpose || entry.raw || 'Book entry', amount: entry.amount,
-            accountName: accountId ? accountNames.get(accountId) ?? '' : '',
-            person: entry.createdBy ? usernames.get(entry.createdBy) ?? '' : '', status: entry.kind,
-          });
-        }
-        for (const request of dashboard.approvals ?? []) {
-          targets.push({
-            source: 'approval', id: request.id, relatedDate: day(request.created_at),
-            description: request.request_text || 'Approval request', amount: request.amount,
-            accountName: request.account_name ?? '', person: request.requester_email ?? '', status: request.status,
-          });
-        }
-
-        setProgress({ done: 0, total: targets.length });
-        if (!targets.length) { setLoading(false); return; }
-
-        let cursor = 0;
-        let completed = 0;
-        const found: LibraryItem[] = [];
-        const workers = Math.min(8, targets.length);
-        const scan = async () => {
-          while (!cancelled) {
-            const index = cursor++;
-            if (index >= targets.length) return;
-            const target = targets[index];
-            try {
-              const response = target.source === 'entry' ? await api.evidenceForEntry(target.id) : await api.evidenceForRequest(target.id);
-              for (const file of response.files) found.push({ ...target, ...file, relatedId: target.id });
-            } catch (e) {
-              if (!cancelled) setError((e as Error).message);
-            }
-            completed += 1;
-            if (!cancelled) setProgress({ done: completed, total: targets.length });
-          }
-        };
-        await Promise.all(Array.from({ length: workers }, () => scan()));
-        if (cancelled) return;
-        found.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
-        setFiles(found);
-      } catch (e) {
-        if (!cancelled) setError((e as Error).message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    void load();
+    api.users()
+      .then((response) => { if (!cancelled) setUsers(response.users); })
+      .catch((err) => { if (!cancelled) setError((err as Error).message); });
     return () => { cancelled = true; };
-  }, [book]);
+  }, []);
 
-  const accounts = useMemo(() => [...new Set(files.map((f) => f.accountName).filter(Boolean))].sort(), [files]);
-  const people = useMemo(() => [...new Set(files.map((f) => f.person).filter(Boolean))].sort(), [files]);
-  const visible = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return files.filter((file) => {
-      if (kind === 'images' && !isImage(file.mime_type)) return false;
-      if (kind === 'pdf' && file.mime_type !== 'application/pdf') return false;
-      if (source !== 'all' && file.source !== source) return false;
-      if (account !== 'all' && file.accountName !== account) return false;
-      if (person !== 'all' && file.person !== person) return false;
-      if (from && file.relatedDate && file.relatedDate < from) return false;
-      if (to && file.relatedDate && file.relatedDate > to) return false;
-      if (!q) return true;
-      return [file.filename, file.description, file.accountName, file.person, file.status].some((value) => String(value || '').toLowerCase().includes(q));
-    });
-  }, [files, search, kind, source, account, person, from, to]);
+  useEffect(() => {
+    const serial = ++request.current;
+    setLoading(true);
+    setError('');
+    const timer = window.setTimeout(() => {
+      api.filePage({
+        q: search,
+        kind: kind === 'images' || kind === 'pdf' ? kind : '',
+        source: source === 'entry' || source === 'approval' ? source : '',
+        accountId: account === 'all' ? '' : account,
+        userId: person === 'all' ? '' : person,
+        from,
+        to,
+        limit: 40,
+      })
+        .then((page) => {
+          if (serial !== request.current) return;
+          setFiles(page.items);
+          setNextCursor(page.nextCursor);
+        })
+        .catch((err) => {
+          if (serial === request.current) setError((err as Error).message);
+        })
+        .finally(() => {
+          if (serial === request.current) setLoading(false);
+        });
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [search, kind, source, account, person, from, to]);
+
+  const loadMore = async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    setError('');
+    try {
+      const page = await api.filePage({
+        q: search,
+        kind: kind === 'images' || kind === 'pdf' ? kind : '',
+        source: source === 'entry' || source === 'approval' ? source : '',
+        accountId: account === 'all' ? '' : account,
+        userId: person === 'all' ? '' : person,
+        from,
+        to,
+        cursor: nextCursor,
+        limit: 40,
+      });
+      setFiles((current) => [...current, ...page.items]);
+      setNextCursor(page.nextCursor);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
   const filtered = !!(search || kind !== 'all' || source !== 'all' || account !== 'all' || person !== 'all' || from || to);
-  const clearFilters = () => { setSearch(''); setKind('all'); setSource('all'); setAccount('all'); setPerson('all'); setFrom(''); setTo(''); };
+  const clearFilters = () => {
+    setSearch('');
+    setKind('all');
+    setSource('all');
+    setAccount('all');
+    setPerson('all');
+    setFrom('');
+    setTo('');
+  };
 
   return (
     <section className="files-page">
       <div className="dhead files-head">
         <div><h2>Receipts & files</h2><p className="muted">Photos, quotes, PDFs, and receipts attached to transactions or approval requests.</p></div>
-        <div className="files-count"><b className="num">{visible.length}</b><span>{files.length} stored</span></div>
+        <div className="files-count"><b className="num">{files.length}</b><span>{nextCursor ? 'loaded · more available' : 'loaded'}</span></div>
       </div>
 
-      {loading && <div className="note">Finding stored files… {progress.total ? `${progress.done} of ${progress.total} records checked` : 'opening evidence'}.</div>}
-      {error && <div className="note err">Some evidence could not be indexed: {error}</div>}
+      {loading && <div className="note">Finding stored files…</div>}
+      {error && <div className="note err">Could not load some evidence: {error}</div>}
 
       <div className="card files-filter-card">
         <div className="files-filters">
           <label className="files-search">Search<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Filename, reason, account or user" /></label>
           <label>File type<select value={kind} onChange={(e) => setKind(e.target.value)}><option value="all">All files</option><option value="images">Photos / images</option><option value="pdf">PDFs</option></select></label>
           <label>Attached to<select value={source} onChange={(e) => setSource(e.target.value)}><option value="all">Transactions + requests</option><option value="entry">Transactions</option><option value="approval">Approval requests</option></select></label>
-          <label>Account<select value={account} onChange={(e) => setAccount(e.target.value)}><option value="all">All accounts</option>{accounts.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-          <label>User<select value={person} onChange={(e) => setPerson(e.target.value)}><option value="all">Everyone</option>{people.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+          <label>Account<select value={account} onChange={(e) => setAccount(e.target.value)}><option value="all">All accounts</option>{book.accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <label>User<select value={person} onChange={(e) => setPerson(e.target.value)}><option value="all">Everyone</option>{users.map((item) => <option key={item.id} value={item.id}>{item.email}</option>)}</select></label>
           <label>From<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
           <label>To<input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
           {filtered && <button className="btn ghost small files-clear" onClick={clearFilters}>Clear filters</button>}
         </div>
       </div>
 
-      {!loading && !files.length ? <EmptyState title="No files stored yet" detail="Receipts and files added to transactions or approvals will appear here." />
-        : !loading && !visible.length ? <EmptyState title="No files match" detail="Clear a filter or widen the date range." />
-        : <div className="files-gallery">{visible.map((file) => <FileCard key={file.id} file={file} />)}</div>}
+      {!loading && !files.length
+        ? <EmptyState title={filtered ? 'No files match' : 'No files stored yet'} detail={filtered ? 'Clear a filter or widen the date range.' : 'Receipts and files added to transactions or approvals will appear here.'} />
+        : <div className="files-gallery">{files.map((file) => <FileCard key={file.id} file={file} />)}</div>}
+
+      {nextCursor && (
+        <div className="files-load-more">
+          <button className="btn ghost" disabled={loadingMore} onClick={() => void loadMore()}>
+            {loadingMore ? 'Loading…' : 'Load more files'}
+          </button>
+        </div>
+      )}
     </section>
   );
 }
 
-function FileCard({ file }: { file: LibraryItem }) {
+function FileCard({ file }: { file: LibraryFile }) {
   const url = api.evidenceUrl(file.id);
   return (
     <article className="card file-card">
