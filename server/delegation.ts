@@ -15,14 +15,6 @@ const wrap = (fn: RequestHandler): RequestHandler =>
 
 const isoToday = () => new Date().toISOString().slice(0, 10);
 
-function singleQueryParam(value: unknown, name: string): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== 'string') {
-    throw Object.assign(new Error(`${name} must be supplied once as text.`), { status: 400 });
-  }
-  return value;
-}
-
 interface AssignmentRow {
   account_id: string;
   user_id: string;
@@ -131,8 +123,13 @@ router.get('/book', wrap(async (req, res, next) => {
 
 router.get('/statement', wrap(async (req, res, next) => {
   if (req.user?.role === 'owner') return next();
-  const type = singleQueryParam(req.query.type, 'type');
-  const id = singleQueryParam(req.query.id, 'id');
+  const rawType = req.query.type;
+  const rawId = req.query.id;
+  if ((rawType !== undefined && typeof rawType !== 'string') || (rawId !== undefined && typeof rawId !== 'string')) {
+    return res.status(400).json({ error: 'Statement query parameters must be supplied once as text.' });
+  }
+  const type = rawType;
+  const id = rawId;
   if (type !== 'account' || !id) return res.status(403).json({ error: 'You can only open statements for your assigned accounts.' });
   const assignments = await assignmentsForUser(req.user!.id);
   if (!assignments.some((a) => a.account_id === id)) return res.status(403).json({ error: 'That account is not assigned to you.' });
@@ -520,8 +517,13 @@ const imageBody = express.raw({
 });
 
 router.post('/delegation/attachments', imageBody, wrap(async (req, res) => {
-  const entryId = singleQueryParam(req.query.entryId, 'entryId');
-  const requestId = singleQueryParam(req.query.requestId, 'requestId');
+  const rawEntryId = req.query.entryId;
+  const rawRequestId = req.query.requestId;
+  if ((rawEntryId !== undefined && typeof rawEntryId !== 'string') || (rawRequestId !== undefined && typeof rawRequestId !== 'string')) {
+    return res.status(400).json({ error: 'Attachment query parameters must be supplied once as text.' });
+  }
+  const entryId = rawEntryId;
+  const requestId = rawRequestId;
   if ((!entryId && !requestId) || (entryId && requestId)) {
     return res.status(400).json({ error: 'Attach the file to one expense or one approval request.' });
   }
@@ -556,8 +558,13 @@ router.post('/delegation/attachments', imageBody, wrap(async (req, res) => {
 }));
 
 router.get('/delegation/attachments', wrap(async (req, res) => {
-  const entryId = singleQueryParam(req.query.entryId, 'entryId');
-  const requestId = singleQueryParam(req.query.requestId, 'requestId');
+  const rawEntryId = req.query.entryId;
+  const rawRequestId = req.query.requestId;
+  if ((rawEntryId !== undefined && typeof rawEntryId !== 'string') || (rawRequestId !== undefined && typeof rawRequestId !== 'string')) {
+    return res.status(400).json({ error: 'Attachment query parameters must be supplied once as text.' });
+  }
+  const entryId = rawEntryId;
+  const requestId = rawRequestId;
   if (entryId && !(await canSeeEntry(req, entryId))) return res.status(403).json({ error: 'You cannot view that expense.' });
   if (requestId && !(await canSeeApproval(req, requestId))) return res.status(403).json({ error: 'You cannot view that request.' });
   if (!entryId && !requestId) return res.status(400).json({ error: 'Say which expense or request.' });
