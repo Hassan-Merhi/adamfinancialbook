@@ -5,7 +5,7 @@
  * password primitive and the signed cookie format, so the crypto stays easy to
  * test and reason about in isolation.
  */
-import { createHmac, randomBytes, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomInt, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 
 const scrypt = promisify(scryptCb) as (secret: string, salt: Buffer, len: number) => Promise<Buffer>;
@@ -47,8 +47,7 @@ export function passwordComplaint(password: string): string | null {
 
 export function suggestPassword(): string {
   const letters = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const bytes = randomBytes(14);
-  const body = Array.from(bytes, (b) => letters[b % letters.length]).join('');
+  const body = Array.from({ length: 14 }, () => letters[randomInt(letters.length)]).join('');
   return `A7!${body.slice(0, 5)}-${body.slice(5, 10)}-${body.slice(10)}`;
 }
 
