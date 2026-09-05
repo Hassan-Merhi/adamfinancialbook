@@ -1,0 +1,333 @@
+/* Phase 2 — the daily mobile experience.
+   Today, the prompt/review flow, Money, and Statements share the same compact
+   visual language so the most-used path feels like one phone app. */
+
+.daily-page { width:100%; }
+.daily-eyebrow {
+  display:block;
+  color:var(--ink-3);
+  font-family:var(--font-display);
+  font-size:10.5px;
+  font-weight:700;
+  letter-spacing:.11em;
+  line-height:1.2;
+  text-transform:uppercase;
+}
+
+.today-hero,
+.money-hero {
+  position:relative;
+  overflow:hidden;
+  margin-bottom:10px;
+  padding:18px;
+  border:1px solid var(--line);
+  border-radius:20px;
+  background:linear-gradient(145deg,color-mix(in srgb,var(--card) 96%,var(--accent) 4%),var(--card));
+  box-shadow:var(--shadow);
+}
+.today-hero { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; }
+.today-hero-copy { min-width:0; display:flex; flex-direction:column; align-items:flex-start; }
+.today-cash-label,
+.money-hero-label { margin-top:13px; color:var(--ink-2); font-size:12.5px; font-weight:600; }
+.today-cash,
+.money-hero-value { margin-top:2px; color:var(--ink); font-size:34px; font-weight:650; letter-spacing:-.045em; line-height:1.08; }
+.today-cash-meta { margin-top:7px; color:var(--ink-3); font-size:11.5px; }
+.daily-hero-action {
+  flex:none;
+  min-height:42px;
+  padding:9px 12px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:var(--sunk);
+  color:var(--ink-2);
+  font-size:12.5px;
+  font-weight:650;
+}
+.daily-hero-action:hover { color:var(--ink); border-color:var(--ink-3); }
+
+.today-pulse {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+  margin-bottom:10px;
+}
+.today-pulse-item {
+  min-width:0;
+  padding:10px 12px;
+  border:1px solid var(--line-soft);
+  border-radius:14px;
+  background:var(--sunk);
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+}
+.today-pulse-item > span { color:var(--ink-3); font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
+.today-pulse-item > b { overflow:hidden; text-overflow:ellipsis; font-size:14px; font-weight:650; }
+
+.today-attention,
+.today-clear {
+  width:100%;
+  min-height:62px;
+  margin-bottom:12px;
+  padding:11px 13px;
+  border:1px solid var(--line);
+  border-radius:16px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  text-align:left;
+}
+.today-attention { background:color-mix(in srgb,var(--loan) 7%,var(--card)); color:var(--ink); }
+.today-attention:hover { border-color:color-mix(in srgb,var(--loan) 35%,var(--line)); }
+.today-attention-icon {
+  flex:none;
+  width:30px;
+  height:30px;
+  display:grid;
+  place-items:center;
+  border-radius:10px;
+  background:color-mix(in srgb,var(--loan) 15%,var(--card));
+  color:var(--loan);
+  font-size:15px;
+  font-weight:800;
+}
+.today-attention-copy { min-width:0; flex:1; display:flex; flex-direction:column; gap:2px; }
+.today-attention-copy b { font-size:13.5px; }
+.today-attention-copy small { color:var(--ink-3); font-size:11.5px; line-height:1.3; }
+.today-clear { background:color-mix(in srgb,var(--pos) 5%,var(--card)); color:var(--ink-2); }
+.today-clear > span:first-child {
+  flex:none;
+  width:30px;
+  height:30px;
+  display:grid;
+  place-items:center;
+  border-radius:10px;
+  background:color-mix(in srgb,var(--pos) 12%,var(--card));
+  color:var(--pos);
+  font-weight:800;
+}
+.today-clear > span:last-child { display:flex; flex-direction:column; gap:1px; }
+.today-clear b { color:var(--ink); font-size:13px; }
+.today-clear small { color:var(--ink-3); font-size:11.5px; }
+.today-footnote { margin:-2px 2px 10px; color:var(--ink-3); font-size:11.5px; text-align:center; }
+
+.money-hero { display:flex; flex-direction:column; align-items:flex-start; }
+.money-hero-meta { width:100%; margin-top:11px; display:flex; flex-wrap:wrap; gap:6px; }
+.money-hero-meta span {
+  padding:5px 8px;
+  border:1px solid var(--line-soft);
+  border-radius:999px;
+  background:var(--sunk);
+  color:var(--ink-3);
+  font-size:10.5px;
+  font-weight:600;
+}
+.money-business-title { min-width:0; display:flex; flex-direction:column; gap:2px; }
+.money-business-title small { color:var(--ink-3); font-family:var(--font-body); font-size:10.5px; font-weight:500; letter-spacing:0; text-transform:none; }
+.money-account-line { position:relative; }
+.money-account-line .money-account-open { padding-right:50px; }
+.pin-account {
+  position:absolute;
+  z-index:2;
+  top:50%;
+  right:8px;
+  width:38px;
+  height:38px;
+  transform:translateY(-50%);
+  display:grid;
+  place-items:center;
+  border-radius:11px;
+  color:var(--ink-3);
+  font-size:17px;
+}
+.pin-account:hover,
+.pin-account[aria-pressed="true"] { background:var(--sunk); color:var(--accent); }
+.money-rules { margin:4px 0 12px; border:1px solid var(--line-soft); border-radius:15px; background:var(--card); }
+.money-rules > summary { min-height:46px; padding:12px 14px; cursor:pointer; color:var(--ink-2); font-size:12.5px; font-weight:650; }
+.money-rules[open] > summary { border-bottom:1px solid var(--line-soft); }
+.money-rules .notes2 { padding:10px; margin:0; }
+.money-rules .rule { margin:0; }
+
+@media (max-width:760px) {
+  .wrap:has(.daily-page) { padding-top:8px; }
+
+  .today-hero,
+  .money-hero {
+    margin-bottom:8px;
+    padding:15px;
+    border-radius:18px;
+    box-shadow:none;
+  }
+  .today-hero { align-items:center; }
+  .today-cash-label,
+  .money-hero-label { margin-top:10px; }
+  .today-cash,
+  .money-hero-value { font-size:29px; }
+  .today-cash-meta { max-width:240px; line-height:1.3; }
+  .daily-hero-action { min-height:40px; padding:8px 10px; }
+  .today-pulse { gap:6px; margin-bottom:8px; }
+  .today-pulse-item { padding:9px 10px; border-radius:13px; }
+  .today-pulse-item > b { font-size:13px; }
+  .today-attention,
+  .today-clear { margin-bottom:10px; border-radius:15px; }
+  .today-page .card,
+  .money-page .card { margin-bottom:10px; }
+  .today-page .card > h3,
+  .money-page .card > h3 { min-height:42px; padding:10px 12px; }
+  .today-page .row,
+  .money-page .row { min-height:52px; padding-top:9px; padding-bottom:9px; }
+  .today-page .row .main b,
+  .money-page .row .main b { font-size:13.5px; }
+  .today-page .row .main small,
+  .money-page .row .main small { max-width:42ch; line-height:1.25; }
+  .money-account-line .money-account-open { padding-right:48px; }
+  .pin-account { right:6px; width:38px; height:38px; }
+
+  /* The prompt becomes a compact composer instead of another full card. */
+  .dockable {
+    padding:0 8px 6px;
+    border-top:0;
+    background:transparent;
+    box-shadow:none;
+  }
+  .dockable .entrycard {
+    margin:0;
+    overflow:hidden;
+    border:1px solid var(--line);
+    border-radius:17px;
+    background:color-mix(in srgb,var(--card) 97%,transparent);
+    box-shadow:0 8px 26px rgba(15,20,26,.10);
+  }
+  .dockable .entry { padding:7px; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px; }
+  .dockable .entry input {
+    min-width:0;
+    min-height:48px;
+    padding:10px 12px;
+    border:0;
+    border-radius:12px;
+    background:var(--sunk);
+    box-shadow:none;
+  }
+  .dockable .entry .btn {
+    min-width:52px;
+    min-height:48px;
+    padding:9px 12px;
+    border-radius:12px;
+    font-weight:700;
+  }
+  .dockable .examples { gap:5px; padding:0 7px 7px; }
+  .dockable .examples .ex { flex:none; max-width:220px; padding:6px 9px; border-radius:999px; font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .dockable .examples .ex:nth-child(n+4) { display:none; }
+  .entrywrap:has(.review) .entrycard .examples { display:none; }
+  .entrywrap:has(.review) .entrycard { border-radius:14px; }
+
+  /* Review is optimized for a quick confirm: essentials first, details tucked away. */
+  .dockable .review {
+    max-height:min(62dvh,620px);
+    margin:0 0 6px;
+    border:1px solid var(--line);
+    border-radius:18px;
+    background:var(--card);
+  }
+  .reviewhead { padding:11px 12px 9px; gap:5px; }
+  .reviewheadline { gap:2px; }
+  .reviewtitle { font-size:15px; line-height:1.25; }
+  .reviewsource { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10.5px; }
+  .review .rgrid.core { gap:8px; padding:10px 12px; }
+  .review .f label,
+  .review .f .lab { font-size:10.5px; }
+  .review .warn { padding:9px 12px; font-size:12px; line-height:1.35; }
+  .review .effectstitle { padding:8px 12px 5px; font-size:10px; }
+  .review .effects { max-height:120px; overflow:auto; padding:8px 12px; gap:6px; }
+  .review .eff { font-size:12px; }
+  .review .ractions {
+    position:sticky;
+    bottom:0;
+    z-index:3;
+    display:grid;
+    grid-template-columns:1fr auto;
+    padding:9px 10px max(9px,env(safe-area-inset-bottom));
+    background:color-mix(in srgb,var(--card) 98%,transparent);
+  }
+  .review .ractions > .btn:first-child { grid-column:1 / 2; }
+  .review .ractions > .btn.ghost { grid-column:2 / 3; min-width:78px; }
+  .reviewdetails-toggle { grid-column:1 / -1; min-height:36px; }
+
+  /* Statements become touch-friendly cards instead of a sideways desktop table. */
+  main:has(.back) .back { min-height:42px; margin-bottom:7px; }
+  main:has(.back) .dhead {
+    padding:13px;
+    border:1px solid var(--line);
+    border-radius:17px;
+    background:var(--card);
+  }
+  main:has(.back) .dhead h2 { margin:0; font-size:19px; }
+  main:has(.back) .dhead .muted { margin-top:3px; font-size:11.5px; line-height:1.3; }
+  main:has(.back) .dhead .bal { padding-top:8px; border-top:1px solid var(--line-soft); display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  main:has(.back) .dhead .bal small { margin:0; }
+  main:has(.back) .dhead .bal .num { font-size:22px; }
+
+  main:has(.back) .filters {
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    gap:7px;
+    margin-bottom:10px;
+  }
+  main:has(.back) .filters .grow,
+  main:has(.back) .filters select { grid-column:1 / -1; width:100%; }
+  main:has(.back) .filters .flab { min-width:0; display:grid; gap:3px; color:var(--ink-3); font-size:10px; }
+  main:has(.back) .filters .flab .fi { width:100%; }
+  main:has(.back) .filters .btn { grid-column:1 / -1; width:100%; }
+
+  main:has(.back) .card > h3 { align-items:flex-start; flex-wrap:wrap; gap:3px 10px; }
+  main:has(.back) .card > h3 .muted { width:100%; margin-left:0; font-size:10.5px; }
+  main:has(.back) .tblwrap { overflow:visible; }
+  main:has(.back) .tblwrap table,
+  main:has(.back) .tblwrap tbody { display:block; width:100%; min-width:0; }
+  main:has(.back) .tblwrap thead { display:none; }
+  main:has(.back) .tblwrap tbody { padding:7px; display:grid; gap:7px; }
+  main:has(.back) .tblwrap tr {
+    width:100%;
+    display:grid;
+    grid-template-columns:auto minmax(0,1fr) auto;
+    gap:4px 9px;
+    padding:10px;
+    border:1px solid var(--line-soft);
+    border-radius:14px;
+    background:var(--sunk);
+  }
+  main:has(.back) .tblwrap td { min-width:0; padding:0; border:0; background:transparent; text-align:left; }
+  main:has(.back) .tblwrap td:nth-child(1) { grid-column:1; grid-row:1; color:var(--ink-3); font-size:10px; }
+  main:has(.back) .tblwrap td:nth-child(2) { grid-column:2; grid-row:1 / span 2; }
+  main:has(.back) .tblwrap td:nth-child(2) b { display:block; overflow:hidden; text-overflow:ellipsis; font-size:13px; }
+  main:has(.back) .tblwrap td:nth-child(2) small { display:block; margin-top:2px; color:var(--ink-3); font-size:10.5px; line-height:1.25; }
+  main:has(.back) .tblwrap td:nth-child(3) { grid-column:1; grid-row:2; font-size:10px; }
+  main:has(.back) .tblwrap td:nth-child(4) { grid-column:3; grid-row:1; text-align:right; font-size:13px; font-weight:650; white-space:nowrap; }
+  main:has(.back) .tblwrap td:nth-child(5) { grid-column:3; grid-row:2; text-align:right; color:var(--ink-3); font-size:11px; white-space:nowrap; }
+  main:has(.back) .tblwrap td:nth-child(6) {
+    grid-column:1 / -1;
+    grid-row:3;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:6px;
+    margin-top:5px;
+    padding-top:7px;
+    border-top:1px solid var(--line-soft);
+  }
+  main:has(.back) .tblwrap td:nth-child(6) .btn { width:100%; min-height:38px; margin:0; }
+}
+
+@media (max-width:420px) {
+  .today-hero { align-items:flex-end; }
+  .today-cash,
+  .money-hero-value { font-size:27px; }
+  .daily-hero-action { font-size:11.5px; }
+  .today-attention-copy small { display:none; }
+  .dockable .examples .ex:nth-child(n+3) { display:none; }
+}
+
+@media (max-width:360px) {
+  .today-hero { flex-direction:column; align-items:stretch; }
+  .daily-hero-action { width:100%; }
+  .today-pulse-item { padding-left:8px; padding-right:8px; }
+  .today-pulse-item > b { font-size:12px; }
+}

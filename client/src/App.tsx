@@ -32,6 +32,7 @@ import './styles.css';
 import './navigation.css';
 import './ux6.css';
 import './mobile-core.css';
+import './daily-mobile.css';
 
 type View = 'today' | 'money' | 'projects' | 'people' | 'attention' | 'report' | 'files' | 'history' | 'access' | 'setup' | 'approvals';
 type NavItem = { id: View; label: string; short: string; icon: string; ownerOnly?: boolean };
