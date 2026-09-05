@@ -207,7 +207,7 @@ async function loadBalanceSnapshot(on: string | null, allowedAccounts: string[] 
     : [];
   const receiptOpening = new Map(receiptRows.map((row) => [row.project_id, Number(row.amount)]));
 
-  const accounts = Object.fromEntries(catalogs.accounts.map((account) => [
+  const accounts: Record<string, number> = Object.fromEntries(catalogs.accounts.map((account) => [
     account.id,
     Number(account.opening) + (accountMovement.get(account.id) ?? 0),
   ]));
