@@ -532,11 +532,19 @@ router.post('/delegation/attachments', imageBody, wrap(async (req, res) => {
   if (requestId && !(await canSeeApproval(req, requestId))) return res.status(403).json({ error: 'You cannot attach to that request.' });
   const data = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
   if (!data.length) return res.status(400).json({ error: 'Choose a receipt or photo first.' });
-  const mime = String(req.headers['content-type'] ?? '');
+  const contentType = req.headers['content-type'];
+  if (contentType !== undefined && typeof contentType !== 'string') {
+    return res.status(400).json({ error: 'Content-Type header must be supplied once as text.' });
+  }
+  const mime = contentType ?? '';
   if (!['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(mime)) {
     return res.status(415).json({ error: 'Use a JPG, PNG, WebP or PDF.' });
   }
-  const rawName = String(req.headers['x-file-name'] ?? 'evidence');
+  const rawNameHeader = req.headers['x-file-name'];
+  if (rawNameHeader !== undefined && typeof rawNameHeader !== 'string') {
+    return res.status(400).json({ error: 'File name header must be supplied once as text.' });
+  }
+  const rawName = rawNameHeader ?? 'evidence';
   let filename = rawName;
   try { filename = decodeURIComponent(rawName); } catch { /* keep the safe header text */ }
   filename = filename.replace(/[\r\n]/g, '').slice(0, 180) || 'evidence';
