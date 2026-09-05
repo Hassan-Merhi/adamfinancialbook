@@ -5,6 +5,11 @@ import pg from 'pg';
 // NUMERIC comes back as a string by default; this book only holds money at a
 // scale where a JS number is exact to the cent, so read them as numbers.
 pg.types.setTypeParser(1700, (v) => (v === null ? null : Number(v)));
+// PostgreSQL DATE has no time zone. Keep it as its canonical YYYY-MM-DD string
+// instead of letting node-postgres turn it into a local-midnight Date object.
+// Besides avoiding timezone date shifts, this keeps dates safe when a row is
+// read and written again (for example when a delegated cash handoff is confirmed).
+pg.types.setTypeParser(1082, (v) => v);
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
