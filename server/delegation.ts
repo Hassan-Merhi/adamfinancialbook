@@ -516,20 +516,20 @@ const imageBody = express.raw({
   limit: '6mb',
 });
 
-router.post('/delegation/attachments', imageBody, wrap(async (req, res) => {
-  const params = new URL(req.originalUrl, 'http://localhost').searchParams;
-  const entryIds = params.getAll('entryId');
-  const requestIds = params.getAll('requestId');
-  if (entryIds.length > 1 || requestIds.length > 1) {
-    return res.status(400).json({ error: 'Attachment query parameters must be supplied once as text.' });
+type AttachmentTarget =
+  | { type: 'entry'; id: string }
+  | { type: 'approval'; id: string };
+
+async function canSeeAttachmentTarget(req: Request, target: AttachmentTarget): Promise<boolean> {
+  return target.type === 'entry'
+    ? canSeeEntry(req, target.id)
+    : canSeeApproval(req, target.id);
+}
+
+async function saveAttachment(req: Request, res: express.Response, target: AttachmentTarget) {
+  if (!(await canSeeAttachmentTarget(req, target))) {
+    return res.status(403).json({ error: target.type === 'entry' ? 'You cannot attach to that expense.' : 'You cannot attach to that request.' });
   }
-  const entryId = entryIds[0];
-  const requestId = requestIds[0];
-  if ((!entryId && !requestId) || (entryId && requestId)) {
-    return res.status(400).json({ error: 'Attach the file to one expense or one approval request.' });
-  }
-  if (entryId && !(await canSeeEntry(req, entryId))) return res.status(403).json({ error: 'You cannot attach to that expense.' });
-  if (requestId && !(await canSeeApproval(req, requestId))) return res.status(403).json({ error: 'You cannot attach to that request.' });
   const data = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
   if (!data.length) return res.status(400).json({ error: 'Choose a receipt or photo first.' });
 
@@ -547,43 +547,63 @@ router.post('/delegation/attachments', imageBody, wrap(async (req, res) => {
     : mime === 'image/webp' ? 'webp'
     : 'pdf';
   const filename = `evidence-${id}.${extension}`;
+  const entryId = target.type === 'entry' ? target.id : null;
+  const requestId = target.type === 'approval' ? target.id : null;
 
   await query(
     `INSERT INTO attachments
       (id, uploaded_by, entry_id, approval_request_id, filename, mime_type, byte_size, data)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-    [id, req.user!.id, entryId ?? null, requestId ?? null, filename, mime, data.length, data]);
+    [id, req.user!.id, entryId, requestId, filename, mime, data.length, data]);
   if (req.user?.role === 'entry') {
     await notifyOwners(
       'evidence_added',
       `${req.user!.email} added evidence`,
-      `${filename} was attached to ${entryId ? 'an expense' : 'an approval request'}.`,
-      entryId ? 'entry' : 'approval', entryId ?? requestId,
+      `${filename} was attached to ${target.type === 'entry' ? 'an expense' : 'an approval request'}.`,
+      target.type === 'entry' ? 'entry' : 'approval', target.id,
     );
   }
-  await record(req, 'evidence attached', id, { filename, bytes: data.length, entryId: entryId ?? null, requestId: requestId ?? null });
-  res.status(201).json({ id, filename, mimeType: mime, byteSize: data.length });
+  await record(req, 'evidence attached', id, {
+    filename,
+    bytes: data.length,
+    entryId,
+    requestId,
+  });
+  return res.status(201).json({ id, filename, mimeType: mime, byteSize: data.length });
+}
+
+async function listAttachments(req: Request, res: express.Response, target: AttachmentTarget) {
+  if (!(await canSeeAttachmentTarget(req, target))) {
+    return res.status(403).json({ error: target.type === 'entry' ? 'You cannot view that expense.' : 'You cannot view that request.' });
+  }
+  const rows = target.type === 'entry'
+    ? await query(
+      `SELECT id, filename, mime_type, byte_size, created_at
+         FROM attachments WHERE entry_id = $1 ORDER BY created_at`, [target.id])
+    : await query(
+      `SELECT id, filename, mime_type, byte_size, created_at
+         FROM attachments WHERE approval_request_id = $1 ORDER BY created_at`, [target.id]);
+  return res.json({ files: rows });
+}
+
+router.post('/delegation/attachments/entry/:entryId', imageBody, wrap(async (req, res) => {
+  const entryId = String(req.params.entryId);
+  return saveAttachment(req, res, { type: 'entry', id: entryId });
 }));
 
-router.get('/delegation/attachments', wrap(async (req, res) => {
-  const params = new URL(req.originalUrl, 'http://localhost').searchParams;
-  const entryIds = params.getAll('entryId');
-  const requestIds = params.getAll('requestId');
-  if (entryIds.length > 1 || requestIds.length > 1) {
-    return res.status(400).json({ error: 'Attachment query parameters must be supplied once as text.' });
-  }
-  const entryId = entryIds[0];
-  const requestId = requestIds[0];
-  if (entryId && !(await canSeeEntry(req, entryId))) return res.status(403).json({ error: 'You cannot view that expense.' });
-  if (requestId && !(await canSeeApproval(req, requestId))) return res.status(403).json({ error: 'You cannot view that request.' });
-  if (!entryId && !requestId) return res.status(400).json({ error: 'Say which expense or request.' });
-  const rows = await query(
-    `SELECT id, filename, mime_type, byte_size, created_at
-       FROM attachments
-      WHERE ($1::text IS NOT NULL AND entry_id = $1)
-         OR ($2::text IS NOT NULL AND approval_request_id = $2)
-      ORDER BY created_at`, [entryId ?? null, requestId ?? null]);
-  res.json({ files: rows });
+router.post('/delegation/attachments/request/:requestId', imageBody, wrap(async (req, res) => {
+  const requestId = String(req.params.requestId);
+  return saveAttachment(req, res, { type: 'approval', id: requestId });
+}));
+
+router.get('/delegation/attachments/entry/:entryId', wrap(async (req, res) => {
+  const entryId = String(req.params.entryId);
+  return listAttachments(req, res, { type: 'entry', id: entryId });
+}));
+
+router.get('/delegation/attachments/request/:requestId', wrap(async (req, res) => {
+  const requestId = String(req.params.requestId);
+  return listAttachments(req, res, { type: 'approval', id: requestId });
 }));
 
 router.get('/delegation/attachments/:id', wrap(async (req, res) => {
