@@ -8,10 +8,10 @@ const {
 } = await import('../server/session.js');
 
 describe('passwords', () => {
-  it('is stored as a hash, never as itself', async () => {
+  it('is stored as a strong versioned hash, never as itself', async () => {
     const stored = await hashPassword('the-real-password');
     expect(stored).not.toContain('the-real-password');
-    expect(stored.startsWith('scrypt$')).toBe(true);
+    expect(stored.startsWith('scrypt-v2$')).toBe(true);
   });
 
   it('recognises the right one and refuses the rest', async () => {
