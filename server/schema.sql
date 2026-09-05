@@ -135,3 +135,79 @@ CREATE INDEX IF NOT EXISTS audit_at_idx ON audit (at DESC);
 
 -- Moves whenever a password changes, which stops every session issued before it.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INT NOT NULL DEFAULT 0;
+
+-- Delegated wallet access. An account can be controlled by only one delegated
+-- user, while one user may be responsible for several accounts.
+CREATE TABLE IF NOT EXISTS user_accounts (
+  account_id  TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS user_accounts_user_idx ON user_accounts (user_id);
+
+-- In-app notifications for cash handoffs, spending, approvals and evidence.
+CREATE TABLE IF NOT EXISTS notifications (
+  id            TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type          TEXT NOT NULL,
+  title         TEXT NOT NULL,
+  body          TEXT NOT NULL DEFAULT '',
+  related_type  TEXT,
+  related_id    TEXT,
+  read_at       TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, created_at DESC);
+
+-- Money sent to a delegated account does not touch the ledger until the person
+-- responsible for that account confirms that the money was actually received.
+CREATE TABLE IF NOT EXISTS pending_transfers (
+  id                 TEXT PRIMARY KEY,
+  from_account_id    TEXT NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+  to_account_id      TEXT NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+  amount             NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  purpose            TEXT NOT NULL DEFAULT 'Cash handoff',
+  occurred_on        DATE NOT NULL,
+  requested_by       TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  recipient_user_id  TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  status             TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','confirmed','rejected')),
+  confirmed_at       TIMESTAMPTZ,
+  entry_id           TEXT REFERENCES entries(id) ON DELETE SET NULL,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS pending_transfers_recipient_idx
+  ON pending_transfers (recipient_user_id, status, created_at DESC);
+
+-- Non-cash purchase/order requests. Approval itself never changes a balance;
+-- the actual spend is logged separately when money is used.
+CREATE TABLE IF NOT EXISTS approval_requests (
+  id            TEXT PRIMARY KEY,
+  created_by    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  account_id    TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+  request_text  TEXT NOT NULL,
+  amount        NUMERIC(14,2),
+  status        TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+  reviewed_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
+  review_note   TEXT NOT NULL DEFAULT '',
+  reviewed_at   TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS approval_requests_status_idx ON approval_requests (status, created_at DESC);
+
+-- Receipt photos, PDFs and evidence. Kept private behind the same authenticated
+-- API as the book; files are not exposed as public static assets.
+CREATE TABLE IF NOT EXISTS attachments (
+  id                   TEXT PRIMARY KEY,
+  uploaded_by          TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+  entry_id             TEXT REFERENCES entries(id) ON DELETE CASCADE,
+  approval_request_id  TEXT REFERENCES approval_requests(id) ON DELETE CASCADE,
+  filename             TEXT NOT NULL,
+  mime_type            TEXT NOT NULL,
+  byte_size            INT NOT NULL CHECK (byte_size > 0),
+  data                 BYTEA NOT NULL,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK ((entry_id IS NOT NULL AND approval_request_id IS NULL)
+      OR (entry_id IS NULL AND approval_request_id IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS attachments_entry_idx ON attachments (entry_id);
+CREATE INDEX IF NOT EXISTS attachments_approval_idx ON attachments (approval_request_id);
