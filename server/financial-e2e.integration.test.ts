@@ -486,7 +486,7 @@ describe.skipIf(!DATABASE_URL)('financial end-to-end reconciliation', () => {
            WHEN 'void' THEN 'financial entry voided'
          END
        GROUP BY r.entry_id, r.revision_type, r.transaction_id
-       ORDER BY r.id
+       ORDER BY r.entry_id, r.revision_type, r.transaction_id
     `);
     expect(revisionAudit.map((row) => row.revision_type)).toEqual(
       expect.arrayContaining(['classification', 'correction', 'void']),
