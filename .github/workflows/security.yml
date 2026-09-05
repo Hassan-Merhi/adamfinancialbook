@@ -51,6 +51,10 @@ jobs:
         uses: github/codeql-action/analyze@v4
         with:
           category: '/language:javascript-typescript'
+          output: codeql-results
+          upload: always
+      - name: Block high and critical CodeQL findings
+        run: node scripts/codeql-gate.mjs codeql-results
 
   dependency-review:
     name: dependency-review
