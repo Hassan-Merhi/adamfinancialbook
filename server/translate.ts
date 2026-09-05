@@ -6,6 +6,7 @@ export type BookLanguage = 'en' | 'fr' | 'ar';
 const GOOGLE_ENDPOINT = 'https://translation.googleapis.com/language/translate/v2';
 const MEMORY_CACHE = new Map<string, string>();
 const MAX_MEMORY_CACHE = 2_000;
+let cacheReady: Promise<void> | null = null;
 
 type Provider = 'google';
 type CacheRow = { source_hash: string; source_text: string; translated_text: string };
@@ -27,6 +28,29 @@ function rememberMemory(key: string, value: string) {
   }
 }
 
+async function ensureTranslationCache() {
+  if (!cacheReady) {
+    cacheReady = query(`
+      CREATE TABLE IF NOT EXISTS translation_cache (
+        language TEXT NOT NULL CHECK (language IN ('en','fr','ar')),
+        source_language TEXT CHECK (source_language IS NULL OR source_language IN ('en','fr','ar')),
+        source_hash TEXT NOT NULL,
+        source_text TEXT NOT NULL,
+        translated_text TEXT NOT NULL,
+        provider TEXT NOT NULL DEFAULT 'google',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (language, source_hash)
+      );
+      CREATE INDEX IF NOT EXISTS translation_cache_updated_idx
+        ON translation_cache (updated_at DESC);
+    `).then(() => undefined).catch((error) => {
+      cacheReady = null;
+      throw error;
+    });
+  }
+  await cacheReady;
+}
+
 function decodeGoogleText(value: string) {
   return value
     .replace(/&#x([0-9a-f]+);/gi, (_all, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
@@ -45,7 +69,6 @@ async function translateWithGoogle(
 ): Promise<string[] | null> {
   const key = process.env.GOOGLE_TRANSLATE_API_KEY;
   if (!key) return null;
-
   const response = await fetch(`${GOOGLE_ENDPOINT}?key=${encodeURIComponent(key)}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -56,15 +79,11 @@ async function translateWithGoogle(
       format: 'text',
     }),
   });
-
   if (!response.ok) {
     const detail = (await response.text()).replace(/\s+/g, ' ').slice(0, 240);
     throw new Error(`Google Translation returned ${response.status}${detail ? `: ${detail}` : ''}`);
   }
-
-  const payload = await response.json() as {
-    data?: { translations?: Array<{ translatedText?: unknown }> };
-  };
+  const payload = await response.json() as { data?: { translations?: Array<{ translatedText?: unknown }> } };
   const rows = payload.data?.translations;
   if (!Array.isArray(rows) || rows.length !== texts.length) {
     throw new Error('Google Translation returned the wrong number of strings.');
@@ -80,6 +99,7 @@ async function durableHits(
   sourceLanguage: BookLanguage | undefined,
   texts: string[],
 ): Promise<Map<string, string>> {
+  await ensureTranslationCache();
   const hashes = texts.map((text) => digest(sourceLanguage, text));
   if (!hashes.length) return new Map();
   const rows = await query<CacheRow>(
@@ -92,8 +112,6 @@ async function durableHits(
   const result = new Map<string, string>();
   texts.forEach((text) => {
     const row = byHash.get(digest(sourceLanguage, text));
-    // Hash collisions are extraordinarily unlikely, but checking the stored
-    // source makes cache correctness independent of that assumption.
     if (row?.source_text === text) result.set(text, row.translated_text);
   });
   return result;
@@ -106,6 +124,7 @@ async function rememberDurable(
   translated: string,
   provider: Provider,
 ) {
+  await ensureTranslationCache();
   await query(
     `INSERT INTO translation_cache
        (language, source_language, source_hash, source_text, translated_text, provider, updated_at)
@@ -126,14 +145,11 @@ export async function translateTexts(
   sourceLanguage?: BookLanguage,
 ): Promise<{ translations: string[]; available: boolean; provider?: Provider | 'cache' }> {
   if (!texts.length) return { translations: [], available: true };
-  if (sourceLanguage === language || (language === 'en' && !sourceLanguage)) {
-    return { translations: [...texts], available: true };
-  }
+  if (sourceLanguage === language) return { translations: [...texts], available: true };
 
   const result = [...texts];
   const missing: string[] = [];
   const missingIndexes = new Map<string, number[]>();
-
   const unresolved = texts.filter((text) => MEMORY_CACHE.get(memoryKey(language, sourceLanguage, text)) === undefined);
   let durable = new Map<string, string>();
   if (unresolved.length) {
@@ -162,11 +178,8 @@ export async function translateTexts(
   if (!missing.length) return { translations: result, available: true, provider: 'cache' };
 
   let translated: string[] | null = null;
-  try {
-    translated = await translateWithGoogle(language, missing, sourceLanguage);
-  } catch (error) {
-    console.warn('Google translation unavailable:', (error as Error).message);
-  }
+  try { translated = await translateWithGoogle(language, missing, sourceLanguage); }
+  catch (error) { console.warn('Google translation unavailable:', (error as Error).message); }
   if (!translated) return { translations: result, available: false };
 
   await Promise.all(missing.map(async (source, index) => {
@@ -176,6 +189,5 @@ export async function translateTexts(
     try { await rememberDurable(language, sourceLanguage, source, value, 'google'); }
     catch (error) { console.warn('Translation cache write unavailable:', (error as Error).message); }
   }));
-
   return { translations: result, available: true, provider: 'google' };
 }
