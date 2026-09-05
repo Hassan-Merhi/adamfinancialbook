@@ -108,7 +108,9 @@ AS $$
 DECLARE
   handoff_id TEXT;
 BEGIN
-  IF NEW.kind = 'transfer' AND NEW.client_ref LIKE 'handoff\_%' ESCAPE '\\' THEN
+  IF NEW.kind = 'transfer'
+     AND NEW.client_ref IS NOT NULL
+     AND left(NEW.client_ref, 8) = 'handoff_' THEN
     handoff_id := substring(NEW.client_ref FROM 9);
 
     UPDATE pending_transfers
