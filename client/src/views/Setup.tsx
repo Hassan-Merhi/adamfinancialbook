@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { api, type LoadedBook } from '../api';
 import { money, tone } from '../ui';
+import OperationsPanel from './OperationsPanel';
 import ResetData from './ResetData';
 
 export default function Setup({ book, run }: { book: LoadedBook; run: (w: () => Promise<unknown>, d: string) => void }) {
@@ -132,6 +133,7 @@ export default function Setup({ book, run }: { book: LoadedBook; run: (w: () => 
         </div>
       )}
 
+      <OperationsPanel />
       <ResetData />
     </section>
   );
