@@ -17,15 +17,9 @@ const ENGLISH_WORDS = new Set([
   'project', 'business', 'salary', 'loan', 'expense', 'add', 'create', 'under', 'into', 'ton', 'tons',
 ]);
 
-/**
- * Cheap deterministic language guess used when Chrome's LanguageDetector is not
- * available yet. Arabic script is unambiguous; Latin text is scored from common
- * bookkeeping words and French diacritics. Unknown Latin prose defaults to EN,
- * which is the app's source language.
- */
+/** Cheap deterministic language guess used before an optional browser model is available. */
 export function heuristicLanguage(text: string): SupportedLanguage {
   if (ARABIC.test(text)) return 'ar';
-
   const words = text.toLocaleLowerCase().match(/[\p{L}]+/gu) ?? [];
   let fr = (text.match(FRENCH_ACCENTS) ?? []).length * 2;
   let en = 0;
@@ -46,9 +40,9 @@ function escapeRegExp(value: string) {
 }
 
 /**
- * Keep ledger vocabulary and obvious identifiers out of machine translation.
- * The translator only sees numeric marker tokens such as ⟦0⟧, which keeps exact
- * account/business/person/project names stable for the parser.
+ * Keep ledger identity and financial literals out of machine translation.
+ * Translation providers only see marker tokens such as ⟦0⟧, so stored names,
+ * amounts, dates, percentages, references and filenames come back byte-for-byte.
  */
 export function protectTranslationText(text: string, names: string[] = []): ProtectedTranslationText {
   let masked = text;
@@ -57,8 +51,9 @@ export function protectTranslationText(text: string, names: string[] = []): Prot
 
   const protect = (value: string) => {
     const clean = value.trim();
-    if (!clean || protectedValues.has(clean.toLocaleLowerCase())) return;
-    protectedValues.add(clean.toLocaleLowerCase());
+    const key = clean.toLocaleLowerCase();
+    if (!clean || protectedValues.has(key)) return;
+    protectedValues.add(key);
     const token = `⟦${tokens.length}⟧`;
     tokens.push({ token, value: clean });
     masked = masked.replace(new RegExp(escapeRegExp(clean), 'giu'), token);
@@ -69,21 +64,34 @@ export function protectTranslationText(text: string, names: string[] = []): Prot
     .sort((a, b) => b.length - a.length)
     .forEach(protect);
 
-  // Quoted names/comments are deliberate user text. Preserve them exactly.
-  for (const match of text.matchAll(/["'“”«»]([^"'“”«»]{2,80})["'“”«»]/gu)) {
+  // Deliberately quoted user text is treated as a literal.
+  for (const match of text.matchAll(/["'“”«»]([^"'“”«»]{2,120})["'“”«»]/gu)) {
     if (match[1]) protect(match[1]);
   }
 
-  // Opaque business/account codes should never be translated.
-  for (const match of text.matchAll(/\b[A-Z][A-Z0-9_-]{1,24}\b/g)) protect(match[0]);
+  // Protect URLs and email addresses before shorter token patterns.
+  for (const match of text.matchAll(/\bhttps?:\/\/[^\s]+|\bwww\.[^\s]+/giu)) protect(match[0]);
+  for (const match of text.matchAll(/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/giu)) protect(match[0]);
+
+  // Filenames and common document/image evidence references.
+  for (const match of text.matchAll(/\b[^\s/\\]+\.(?:pdf|png|jpe?g|webp|gif|csv|xlsx?|docx?)\b/giu)) protect(match[0]);
+
+  // Opaque business/account/reference codes should never be translated.
+  for (const match of text.matchAll(/\b[A-Z][A-Z0-9_-]{1,32}\b/g)) protect(match[0]);
+
+  // Dates, currency amounts, percentages and standalone numeric quantities keep
+  // their original decimal separators and symbols. Do this after names/codes so
+  // a number embedded inside a protected identifier does not become a new token.
+  for (const match of text.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)) protect(match[0]);
+  for (const match of text.matchAll(/(?:USD|EUR|GBP|ZAR|CDF|[$€£])\s?\d[\d,.]*(?:\s?(?:USD|EUR|GBP|ZAR|CDF))?/giu)) protect(match[0]);
+  for (const match of text.matchAll(/\b\d[\d,.]*%\b/g)) protect(match[0]);
+  for (const match of text.matchAll(/\b\d+(?:[.,]\d+)?\b/g)) protect(match[0]);
 
   return { masked, tokens };
 }
 
 export function restoreTranslationText(text: string, protectedText: ProtectedTranslationText): string {
   let restored = text;
-  for (const { token, value } of protectedText.tokens) {
-    restored = restored.split(token).join(value);
-  }
+  for (const { token, value } of protectedText.tokens) restored = restored.split(token).join(value);
   return restored;
 }
