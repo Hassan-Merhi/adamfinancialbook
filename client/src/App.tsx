@@ -22,11 +22,20 @@ import Approvals from './views/Approvals';
 import Statement, { type Focus } from './views/Statement';
 import { money } from './ui';
 import './styles.css';
+import './navigation.css';
 
 type View = 'today' | 'money' | 'projects' | 'people' | 'report' | 'files' | 'history' | 'access' | 'setup' | 'approvals';
 
-/** The long label is for the rail; the short one and the icon are for the phone. */
-const NAV: { id: View; label: string; short: string; icon: string }[] = [
+type NavItem = {
+  id: View;
+  label: string;
+  short: string;
+  icon: string;
+  ownerOnly?: boolean;
+};
+
+/** Keep the everyday rail intentionally small. Everything secondary lives under More. */
+const PRIMARY_NAV: NavItem[] = [
   { id: 'today', label: 'Today', short: 'Today',
     icon: 'M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
   { id: 'money', label: 'Accounts & loans', short: 'Money',
@@ -35,18 +44,24 @@ const NAV: { id: View; label: string; short: string; icon: string }[] = [
     icon: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' },
   { id: 'people', label: 'People', short: 'People',
     icon: 'M9 4.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4zM3 20c0-3.3 2.7-5 6-5s6 1.7 6 5M16 6.5a3 3 0 0 1 0 6M17.5 20c0-2.2-.7-3.7-2-4.6' },
-  { id: 'report', label: 'Day report', short: 'Report',
-    icon: 'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM8 8h8M8 12h8M8 16h5' },
-  { id: 'files', label: 'Receipts & files', short: 'Files',
-    icon: 'M6 3h8l4 4v14H6zM14 3v5h5M9 13h6M9 17h4' },
-  { id: 'history', label: 'History', short: 'History',
-    icon: 'M12 7v5l3 2M3.5 12a8.5 8.5 0 1 0 2.2-5.7M3 4v4h4' },
-  { id: 'setup', label: 'Set it up', short: 'Setup',
-    icon: 'M4 7h16M4 12h16M4 17h16M9 5v4M15 10v4M7 15v4' },
-  { id: 'access', label: 'Access', short: 'Access',
-    icon: 'M15.5 5a4.5 4.5 0 1 0-2.2 3.9L18 13.4V17h3.5v-3.5l-6-6A4.5 4.5 0 0 0 15.5 5zM11 5.6a1.4 1.4 0 1 1-2.8 0 1.4 1.4 0 0 1 2.8 0z' },
 ];
 
+const MORE_NAV: NavItem[] = [
+  { id: 'report', label: 'Day report', short: 'Report',
+    icon: 'M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM8 8h8M8 12h8M8 16h5' },
+  { id: 'approvals', label: 'Approvals', short: 'Approvals',
+    icon: 'M5 12.5 9.2 17 19 7' },
+  { id: 'files', label: 'Receipts & files', short: 'Files', ownerOnly: true,
+    icon: 'M6 3h8l4 4v14H6zM14 3v5h5M9 13h6M9 17h4' },
+  { id: 'history', label: 'History', short: 'History', ownerOnly: true,
+    icon: 'M12 7v5l3 2M3.5 12a8.5 8.5 0 1 0 2.2-5.7M3 4v4h4' },
+  { id: 'access', label: 'Access', short: 'Access',
+    icon: 'M15.5 5a4.5 4.5 0 1 0-2.2 3.9L18 13.4V17h3.5v-3.5l-6-6A4.5 4.5 0 0 0 15.5 5zM11 5.6a1.4 1.4 0 1 1-2.8 0 1.4 1.4 0 0 1 2.8 0z' },
+  { id: 'setup', label: 'Set it up', short: 'Setup', ownerOnly: true,
+    icon: 'M4 7h16M4 12h16M4 17h16M9 5v4M15 10v4M7 15v4' },
+];
+
+const MORE_ICON = 'M5 12h.01M12 12h.01M19 12h.01';
 const LOOKS = [['assistant', 'Assistant'], ['ledger', 'Ledger']] as const;
 
 export default function App() {
@@ -59,6 +74,7 @@ export default function App() {
   const [offline, setOffline] = useState(!navigator.onLine);
   const [look, setLook] = useState(0);
   const [approvalUnread, setApprovalUnread] = useState(0);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   // The look is only a set of tokens; nothing else in the app knows about it.
   useEffect(() => {
@@ -133,9 +149,7 @@ export default function App() {
     return () => { window.removeEventListener('online', online); window.removeEventListener('offline', gone); };
   }, [me?.user?.id]);
 
-  // Keep the launcher useful even when the approvals page is not open. The old
-  // standalone wallet polled in the background; the integrated UI keeps that
-  // behavior without bringing back a second visual system.
+  // Keep the unread count useful even though approvals now lives under More.
   useEffect(() => {
     if (!me?.user) { setApprovalUnread(0); return; }
     let cancelled = false;
@@ -160,8 +174,13 @@ export default function App() {
     try { await work(); await reload(); say(done); }
     catch (e) { say((e as Error).message, true); }
   };
-  const go = (next: View) => { setView(next); setFocus(null); setNote(null); };
-  const open = (f: Focus) => { setFocus(f); setNote(null); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  const go = (next: View) => {
+    setView(next);
+    setFocus(null);
+    setNote(null);
+    setMoreOpen(false);
+  };
+  const open = (f: Focus) => { setFocus(f); setNote(null); setMoreOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); };
 
   if (!me) return <div className="wrap"><p className="muted">Opening the book…</p></div>;
 
@@ -183,6 +202,8 @@ export default function App() {
   const entryOnly = me.user.role === 'entry';
   const entryLanding = entryOnly && view === 'today' && !focus;
   const showPrompt = !entryOnly || view === 'today';
+  const visibleMore = MORE_NAV.filter((item) => !item.ownerOnly || me.user!.role === 'owner');
+  const moreIsCurrent = !focus && visibleMore.some((item) => item.id === view);
 
   return (
     <div className="shell">
@@ -197,14 +218,43 @@ export default function App() {
           <b>Financial Book</b>
           <span>{money(book.balances.totalCash)} on hand</span>
         </div>
-        {NAV.filter((n) => me.user!.role === 'owner' || (n.id !== 'setup' && n.id !== 'history' && n.id !== 'files')).map((n) => (
-          <button key={n.id} className="navbtn" aria-current={!focus && view === n.id}
-            onClick={() => go(n.id)}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d={n.icon} /></svg>
-            <span className="long">{n.label}</span>
-            <span className="short">{n.short}</span>
+
+        {PRIMARY_NAV.map((item) => (
+          <button key={item.id} className="navbtn" aria-current={!focus && view === item.id}
+            onClick={() => go(item.id)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.icon} /></svg>
+            <span className="long">{item.label}</span>
+            <span className="short">{item.short}</span>
           </button>
         ))}
+
+        <div className="moregroup">
+          <button className="navbtn morebtn" aria-current={moreIsCurrent} aria-expanded={moreOpen}
+            aria-haspopup="menu" onClick={() => setMoreOpen((openNow) => !openNow)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d={MORE_ICON} /></svg>
+            <span className="long">More</span>
+            <span className="short">More</span>
+            {approvalUnread > 0 && <span className="navbadge">{approvalUnread > 99 ? '99+' : approvalUnread}</span>}
+          </button>
+
+          {moreOpen && (
+            <div className="moremenu" role="menu" aria-label="More pages">
+              {visibleMore.map((item) => {
+                const label = item.id === 'approvals' && entryOnly ? 'My wallet' : item.label;
+                return (
+                  <button key={item.id} className="moreitem" role="menuitem"
+                    aria-current={!focus && view === item.id} onClick={() => go(item.id)}>
+                    <span>{label}</span>
+                    {item.id === 'approvals' && approvalUnread > 0 && (
+                      <span className="navbadge inline">{approvalUnread > 99 ? '99+' : approvalUnread}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
         <div className="railfoot">
           <span className="muted">{me.user.email}{me.user.role === 'entry' ? ' · can enter only' : ''}</span>
           <button className="linkbtn" onClick={async () => {
@@ -273,11 +323,6 @@ export default function App() {
           </main>
         )}
       </div>
-
-      <button className="approval-launcher" aria-current={!focus && view === 'approvals'} onClick={() => go('approvals')}>
-        {entryOnly ? 'My wallet' : 'Approvals'}
-        {approvalUnread > 0 && <span className="approval-badge">{approvalUnread > 99 ? '99+' : approvalUnread}</span>}
-      </button>
 
       <div className="toggles">
         <button className="toggle" onClick={() => setLook((look + 1) % LOOKS.length)}>
