@@ -370,7 +370,7 @@ function SetupCard({ draft, book, done, cancel, fail }: {
 
   const preview = kind === 'business'
     ? `A new business "${name || '—'}", with its own accounts and loan positions.`
-    : kind === 'account' ? `Cash account "${name || '—'}" under ${book.businesses.find((b) => b.id === businessId)?.name}, starting at ${money(amount)}.`
+    : kind === 'account' ? `Cash account "${name || '—'}", starting at ${money(amount)}.`
     : kind === 'project' ? `Project "${name || '—'}", ${money(amount)} received before the cut-off.`
     : kind === 'payroll' ? `"${name || '—'}" on payroll at ${money(amount)} per month.`
     : kind === 'supplier' ? `Supplier "${name || '—'}", opening amount owed ${money(amount)}.`
@@ -380,7 +380,7 @@ function SetupCard({ draft, book, done, cancel, fail }: {
     setBusy(true);
     try {
       if (kind === 'business') await api.addBusiness(name);
-      else if (kind === 'account') await api.addAccount({ name, businessId, opening: amount });
+      else if (kind === 'account') await api.addAccount({ name, businessId: null, opening: amount });
       else if (kind === 'project') await api.addProject({ name, businessId, opening: amount });
       else {
         await api.addPerson({
@@ -414,7 +414,7 @@ function SetupCard({ draft, book, done, cancel, fail }: {
         <Field label="Name" flag={!name}>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="What to call it" />
         </Field>
-        {kind !== 'business' && (
+        {kind !== 'business' && kind !== 'account' && (
           <Field label="Under">
             <select value={businessId} onChange={(e) => setBusinessId(e.target.value)}>
               {book.businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
