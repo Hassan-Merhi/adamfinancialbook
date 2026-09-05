@@ -1,73 +1,62 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { createHash } from 'node:crypto';
+import { heuristicLanguage } from '../shared/language.js';
+import { query } from './db.js';
 
 export type BookLanguage = 'en' | 'fr' | 'ar';
 
-const LANGUAGE_NAMES: Record<BookLanguage, string> = {
-  en: 'English',
-  fr: 'French',
-  ar: 'Arabic',
-};
-
-// Google Cloud Translation is the primary provider for the global UI translator.
-// It is purpose-built for this job and lets the client translate every visible
-// string without maintaining a hand-written dictionary for every page.
 const GOOGLE_ENDPOINT = 'https://translation.googleapis.com/language/translate/v2';
+const MEMORY_CACHE = new Map<string, string>();
+const MAX_MEMORY_CACHE = 2_000;
+let cacheReady: Promise<void> | null = null;
 
-// Claude remains a fallback when it is already configured for sentence reading,
-// so deployments do not suddenly lose translation while a Google key is being
-// added. It can also be pointed at a cheaper model independently.
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_TRANSLATION_MODEL ?? 'claude-opus-5';
+type Provider = 'google';
+type CacheRow = { source_hash: string; source_text: string; translated_text: string };
 
-const TRANSLATION_TOOL: Anthropic.Tool = {
-  name: 'return_translations',
-  description: 'Return exactly one translated string for every supplied string, in the same order.',
-  strict: true,
-  input_schema: {
-    type: 'object',
-    properties: {
-      translations: {
-        type: 'array',
-        items: { type: 'string' },
-      },
-    },
-    required: ['translations'],
-    additionalProperties: false,
-  },
-};
-
-const SYSTEM = `You are the translation layer for a financial bookkeeping application.
-Translate every supplied string into the requested target language and return only the tool result.
-
-Rules:
-- Preserve the exact financial meaning. Never add explanations, advice, or missing facts.
-- Preserve numbers, currency amounts, dates, percentages, email addresses, URLs, identifiers, reference codes, and filenames exactly.
-- Keep personal names, company/brand names, and opaque account codes unchanged. Ordinary descriptive account/project/business names may be translated naturally.
-- Translate interface labels, transaction purposes, comments, notes, reminders, status messages, warnings, and ordinary prose naturally.
-- A string already written in the requested language should be returned unchanged unless a tiny grammatical normalization is necessary.
-- For Arabic use clear Modern Standard Arabic suitable for a business interface. Do not transliterate English words when a normal Arabic financial term exists.
-- Keep each output concise and faithful to the corresponding input. The output array length must exactly equal the input array length.`;
-
-// Server-side cache stops repeated provider calls across users while this process
-// is alive. The browser has its own persistent cache as well.
-const CACHE = new Map<string, string>();
-const MAX_CACHE = 5_000;
-
-function cacheKey(language: BookLanguage, text: string) {
-  return `${language}\u0000${text}`;
+function digest(sourceLanguage: BookLanguage | undefined, text: string) {
+  return createHash('sha256').update(`${sourceLanguage ?? 'auto'}\u0000${text}`, 'utf8').digest('hex');
 }
 
-function remember(key: string, value: string) {
-  if (CACHE.has(key)) CACHE.delete(key);
-  CACHE.set(key, value);
-  if (CACHE.size > MAX_CACHE) {
-    const oldest = CACHE.keys().next().value as string | undefined;
-    if (oldest) CACHE.delete(oldest);
+function memoryKey(language: BookLanguage, sourceLanguage: BookLanguage | undefined, text: string) {
+  return `${language}\u0000${sourceLanguage ?? 'auto'}\u0000${text}`;
+}
+
+function rememberMemory(key: string, value: string) {
+  if (MEMORY_CACHE.has(key)) MEMORY_CACHE.delete(key);
+  MEMORY_CACHE.set(key, value);
+  if (MEMORY_CACHE.size > MAX_MEMORY_CACHE) {
+    const oldest = MEMORY_CACHE.keys().next().value as string | undefined;
+    if (oldest) MEMORY_CACHE.delete(oldest);
   }
 }
 
+async function ensureTranslationCache() {
+  if (!cacheReady) {
+    cacheReady = (async () => {
+      await query(`
+        CREATE TABLE IF NOT EXISTS translation_cache (
+          language TEXT NOT NULL CHECK (language IN ('en','fr','ar')),
+          source_language TEXT CHECK (source_language IS NULL OR source_language IN ('en','fr','ar')),
+          source_hash TEXT NOT NULL,
+          source_text TEXT NOT NULL,
+          translated_text TEXT NOT NULL,
+          provider TEXT NOT NULL DEFAULT 'google',
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (language, source_hash)
+        )
+      `);
+      await query(`
+        CREATE INDEX IF NOT EXISTS translation_cache_updated_idx
+          ON translation_cache (updated_at DESC)
+      `);
+    })().catch((error) => {
+      cacheReady = null;
+      throw error;
+    });
+  }
+  await cacheReady;
+}
+
 function decodeGoogleText(value: string) {
-  // The v2 API can entity-encode punctuation in translatedText. Decode the
-  // small HTML entity set that can occur in ordinary bookkeeping/UI prose.
   return value
     .replace(/&#x([0-9a-f]+);/gi, (_all, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
     .replace(/&#(\d+);/g, (_all, dec: string) => String.fromCodePoint(parseInt(dec, 10)))
@@ -78,79 +67,115 @@ function decodeGoogleText(value: string) {
     .replace(/&amp;/g, '&');
 }
 
-async function translateWithGoogle(language: BookLanguage, texts: string[]): Promise<string[] | null> {
+async function translateWithGoogle(
+  language: BookLanguage,
+  texts: string[],
+  sourceLanguage?: BookLanguage,
+): Promise<string[] | null> {
   const key = process.env.GOOGLE_TRANSLATE_API_KEY;
   if (!key) return null;
-
   const response = await fetch(`${GOOGLE_ENDPOINT}?key=${encodeURIComponent(key)}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ q: texts, target: language, format: 'text' }),
+    body: JSON.stringify({
+      q: texts,
+      target: language,
+      ...(sourceLanguage ? { source: sourceLanguage } : {}),
+      format: 'text',
+    }),
   });
-
   if (!response.ok) {
     const detail = (await response.text()).replace(/\s+/g, ' ').slice(0, 240);
     throw new Error(`Google Translation returned ${response.status}${detail ? `: ${detail}` : ''}`);
   }
-
-  const payload = await response.json() as {
-    data?: { translations?: Array<{ translatedText?: unknown }> };
-  };
+  const payload = await response.json() as { data?: { translations?: Array<{ translatedText?: unknown }> } };
   const rows = payload.data?.translations;
   if (!Array.isArray(rows) || rows.length !== texts.length) {
     throw new Error('Google Translation returned the wrong number of strings.');
   }
-
-  const translated = rows.map((row) => {
+  return rows.map((row) => {
     if (typeof row.translatedText !== 'string') throw new Error('Google Translation returned an invalid string.');
     return decodeGoogleText(row.translatedText);
   });
-  return translated;
 }
 
-async function translateWithAnthropic(language: BookLanguage, texts: string[]): Promise<string[] | null> {
-  if (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) return null;
-
-  const client = new Anthropic();
-  const response = await client.messages.create({
-    model: ANTHROPIC_MODEL,
-    max_tokens: Math.min(8_000, Math.max(1_000, texts.join('').length * 2)),
-    system: SYSTEM,
-    tools: [TRANSLATION_TOOL],
-    tool_choice: { type: 'tool', name: 'return_translations' },
-    messages: [{
-      role: 'user',
-      content: `Target language: ${LANGUAGE_NAMES[language]} (${language}).\n\nStrings to translate, as JSON:\n${JSON.stringify(texts)}`,
-    }],
+async function durableHits(
+  language: BookLanguage,
+  sourceLanguage: BookLanguage | undefined,
+  texts: string[],
+): Promise<Map<string, string>> {
+  await ensureTranslationCache();
+  const hashes = texts.map((text) => digest(sourceLanguage, text));
+  if (!hashes.length) return new Map();
+  const rows = await query<CacheRow>(
+    `SELECT source_hash, source_text, translated_text
+       FROM translation_cache
+      WHERE language = $1 AND source_hash = ANY($2::text[])`,
+    [language, hashes],
+  );
+  const byHash = new Map(rows.map((row) => [row.source_hash, row]));
+  const result = new Map<string, string>();
+  texts.forEach((text) => {
+    const row = byHash.get(digest(sourceLanguage, text));
+    if (row?.source_text === text) result.set(text, row.translated_text);
   });
+  return result;
+}
 
-  const call = response.content.find((block): block is Anthropic.ToolUseBlock => block.type === 'tool_use');
-  if (!call) throw new Error('The translation model returned no translation tool result.');
-
-  const translated = (call.input as { translations?: unknown }).translations;
-  if (!Array.isArray(translated) || translated.length !== texts.length || translated.some((v) => typeof v !== 'string')) {
-    throw new Error('The translation model returned the wrong number of strings.');
-  }
-  return translated as string[];
+async function rememberDurable(
+  language: BookLanguage,
+  sourceLanguage: BookLanguage | undefined,
+  source: string,
+  translated: string,
+  provider: Provider,
+) {
+  await ensureTranslationCache();
+  await query(
+    `INSERT INTO translation_cache
+       (language, source_language, source_hash, source_text, translated_text, provider, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,now())
+     ON CONFLICT (language, source_hash) DO UPDATE SET
+       source_language = EXCLUDED.source_language,
+       source_text = EXCLUDED.source_text,
+       translated_text = EXCLUDED.translated_text,
+       provider = EXCLUDED.provider,
+       updated_at = now()`,
+    [language, sourceLanguage ?? null, digest(sourceLanguage, source), source, translated, provider],
+  );
 }
 
 export async function translateTexts(
   language: BookLanguage,
   texts: string[],
-): Promise<{ translations: string[]; available: boolean; provider?: 'google' | 'anthropic' }> {
+  sourceLanguage?: BookLanguage,
+): Promise<{ translations: string[]; available: boolean; provider?: Provider | 'cache' }> {
   if (!texts.length) return { translations: [], available: true };
-
-  // English is the source UI language. No provider call is needed to switch back.
-  if (language === 'en') return { translations: [...texts], available: true };
+  if (sourceLanguage === language) return { translations: [...texts], available: true };
+  // Generic UI calls historically used target=en as an identity operation. Keep
+  // that contract for English text, while still allowing a French/Arabic prompt
+  // to be auto-detected and normalized to English when sourceLanguage is omitted.
+  if (!sourceLanguage && language === 'en' && texts.every((text) => heuristicLanguage(text) === 'en')) {
+    return { translations: [...texts], available: true };
+  }
 
   const result = [...texts];
   const missing: string[] = [];
   const missingIndexes = new Map<string, number[]>();
+  const unresolved = texts.filter((text) => MEMORY_CACHE.get(memoryKey(language, sourceLanguage, text)) === undefined);
+  let durable = new Map<string, string>();
+  if (unresolved.length) {
+    try { durable = await durableHits(language, sourceLanguage, [...new Set(unresolved)]); }
+    catch (error) { console.warn('Translation cache read unavailable:', (error as Error).message); }
+  }
 
   texts.forEach((text, index) => {
-    const cached = CACHE.get(cacheKey(language, text));
-    if (cached !== undefined) {
-      result[index] = cached;
+    const key = memoryKey(language, sourceLanguage, text);
+    const memory = MEMORY_CACHE.get(key);
+    if (memory !== undefined) { result[index] = memory; return; }
+    const stored = durable.get(text);
+    if (stored !== undefined) {
+      result[index] = stored;
+      rememberMemory(key, stored);
       return;
     }
     const indexes = missingIndexes.get(text);
@@ -161,36 +186,19 @@ export async function translateTexts(
     }
   });
 
-  if (!missing.length) return { translations: result, available: true };
+  if (!missing.length) return { translations: result, available: true, provider: 'cache' };
 
   let translated: string[] | null = null;
-  let provider: 'google' | 'anthropic' | undefined;
-
-  // Google is primary. If its key is absent or the API has a temporary problem,
-  // try the already-supported Anthropic connection before showing source text.
-  try {
-    translated = await translateWithGoogle(language, missing);
-    if (translated) provider = 'google';
-  } catch (error) {
-    console.warn('Google translation unavailable, trying fallback:', (error as Error).message);
-  }
-
-  if (!translated) {
-    try {
-      translated = await translateWithAnthropic(language, missing);
-      if (translated) provider = 'anthropic';
-    } catch (error) {
-      console.warn('Anthropic translation unavailable:', (error as Error).message);
-    }
-  }
-
+  try { translated = await translateWithGoogle(language, missing, sourceLanguage); }
+  catch (error) { console.warn('Google translation unavailable:', (error as Error).message); }
   if (!translated) return { translations: result, available: false };
 
-  missing.forEach((source, i) => {
-    const value = translated![i] ?? source;
-    remember(cacheKey(language, source), value);
-    for (const index of missingIndexes.get(source) ?? []) result[index] = value;
-  });
-
-  return { translations: result, available: true, provider };
+  await Promise.all(missing.map(async (source, index) => {
+    const value = translated![index] ?? source;
+    rememberMemory(memoryKey(language, sourceLanguage, source), value);
+    for (const itemIndex of missingIndexes.get(source) ?? []) result[itemIndex] = value;
+    try { await rememberDurable(language, sourceLanguage, source, value, 'google'); }
+    catch (error) { console.warn('Translation cache write unavailable:', (error as Error).message); }
+  }));
+  return { translations: result, available: true, provider: 'google' };
 }

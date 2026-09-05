@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -22,11 +22,16 @@ describe('mobile performance contract', () => {
   });
 
   it('keeps compact startup compatible with bounded translation work and prompt-name protection', () => {
-    const translation = read('client/src/browser-translation.ts');
-    expect(translation).toContain('const DISPLAY_CONCURRENCY = 6');
-    expect(translation).toContain("url.pathname === '/api/overview'");
-    expect(translation).toContain('rememberCatalog(await response.clone().json())');
-    expect(translation).toContain('Do not warm LanguageDetector here');
+    const i18n = read('client/src/i18n.tsx');
+    const prompt = read('client/src/multilingual-offline.ts');
+    expect(existsSync(join(root, 'client/src/browser-translation.ts'))).toBe(false);
+    expect(i18n).toContain('translateStatic(language, source)');
+    expect(i18n).toContain('Math.min(4, sources.length)');
+    expect(i18n).toContain('setTimeout(() => { void flush(); }, 160)');
+    expect(prompt).toContain('protectTranslationText(text, names(book))');
+    expect(prompt).toContain("url.pathname === '/api/read'");
+    expect(`${i18n}\n${prompt}`).not.toContain('window.location.reload');
+    expect(`${i18n}\n${prompt}`).not.toContain('setInterval(');
   });
 
   it('keeps the phone viewport, safe areas, RTL and reduced-motion contracts', () => {
