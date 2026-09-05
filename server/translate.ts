@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { heuristicLanguage } from '../shared/language.js';
 import { query } from './db.js';
 
 export type BookLanguage = 'en' | 'fr' | 'ar';
@@ -30,20 +31,24 @@ function rememberMemory(key: string, value: string) {
 
 async function ensureTranslationCache() {
   if (!cacheReady) {
-    cacheReady = query(`
-      CREATE TABLE IF NOT EXISTS translation_cache (
-        language TEXT NOT NULL CHECK (language IN ('en','fr','ar')),
-        source_language TEXT CHECK (source_language IS NULL OR source_language IN ('en','fr','ar')),
-        source_hash TEXT NOT NULL,
-        source_text TEXT NOT NULL,
-        translated_text TEXT NOT NULL,
-        provider TEXT NOT NULL DEFAULT 'google',
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        PRIMARY KEY (language, source_hash)
-      );
-      CREATE INDEX IF NOT EXISTS translation_cache_updated_idx
-        ON translation_cache (updated_at DESC);
-    `).then(() => undefined).catch((error) => {
+    cacheReady = (async () => {
+      await query(`
+        CREATE TABLE IF NOT EXISTS translation_cache (
+          language TEXT NOT NULL CHECK (language IN ('en','fr','ar')),
+          source_language TEXT CHECK (source_language IS NULL OR source_language IN ('en','fr','ar')),
+          source_hash TEXT NOT NULL,
+          source_text TEXT NOT NULL,
+          translated_text TEXT NOT NULL,
+          provider TEXT NOT NULL DEFAULT 'google',
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (language, source_hash)
+        )
+      `);
+      await query(`
+        CREATE INDEX IF NOT EXISTS translation_cache_updated_idx
+          ON translation_cache (updated_at DESC)
+      `);
+    })().catch((error) => {
       cacheReady = null;
       throw error;
     });
@@ -146,6 +151,12 @@ export async function translateTexts(
 ): Promise<{ translations: string[]; available: boolean; provider?: Provider | 'cache' }> {
   if (!texts.length) return { translations: [], available: true };
   if (sourceLanguage === language) return { translations: [...texts], available: true };
+  // Generic UI calls historically used target=en as an identity operation. Keep
+  // that contract for English text, while still allowing a French/Arabic prompt
+  // to be auto-detected and normalized to English when sourceLanguage is omitted.
+  if (!sourceLanguage && language === 'en' && texts.every((text) => heuristicLanguage(text) === 'en')) {
+    return { translations: [...texts], available: true };
+  }
 
   const result = [...texts];
   const missing: string[] = [];
