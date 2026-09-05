@@ -522,8 +522,8 @@ router.post('/delegation/attachments', imageBody, wrap(async (req, res) => {
   if ((rawEntryId !== undefined && typeof rawEntryId !== 'string') || (rawRequestId !== undefined && typeof rawRequestId !== 'string')) {
     return res.status(400).json({ error: 'Attachment query parameters must be supplied once as text.' });
   }
-  const entryId = rawEntryId;
-  const requestId = rawRequestId;
+  const entryId = rawEntryId === undefined ? undefined : String(rawEntryId);
+  const requestId = rawRequestId === undefined ? undefined : String(rawRequestId);
   if ((!entryId && !requestId) || (entryId && requestId)) {
     return res.status(400).json({ error: 'Attach the file to one expense or one approval request.' });
   }
@@ -563,8 +563,8 @@ router.get('/delegation/attachments', wrap(async (req, res) => {
   if ((rawEntryId !== undefined && typeof rawEntryId !== 'string') || (rawRequestId !== undefined && typeof rawRequestId !== 'string')) {
     return res.status(400).json({ error: 'Attachment query parameters must be supplied once as text.' });
   }
-  const entryId = rawEntryId;
-  const requestId = rawRequestId;
+  const entryId = rawEntryId === undefined ? undefined : String(rawEntryId);
+  const requestId = rawRequestId === undefined ? undefined : String(rawRequestId);
   if (entryId && !(await canSeeEntry(req, entryId))) return res.status(403).json({ error: 'You cannot view that expense.' });
   if (requestId && !(await canSeeApproval(req, requestId))) return res.status(403).json({ error: 'You cannot view that request.' });
   if (!entryId && !requestId) return res.status(400).json({ error: 'Say which expense or request.' });
