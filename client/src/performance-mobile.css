@@ -1,0 +1,15 @@
+/* Phase 5 — keep phone rendering calm and cheap without changing the visual language. */
+.view-loading{display:grid;gap:10px;margin:0 0 18px;padding:14px 0}.view-loading-title,.view-loading-block{display:block;border-radius:12px;background:linear-gradient(90deg,var(--sunk),var(--line-soft),var(--sunk));background-size:200% 100%;animation:view-loading-shimmer 1.2s ease-in-out infinite}.view-loading-title{width:min(42%,220px);height:24px}.view-loading-block{width:100%;height:112px}.view-loading-block.short{width:72%;height:72px}@keyframes view-loading-shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
+
+@media(max-width:760px){
+  html,body,#root,.shell,.content,main,.wrap{max-width:100%;overflow-x:clip}
+  .card,.tile,.file-card,.audit-event,.setup-card,.access-page .card{content-visibility:auto;contain-intrinsic-size:auto 180px}
+  .view-loading{padding:8px 0 4px}.view-loading-block{height:94px}.view-loading-block.short{height:62px}
+  input,select,textarea{font-size:16px}
+  .moremenu,.statement-sheet,.detail-sheet{overscroll-behavior:contain}
+}
+
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+  .view-loading-title,.view-loading-block{animation:none;background:var(--sunk)}
+}
