@@ -1,4 +1,4 @@
-import express, { Router, type Request, type RequestHandler } from 'express';
+import express, { Router, type Request, type RequestHandler, type Response } from 'express';
 import { z } from 'zod';
 import { newId, pool, query } from './db.js';
 import { loadBook, saveEntry } from './book.js';
@@ -516,20 +516,26 @@ const imageBody = express.raw({
   limit: '6mb',
 });
 
-router.post('/delegation/attachments', imageBody, wrap(async (req, res) => {
-  const params = new URL(req.originalUrl, 'http://localhost').searchParams;
-  const entryIds = params.getAll('entryId');
-  const requestIds = params.getAll('requestId');
-  if (entryIds.length > 1 || requestIds.length > 1) {
-    return res.status(400).json({ error: 'Attachment query parameters must be supplied once as text.' });
+type AttachmentTarget =
+  | { kind: 'entry'; id: string }
+  | { kind: 'approval'; id: string };
+
+function attachmentColumns(target: AttachmentTarget) {
+  return target.kind === 'entry'
+    ? { entryId: target.id, requestId: null, relatedType: 'entry' as const }
+    : { entryId: null, requestId: target.id, relatedType: 'approval' as const };
+}
+
+async function authorizeAttachment(req: Request, target: AttachmentTarget): Promise<boolean> {
+  return target.kind === 'entry'
+    ? canSeeEntry(req, target.id)
+    : canSeeApproval(req, target.id);
+}
+
+async function storeAttachment(req: Request, res: Response, target: AttachmentTarget) {
+  if (!(await authorizeAttachment(req, target))) {
+    return res.status(403).json({ error: `You cannot attach to that ${target.kind === 'entry' ? 'expense' : 'request'}.` });
   }
-  const entryId = entryIds[0];
-  const requestId = requestIds[0];
-  if ((!entryId && !requestId) || (entryId && requestId)) {
-    return res.status(400).json({ error: 'Attach the file to one expense or one approval request.' });
-  }
-  if (entryId && !(await canSeeEntry(req, entryId))) return res.status(403).json({ error: 'You cannot attach to that expense.' });
-  if (requestId && !(await canSeeApproval(req, requestId))) return res.status(403).json({ error: 'You cannot attach to that request.' });
   const data = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
   if (!data.length) return res.status(400).json({ error: 'Choose a receipt or photo first.' });
   const mime = String(req.headers['content-type'] ?? '');
@@ -540,43 +546,81 @@ router.post('/delegation/attachments', imageBody, wrap(async (req, res) => {
   let filename = rawName;
   try { filename = decodeURIComponent(rawName); } catch { /* keep the safe header text */ }
   filename = filename.replace(/[\r\n]/g, '').slice(0, 180) || 'evidence';
+  const columns = attachmentColumns(target);
   const id = newId('att');
   await query(
     `INSERT INTO attachments
       (id, uploaded_by, entry_id, approval_request_id, filename, mime_type, byte_size, data)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-    [id, req.user!.id, entryId ?? null, requestId ?? null, filename, mime, data.length, data]);
+    [id, req.user!.id, columns.entryId, columns.requestId, filename, mime, data.length, data]);
   if (req.user?.role === 'entry') {
     await notifyOwners(
       'evidence_added',
       `${req.user!.email} added evidence`,
-      `${filename} was attached to ${entryId ? 'an expense' : 'an approval request'}.`,
-      entryId ? 'entry' : 'approval', entryId ?? requestId,
+      `${filename} was attached to ${target.kind === 'entry' ? 'an expense' : 'an approval request'}.`,
+      columns.relatedType, target.id,
     );
   }
-  await record(req, 'evidence attached', id, { filename, bytes: data.length, entryId: entryId ?? null, requestId: requestId ?? null });
-  res.status(201).json({ id, filename, mimeType: mime, byteSize: data.length });
+  await record(req, 'evidence attached', id, {
+    filename,
+    bytes: data.length,
+    entryId: columns.entryId,
+    requestId: columns.requestId,
+  });
+  return res.status(201).json({ id, filename, mimeType: mime, byteSize: data.length });
+}
+
+async function listAttachments(req: Request, res: Response, target: AttachmentTarget) {
+  if (!(await authorizeAttachment(req, target))) {
+    return res.status(403).json({ error: `You cannot view that ${target.kind === 'entry' ? 'expense' : 'request'}.` });
+  }
+  const rows = target.kind === 'entry'
+    ? await query(
+      `SELECT id, filename, mime_type, byte_size, created_at
+         FROM attachments WHERE entry_id = $1 ORDER BY created_at`, [target.id])
+    : await query(
+      `SELECT id, filename, mime_type, byte_size, created_at
+         FROM attachments WHERE approval_request_id = $1 ORDER BY created_at`, [target.id]);
+  return res.json({ files: rows });
+}
+
+router.post('/delegation/attachments/entries/:entryId', imageBody, wrap(async (req, res) => {
+  return storeAttachment(req, res, { kind: 'entry', id: String(req.params.entryId) });
 }));
 
-router.get('/delegation/attachments', wrap(async (req, res) => {
+router.post('/delegation/attachments/approvals/:requestId', imageBody, wrap(async (req, res) => {
+  return storeAttachment(req, res, { kind: 'approval', id: String(req.params.requestId) });
+}));
+
+router.get('/delegation/attachments/entries/:entryId', wrap(async (req, res) => {
+  return listAttachments(req, res, { kind: 'entry', id: String(req.params.entryId) });
+}));
+
+router.get('/delegation/attachments/approvals/:requestId', wrap(async (req, res) => {
+  return listAttachments(req, res, { kind: 'approval', id: String(req.params.requestId) });
+}));
+
+function legacyAttachmentTarget(req: Request): AttachmentTarget | null {
   const params = new URL(req.originalUrl, 'http://localhost').searchParams;
   const entryIds = params.getAll('entryId');
   const requestIds = params.getAll('requestId');
-  if (entryIds.length > 1 || requestIds.length > 1) {
-    return res.status(400).json({ error: 'Attachment query parameters must be supplied once as text.' });
-  }
-  const entryId = entryIds[0];
-  const requestId = requestIds[0];
-  if (entryId && !(await canSeeEntry(req, entryId))) return res.status(403).json({ error: 'You cannot view that expense.' });
-  if (requestId && !(await canSeeApproval(req, requestId))) return res.status(403).json({ error: 'You cannot view that request.' });
-  if (!entryId && !requestId) return res.status(400).json({ error: 'Say which expense or request.' });
-  const rows = await query(
-    `SELECT id, filename, mime_type, byte_size, created_at
-       FROM attachments
-      WHERE ($1::text IS NOT NULL AND entry_id = $1)
-         OR ($2::text IS NOT NULL AND approval_request_id = $2)
-      ORDER BY created_at`, [entryId ?? null, requestId ?? null]);
-  res.json({ files: rows });
+  if (entryIds.length === 1 && requestIds.length === 0) return { kind: 'entry', id: entryIds[0] };
+  if (requestIds.length === 1 && entryIds.length === 0) return { kind: 'approval', id: requestIds[0] };
+  return null;
+}
+
+router.post('/delegation/attachments', imageBody, wrap(async (req, res) => {
+  const target = legacyAttachmentTarget(req);
+  if (!target) return res.status(400).json({ error: 'Attach the file to one expense or one approval request.' });
+  const segment = target.kind === 'entry' ? 'entries' : 'approvals';
+  return res.redirect(307, `/api/delegation/attachments/${segment}/${encodeURIComponent(target.id)}`);
+}));
+
+router.get('/delegation/attachments', wrap(async (req, res) => {
+  const target = legacyAttachmentTarget(req);
+  if (!target) return res.status(400).json({ error: 'Say which expense or request.' });
+  const segment = target.kind === 'entry' ? 'entries' : 'approvals';
+  return res.redirect(307, `/api/delegation/attachments/${segment}/${encodeURIComponent(target.id)}`);
 }));
 
 router.get('/delegation/attachments/:id', wrap(async (req, res) => {
