@@ -183,6 +183,14 @@ async function translateDynamicBatch(language: BookLanguage, sources: string[]):
       const sourceLanguage = heuristicLanguage(source);
       if (sourceLanguage === language) { output[index] = source; remember(language, source, source); continue; }
       const protectedText = protectTranslationText(source, names);
+      // If masking removed every natural-language word, the value is an entity,
+      // amount/code/reference or other protected literal. Keep it exactly as-is
+      // and do not expose marker-only text to a translation provider.
+      if (!/\p{L}/u.test(protectedText.masked)) {
+        output[index] = source;
+        remember(language, source, source);
+        continue;
+      }
       const translated = await translateLocal(sourceLanguage, language, protectedText.masked);
       if (translated !== null) {
         const restored = restoreTranslationText(translated, protectedText);
