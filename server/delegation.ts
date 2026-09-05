@@ -526,9 +526,21 @@ async function canSeeAttachmentTarget(req: Request, target: AttachmentTarget): P
     : canSeeApproval(req, target.id);
 }
 
+function canonicalAttachmentTargetId(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const match = /^[A-Za-z0-9_-]{1,120}$/.exec(raw);
+  return match?.[0] ?? null;
+}
+
 async function saveAttachment(req: Request, res: express.Response, target: AttachmentTarget) {
-  if (!(await canSeeAttachmentTarget(req, target))) {
-    return res.status(403).json({ error: target.type === 'entry' ? 'You cannot attach to that expense.' : 'You cannot attach to that request.' });
+  const targetId = canonicalAttachmentTargetId(target.id);
+  if (!targetId) return res.status(400).json({ error: 'Invalid attachment target.' });
+  const safeTarget: AttachmentTarget = target.type === 'entry'
+    ? { type: 'entry', id: targetId }
+    : { type: 'approval', id: targetId };
+
+  if (!(await canSeeAttachmentTarget(req, safeTarget))) {
+    return res.status(403).json({ error: safeTarget.type === 'entry' ? 'You cannot attach to that expense.' : 'You cannot attach to that request.' });
   }
   const data = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
   if (!data.length) return res.status(400).json({ error: 'Choose a receipt or photo first.' });
@@ -547,8 +559,8 @@ async function saveAttachment(req: Request, res: express.Response, target: Attac
     : mime === 'image/webp' ? 'webp'
     : 'pdf';
   const filename = `evidence-${id}.${extension}`;
-  const entryId = target.type === 'entry' ? target.id : null;
-  const requestId = target.type === 'approval' ? target.id : null;
+  const entryId = safeTarget.type === 'entry' ? targetId : null;
+  const requestId = safeTarget.type === 'approval' ? targetId : null;
 
   await query(
     `INSERT INTO attachments
@@ -559,8 +571,8 @@ async function saveAttachment(req: Request, res: express.Response, target: Attac
     await notifyOwners(
       'evidence_added',
       `${req.user!.email} added evidence`,
-      `${filename} was attached to ${target.type === 'entry' ? 'an expense' : 'an approval request'}.`,
-      target.type === 'entry' ? 'entry' : 'approval', target.id,
+      `${filename} was attached to ${safeTarget.type === 'entry' ? 'an expense' : 'an approval request'}.`,
+      safeTarget.type === 'entry' ? 'entry' : 'approval', targetId,
     );
   }
   await record(req, 'evidence attached', id, {
@@ -573,36 +585,46 @@ async function saveAttachment(req: Request, res: express.Response, target: Attac
 }
 
 async function listAttachments(req: Request, res: express.Response, target: AttachmentTarget) {
-  if (!(await canSeeAttachmentTarget(req, target))) {
-    return res.status(403).json({ error: target.type === 'entry' ? 'You cannot view that expense.' : 'You cannot view that request.' });
+  const targetId = canonicalAttachmentTargetId(target.id);
+  if (!targetId) return res.status(400).json({ error: 'Invalid attachment target.' });
+  const safeTarget: AttachmentTarget = target.type === 'entry'
+    ? { type: 'entry', id: targetId }
+    : { type: 'approval', id: targetId };
+
+  if (!(await canSeeAttachmentTarget(req, safeTarget))) {
+    return res.status(403).json({ error: safeTarget.type === 'entry' ? 'You cannot view that expense.' : 'You cannot view that request.' });
   }
-  const rows = target.type === 'entry'
+  const rows = safeTarget.type === 'entry'
     ? await query(
       `SELECT id, filename, mime_type, byte_size, created_at
-         FROM attachments WHERE entry_id = $1 ORDER BY created_at`, [target.id])
+         FROM attachments WHERE entry_id = $1 ORDER BY created_at`, [targetId])
     : await query(
       `SELECT id, filename, mime_type, byte_size, created_at
-         FROM attachments WHERE approval_request_id = $1 ORDER BY created_at`, [target.id]);
+         FROM attachments WHERE approval_request_id = $1 ORDER BY created_at`, [targetId]);
   return res.json({ files: rows });
 }
 
 router.post('/delegation/attachments/entry/:entryId', imageBody, wrap(async (req, res) => {
-  const entryId = String(req.params.entryId);
+  const entryId = canonicalAttachmentTargetId(req.params.entryId);
+  if (!entryId) return res.status(400).json({ error: 'Invalid attachment target.' });
   return saveAttachment(req, res, { type: 'entry', id: entryId });
 }));
 
 router.post('/delegation/attachments/request/:requestId', imageBody, wrap(async (req, res) => {
-  const requestId = String(req.params.requestId);
+  const requestId = canonicalAttachmentTargetId(req.params.requestId);
+  if (!requestId) return res.status(400).json({ error: 'Invalid attachment target.' });
   return saveAttachment(req, res, { type: 'approval', id: requestId });
 }));
 
 router.get('/delegation/attachments/entry/:entryId', wrap(async (req, res) => {
-  const entryId = String(req.params.entryId);
+  const entryId = canonicalAttachmentTargetId(req.params.entryId);
+  if (!entryId) return res.status(400).json({ error: 'Invalid attachment target.' });
   return listAttachments(req, res, { type: 'entry', id: entryId });
 }));
 
 router.get('/delegation/attachments/request/:requestId', wrap(async (req, res) => {
-  const requestId = String(req.params.requestId);
+  const requestId = canonicalAttachmentTargetId(req.params.requestId);
+  if (!requestId) return res.status(400).json({ error: 'Invalid attachment target.' });
   return listAttachments(req, res, { type: 'approval', id: requestId });
 }));
 
