@@ -36,6 +36,7 @@ const EXAMPLES = [
   '$900 STS chargeuse construction cash',
   '$250 filming for the bikes from construction cash',
   '$12000 withdrawn from the agent into construction cash',
+  'move $5,000 from construction cash to STS cash',
   'i bought 1 ton of steel from Dani',
   'add supplier Dani under Construction',
 ];
@@ -141,9 +142,17 @@ function EntryCard({ draft, duplicate, source, book, done, cancel, fail, onQueue
   const save = async () => {
     setBusy(true);
     try {
-      await api.addEntry(withLink);
+      const saved = await api.addEntry(withLink);
       const account = book.accounts.find((a) => a.id === input.accountId);
-      done(`Logged — ${money(input.amount)} ${input.purpose}${account ? `, ${account.name}` : ''}.`);
+      const toAccount = book.accounts.find((a) => a.id === input.toAccountId);
+
+      if ('mode' in saved && saved.mode === 'pending_transfer') {
+        done(`Sent for confirmation — ${money(input.amount)} ${account?.name ?? 'source account'} → ${toAccount?.name ?? 'delegated account'}. It will post only after the recipient confirms receipt.`);
+      } else if (input.kind === 'transfer') {
+        done(`Moved — ${money(input.amount)} ${account?.name ?? 'source account'} → ${toAccount?.name ?? 'destination account'}.`);
+      } else {
+        done(`Logged — ${money(input.amount)} ${input.purpose}${account ? `, ${account.name}` : ''}.`);
+      }
     } catch (e) {
       if (looksOffline(e)) {
         // No signal: keep it, in order, and send it when there is one.
@@ -244,6 +253,12 @@ function EntryCard({ draft, duplicate, source, book, done, cancel, fail, onQueue
           {book.accounts.find((a) => a.id === input.accountId)?.name}. Change it if that is wrong.
         </div>
       )}
+      {input.kind === 'transfer' && input.accountId && input.toAccountId && (
+        <div className="warn">
+          <b>Money move.</b> Check the source and destination above. If the destination is controlled by a delegated user,
+          this will wait for that person to confirm the cash actually arrived before the ledger changes.
+        </div>
+      )}
       {duplicate && (
         <>
           <div className="warn">
@@ -271,7 +286,9 @@ function EntryCard({ draft, duplicate, source, book, done, cancel, fail, onQueue
       )}
 
       <div className="ractions">
-        <button className="btn" onClick={save} disabled={blocked || busy}>{busy ? 'Saving…' : 'Log it'}</button>
+        <button className="btn" onClick={save} disabled={blocked || busy}>
+          {busy ? 'Saving…' : input.kind === 'transfer' ? 'Move it' : 'Log it'}
+        </button>
         <button className="btn ghost" onClick={cancel}>Discard</button>
         <label className="check" style={{ marginLeft: 'auto' }}>
           <input type="checkbox" checked={!!input.historical}
