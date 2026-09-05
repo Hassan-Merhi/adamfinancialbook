@@ -1,0 +1,32 @@
+name: Temp Phase 6 Compatibility Fix
+on:
+  push:
+    branches:
+      - phase6-user-security-hardening-v2
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Update username route for Phase 6 return shape
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('server/index.ts')
+          s = p.read_text()
+          old = """  const next = await setUsername(target.id, username);\n  await record(req, 'username changed', target.id, { from: target.email, to: next });\n  if (target.id === req.user!.id) req.user!.email = next;\n  res.json({ ok: true, username: next });"""
+          new = """  const changed = await setUsername(target.id, username);\n  await record(req, 'username changed', target.id, { from: target.email, to: changed.username });\n  if (target.id === req.user!.id) req.user!.email = changed.username;\n  res.json({ ok: true, username: changed.username });"""
+          if old not in s:
+              raise SystemExit('expected username route snippet not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+      - run: git rm .github/workflows/temp-phase6-compat.yml
+      - name: Commit compatibility fix
+        run: |
+          git config user.name "Hassan Merhi Dakik"
+          git config user.email "hassmerhi.etshadi@gmail.com"
+          git add server/index.ts
+          git commit -m "Fix Phase 6 username route compatibility"
+          git push
