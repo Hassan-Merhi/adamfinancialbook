@@ -8,6 +8,7 @@ import { correctAmount, ensureLoanPair, loadBook, saveEntry, voidEntry } from '.
 import { history, record } from './audit.js';
 import { backup, entriesCsv } from './export.js';
 import { readSentence } from './read.js';
+import { translateTexts } from './translate.js';
 import {
   createUser, findUser, getUser, listUsers, ownerCount, ownerOnly, removeUser,
   requireLogin, setPassword, setRole, userCount, verifyPassword, type Role,
@@ -242,7 +243,7 @@ app.get('/api/statement', wrap(async (req, res) => {
   res.json({ rows: statement(book, target) });
 }));
 
-/* ---------------- reading a sentence ---------------- */
+/* ---------------- reading and translating sentences ---------------- */
 
 /**
  * Turns what he typed into a draft. Nothing is saved here — the draft goes back
@@ -264,6 +265,21 @@ app.post('/api/read', wrap(async (req, res) => {
     duplicate = possibleDuplicateReceipt(book, draft.input.projectId, draft.input.amount);
   }
   res.json({ draft, source, duplicate });
+}));
+
+/**
+ * Visible text is translated for display only. Database values are never
+ * rewritten, so changing language cannot change accounting records or comments.
+ */
+app.post('/api/translate', wrap(async (req, res) => {
+  const { language, texts } = z.object({
+    language: z.enum(['en', 'fr', 'ar']),
+    texts: z.array(z.string().min(1).max(800)).max(80),
+  }).parse(req.body);
+  if (texts.reduce((total, text) => total + text.length, 0) > 20_000) {
+    return res.status(413).json({ error: 'Too much text to translate at once.' });
+  }
+  res.json(await translateTexts(language, texts));
 }));
 
 /* ---------------- setting the book up ---------------- */
