@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import { LanguageProvider } from './i18n';
 import './browser-translation';
+import './multilingual-offline';
 
 // Installed to the home screen, the app must still open with no signal.
 // This lives here rather than inline in the page: the Content-Security-Policy

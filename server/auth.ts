@@ -9,9 +9,11 @@ import { newId, query } from './db.js';
 import { checkPassword, hashPassword, readCookie, readSession } from './session.js';
 
 export type Role = 'owner' | 'entry';
-export interface User { id: string; email: string; role: Role }
+export type UserLanguage = 'en' | 'fr' | 'ar';
+export interface User { id: string; email: string; role: Role; language?: UserLanguage }
 
 export interface UserRow extends User {
+  language: UserLanguage;
   passwordHash: string;
   tokenVersion: number;
   createdAt: string;
@@ -23,12 +25,12 @@ export async function createUser(email: string, password: string, role: Role): P
   const id = newId('usr');
   await query('INSERT INTO users (id, email, password_hash, role) VALUES ($1,$2,$3,$4)',
     [id, tidyEmail(email), await hashPassword(password), role]);
-  return { id, email: tidyEmail(email), role };
+  return { id, email: tidyEmail(email), role, language: 'en' };
 }
 
 export async function findUser(email: string): Promise<UserRow | null> {
   const rows = await query<Record<string, string | number>>(
-    `SELECT id, email, password_hash, role, token_version, created_at
+    `SELECT id, email, password_hash, role, token_version, created_at, language
      FROM users WHERE email = $1`, [tidyEmail(email)]);
   return rows[0] ? asUser(rows[0]) : null;
 }
@@ -73,7 +75,7 @@ export async function removeUser(userId: string): Promise<void> {
 
 export async function getUser(userId: string): Promise<UserRow | null> {
   const rows = await query<Record<string, string | number>>(
-    `SELECT id, email, password_hash, role, token_version, created_at FROM users WHERE id = $1`, [userId]);
+    `SELECT id, email, password_hash, role, token_version, created_at, language FROM users WHERE id = $1`, [userId]);
   return rows[0] ? asUser(rows[0]) : null;
 }
 
@@ -83,10 +85,12 @@ export async function verifyPassword(userId: string, password: string): Promise<
 }
 
 function asUser(row: Record<string, unknown>): UserRow {
+  const language = row.language === 'fr' || row.language === 'ar' ? row.language : 'en';
   return {
     id: String(row.id),
     email: String(row.email),
     role: row.role as Role,
+    language,
     passwordHash: String(row.password_hash),
     tokenVersion: Number(row.token_version ?? 0),
     createdAt: new Date(row.created_at as string).toISOString(),
@@ -114,9 +118,27 @@ export const requireLogin: RequestHandler = async (req, res, next) => {
     const user = await getUser(session.userId);
     // a session from before a password change is no longer a session
     if (user && user.tokenVersion === session.version) {
-      req.user = { id: user.id, email: user.email, role: user.role };
+      req.user = { id: user.id, email: user.email, role: user.role, language: user.language };
     }
   }
+
+  // Keep the tiny language preference route here, beside the authenticated user
+  // record. It is intentionally handled before the rest of the app so every
+  // screen/user role can save the same preference without changing permissions.
+  if (req.path === '/preferences/language' && req.method === 'PATCH') {
+    if (!req.user) return res.status(401).json({ error: 'Sign in to open the book.' });
+    if (req.get('x-book') !== '1') {
+      return res.status(403).json({ error: 'Refused: that request did not come from the app.' });
+    }
+    const language = (req.body as { language?: unknown } | undefined)?.language;
+    if (language !== 'en' && language !== 'fr' && language !== 'ar') {
+      return res.status(400).json({ error: 'Choose English, French or Arabic.' });
+    }
+    await query('UPDATE users SET language = $2 WHERE id = $1', [req.user.id, language]);
+    req.user.language = language;
+    return res.json({ ok: true, language });
+  }
+
   if (OPEN.has(req.path)) return next();
   if (!req.user) return res.status(401).json({ error: 'Sign in to open the book.' });
   next();
