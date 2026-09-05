@@ -1,6 +1,5 @@
 import 'dotenv/config';
 import { getConfig } from './config.js';
-import { getMigrationStatus, runMigrations } from './migration.js';
 
 const config = getConfig();
 console.log(JSON.stringify({
@@ -10,6 +9,10 @@ console.log(JSON.stringify({
   port: config.PORT,
   pgssl: config.PGSSL,
 }));
+
+// Load database code only after environment validation, so a bad deployment
+// fails with one clear configuration error before opening any connections.
+const { getMigrationStatus, runMigrations } = await import('./migration.js');
 
 const applied = await runMigrations();
 if (applied.length) {
