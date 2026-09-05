@@ -42,6 +42,7 @@ function safeParse(text: string) {
   try { return JSON.parse(text); } catch { return null; }
 }
 
+/** `email` is the legacy wire-field name; the product now presents it as username. */
 export interface Me { user: { id: string; email: string; role: 'owner' | 'entry' } | null; needsFirstOwner: boolean }
 
 export interface Keyholder {
@@ -215,8 +216,8 @@ async function evidenceDashboard(): Promise<EvidenceDashboard> {
 
 export const api = {
   me: () => send<Me>('/me', 'GET'),
-  login: (email: string, password: string) => send<Me>('/login', 'POST', { email, password }),
-  firstOwner: (email: string, password: string) => send<Me>('/first-owner', 'POST', { email, password }),
+  login: (username: string, password: string) => send<Me>('/login', 'POST', { username, password }),
+  firstOwner: (username: string, password: string) => send<Me>('/first-owner', 'POST', { username, password }),
   logout: () => send('/logout', 'POST'),
   book: () => send<LoadedBook>('/book', 'GET'),
   read: (text: string, today: string) => send<Reading>('/read', 'POST', { text, today }),
@@ -234,11 +235,13 @@ export const api = {
   voidEntry: (id: string, reason: string) => send(`/entries/${id}/void`, 'POST', { reason }),
   history: () => send<{ lines: AuditLine[] }>('/history', 'GET'),
   users: () => send<{ users: Keyholder[]; suggestion: string }>('/users', 'GET'),
-  addUser: (b: { email: string; password: string; role: string }) => send('/users', 'POST', b),
+  addUser: (b: { username?: string; email?: string; password: string; role: string }) => send('/users', 'POST', b),
+  setUsername: (id: string, username: string) => send(`/users/${id}/username`, 'POST', { username }),
   resetPassword: (id: string, password: string) => send(`/users/${id}/password`, 'POST', { password }),
   setRole: (id: string, role: string) => send(`/users/${id}/role`, 'POST', { role }),
   removeUser: (id: string) => send(`/users/${id}`, 'DELETE'),
   changePassword: (current: string, next: string) => send('/password', 'POST', { current, next }),
+  resetBook: (password: string, confirmation: 'RESET') => send('/reset-book', 'POST', { password, confirmation }),
   evidenceDashboard,
   setUserAccounts: (id: string, accountIds: string[]) =>
     send(`/delegation/users/${encodeURIComponent(id)}/accounts`, 'PUT', { accountIds }),
