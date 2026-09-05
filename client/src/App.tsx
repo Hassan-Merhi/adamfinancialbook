@@ -78,9 +78,6 @@ const MORE_NAV: NavItem[] = [
 
 const MORE_ICON = 'M5 12h.01M12 12h.01M19 12h.01';
 const SEARCH_ICON = 'm21 21-4.2-4.2M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4z';
-const DASHBOARD_REFRESH_DESKTOP_MS = 60_000;
-const DASHBOARD_REFRESH_MOBILE_MS = 120_000;
-const DASHBOARD_WAKE_DELAY_MS = 850;
 const DASHBOARD_DEDUPE_MS = 10_000;
 
 function loadViewModule(view: View): Promise<unknown> | null {
@@ -163,7 +160,7 @@ export default function App() {
 
   const reload = async () => {
     try {
-      const fresh = await api.book();
+      const fresh = await api.overview();
       setBook(fresh);
       snapshot.save(fresh);
       setOffline(false);
@@ -227,7 +224,7 @@ export default function App() {
       const sent = await flushOutbox((input) => api.addEntry(input));
       setWaiting(outbox.all().length);
       if (sent) {
-        await reload();
+        await Promise.all([reload(), refreshDashboard(true)]);
         say(`${sent} ${sent === 1 ? 'entry' : 'entries'} logged from the outbox.`);
       }
     } catch (e) {
@@ -254,36 +251,13 @@ export default function App() {
       setMissingReceiptCount(0);
       return;
     }
-    let timer: number | null = null;
-    let wakeTimer: number | null = null;
-    const mobile = window.matchMedia('(max-width: 760px)').matches;
-    const refreshMs = mobile ? DASHBOARD_REFRESH_MOBILE_MS : DASHBOARD_REFRESH_DESKTOP_MS;
-    const stopTimer = () => {
-      if (timer !== null) window.clearInterval(timer);
-      if (wakeTimer !== null) window.clearTimeout(wakeTimer);
-      timer = null;
-      wakeTimer = null;
-    };
-    const startTimer = () => {
-      if (timer !== null) window.clearInterval(timer);
-      if (document.visibilityState === 'visible') {
-        timer = window.setInterval(() => { void refreshDashboard(); }, refreshMs);
-      }
-    };
     const resume = () => {
-      if (document.visibilityState !== 'visible') {
-        stopTimer();
-        return;
-      }
-      if (wakeTimer !== null) window.clearTimeout(wakeTimer);
-      wakeTimer = window.setTimeout(() => { void refreshDashboard(); }, DASHBOARD_WAKE_DELAY_MS);
-      startTimer();
+      if (document.visibilityState === 'visible') void refreshDashboard();
     };
-    resume();
+    void refreshDashboard(true);
     document.addEventListener('visibilitychange', resume);
     window.addEventListener('focus', resume);
     return () => {
-      stopTimer();
       document.removeEventListener('visibilitychange', resume);
       window.removeEventListener('focus', resume);
     };
@@ -292,7 +266,7 @@ export default function App() {
   const run = async (work: () => Promise<unknown>, done: string) => {
     try {
       await work();
-      await reload();
+      await Promise.all([reload(), refreshDashboard(true)]);
       say(done);
     } catch (e) {
       say((e as Error).message, true);
