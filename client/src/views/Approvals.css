@@ -1,23 +1,48 @@
 .approvals-head { align-items:center; }
 
+/* Desktop utility controls: approvals and language live as one visual cluster
+   without sharing the same fixed position. */
 .approval-launcher {
   position:fixed;
   top:14px;
-  right:16px;
-  z-index:35;
+  right:144px;
+  z-index:95;
+  min-height:38px;
   display:inline-flex;
   align-items:center;
-  gap:7px;
+  gap:8px;
   border:1px solid var(--line);
-  background:var(--accent);
-  color:var(--paper);
+  background:color-mix(in srgb, var(--card) 94%, transparent);
+  color:var(--ink);
   border-radius:999px;
-  padding:10px 16px;
-  font-size:13px;
+  padding:0 14px;
+  font-size:12.5px;
   font-weight:700;
-  box-shadow:var(--shadow);
+  box-shadow:0 8px 24px rgba(0,0,0,.10), var(--shadow);
+  backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
+  transition:transform .16s ease, border-color .16s ease, background .16s ease, box-shadow .16s ease;
 }
-.approval-launcher[aria-current="true"] { box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent); }
+.approval-launcher::before {
+  content:"";
+  width:7px;
+  height:7px;
+  flex:0 0 7px;
+  border-radius:50%;
+  background:var(--accent);
+  box-shadow:0 0 0 3px var(--accent-soft);
+}
+.approval-launcher:hover {
+  transform:translateY(-1px);
+  border-color:var(--ink-3);
+  background:var(--card);
+  box-shadow:0 10px 28px rgba(0,0,0,.13), var(--shadow);
+}
+.approval-launcher[aria-current="true"] {
+  background:var(--accent-soft);
+  border-color:color-mix(in srgb, var(--accent) 28%, var(--line));
+  box-shadow:0 8px 24px rgba(0,0,0,.10), inset 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+}
 .approval-badge {
   display:inline-flex;
   align-items:center;
@@ -26,12 +51,38 @@
   height:18px;
   padding:0 5px;
   border-radius:999px;
-  background:var(--paper);
-  color:var(--accent);
+  background:var(--accent);
+  color:var(--paper);
   font-size:10px;
   font-weight:800;
   line-height:1;
 }
+
+/* Match the language picker to the approvals launcher so both read as one
+   modern top-right control group. The extra html selector intentionally wins
+   over the provider's base styles. */
+html .language-switch {
+  top:14px;
+  right:16px;
+  z-index:96;
+  min-height:38px;
+  gap:2px;
+  padding:4px;
+  border-color:var(--line);
+  background:color-mix(in srgb, var(--card) 94%, transparent);
+  box-shadow:0 8px 24px rgba(0,0,0,.10), var(--shadow);
+  backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
+}
+html .language-switch button {
+  min-width:32px;
+  height:28px;
+  padding:0 8px;
+  transition:background .16s ease, color .16s ease, transform .16s ease;
+}
+html .language-switch button:hover { transform:translateY(-1px); }
+html[dir="rtl"] .language-switch { right:auto; left:16px; }
+html[dir="rtl"] .approval-launcher { right:auto; left:144px; }
 
 .approval-row {
   display:flex;
@@ -129,9 +180,20 @@
   .approval-launcher {
     top:calc(8px + env(safe-area-inset-top));
     right:10px;
-    padding:7px 11px;
+    left:auto;
+    min-height:34px;
+    padding:0 11px;
     font-size:11.5px;
   }
+  .approval-launcher::before { width:6px; height:6px; flex-basis:6px; }
+  html .language-switch {
+    top:calc(58px + env(safe-area-inset-top));
+    right:10px;
+    left:auto;
+    min-height:36px;
+  }
+  html[dir="rtl"] .approval-launcher { right:auto; left:10px; }
+  html[dir="rtl"] .language-switch { right:auto; left:10px; }
   .approval-row { align-items:flex-start; flex-direction:column; }
   .approval-actions { justify-content:flex-start; }
   .approval-balance { font-size:17px; }
