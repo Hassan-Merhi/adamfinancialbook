@@ -131,7 +131,7 @@ describe.skipIf(!DATABASE_URL)('real PostgreSQL API', () => {
   }, 15_000);
 
   it('migrates legacy schema, protects mutations, and bootstraps one owner', async () => {
-    expect((await db<{ version: string }>('SELECT version FROM schema_migrations ORDER BY version')).map((x) => Number(x.version))).toEqual([1, 2, 3, 4, 5]);
+    expect((await db<{ version: string }>('SELECT version FROM schema_migrations ORDER BY version')).map((x) => Number(x.version))).toEqual([1, 2, 3, 4, 5, 6]);
     const columns = (await db<{ column_name: string }>(
       `SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='users'`,
     )).map((x) => x.column_name);
@@ -441,9 +441,6 @@ describe.skipIf(!DATABASE_URL)('real PostgreSQL API', () => {
 
     const loan = book.data.loans[0];
     const rawLoan = book.data.balances.loans[loan.id];
-    // The row's stored orientation is arbitrary. Read it from Alpha's side:
-    // positive means the other business owes Alpha. Alpha sent Beta $100, so
-    // Beta must owe Alpha $100 regardless of row orientation.
     const alphaSide = loan.fromBusiness === alpha ? -rawLoan : rawLoan;
     expect(alphaSide).toBe(100);
 
@@ -493,6 +490,54 @@ describe.skipIf(!DATABASE_URL)('real PostgreSQL API', () => {
       `SELECT count(*) AS n FROM audit WHERE subject = $1 AND action = 'financial entry voided' AND transaction_id = $2`,
       [wrong.data.id, voidRevision.transaction_id],
     ))[0].n)).toBe(1);
+  });
+
+  it('serves compact, paginated Phase 7 reads from PostgreSQL', async () => {
+    const full = await request('/api/book', { session: owner });
+    const overview = await request(`/api/overview?today=${DAY}`, { session: owner });
+    expect(overview.response.status).toBe(200);
+    expect(overview.data.balances.accounts[ownerCash]).toBe(full.data.balances.accounts[ownerCash]);
+    expect(overview.data.balances.accounts[wallet]).toBe(full.data.balances.accounts[wallet]);
+    expect(overview.data.balances.people[supplier]).toBe(full.data.balances.people[supplier]);
+    expect(overview.data.balances.projects[project]).toBe(full.data.balances.projects[project]);
+
+    const historical = await request('/api/overview?on=2026-08-01&today=2026-09-05', { session: owner });
+    expect(historical.response.status).toBe(200);
+    expect(historical.data.entries.every((entry: any) => entry.occurredOn === '2026-08-01')).toBe(true);
+    expect(historical.data.balances.accounts[ownerCash]).toBe(5000);
+    expect(historical.data.balances.projects[project]).toBe(300);
+
+    const firstPage = await request(`/api/statement-page?type=account&id=${ownerCash}&limit=2`, { session: owner });
+    expect(firstPage.response.status).toBe(200);
+    expect(firstPage.data.items).toHaveLength(2);
+    expect(firstPage.data.nextCursor).toBeTruthy();
+    const secondPage = await request(
+      `/api/statement-page?type=account&id=${ownerCash}&limit=2&cursor=${encodeURIComponent(firstPage.data.nextCursor)}`,
+      { session: owner },
+    );
+    expect(secondPage.response.status).toBe(200);
+    expect(secondPage.data.items.length).toBeGreaterThan(0);
+    expect(secondPage.data.items[0].entry.id).not.toBe(firstPage.data.items[0].entry.id);
+
+    const searched = await request('/api/search/entries?q=Steel&limit=10', { session: owner });
+    expect(searched.response.status).toBe(200);
+    expect(searched.data.items.some((item: any) => item.title === 'Steel')).toBe(true);
+
+    const historyPage = await request('/api/history-page?limit=2', { session: owner });
+    expect(historyPage.response.status).toBe(200);
+    expect(historyPage.data.lines).toHaveLength(2);
+    expect(historyPage.data.nextCursor).toBeTruthy();
+
+    const filePage = await request('/api/files-page?limit=2', { session: owner });
+    expect(filePage.response.status).toBe(200);
+    expect(filePage.data.items.length).toBeGreaterThan(0);
+    expect(filePage.data.items[0]).toEqual(expect.objectContaining({ source: 'entry' }));
+
+    const delegatedOverview = await request(`/api/overview?today=${DAY}`, { session: delegate });
+    expect(delegatedOverview.response.status).toBe(200);
+    expect(delegatedOverview.data.accounts.map((account: any) => account.id)).toEqual([wallet]);
+    expect(delegatedOverview.data.people).toEqual([]);
+    expect((await request(`/api/statement-page?type=account&id=${ownerCash}`, { session: delegate })).response.status).toBe(403);
   });
 
   it('keeps critical audit history and protects the last owner', async () => {
