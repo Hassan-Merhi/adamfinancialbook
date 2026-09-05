@@ -5,7 +5,7 @@
  * people.
  */
 import type { RequestHandler } from 'express';
-import { newId, query } from './db.js';
+import { newId, pool, query } from './db.js';
 import { checkPassword, hashPassword, readCookie, readSession } from './session.js';
 
 export type Role = 'owner' | 'entry';
@@ -66,7 +66,21 @@ export async function setPassword(userId: string, password: string): Promise<num
 }
 
 export async function setRole(userId: string, role: Role): Promise<void> {
-  await query('UPDATE users SET role = $2 WHERE id = $1', [userId, role]);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('UPDATE users SET role = $2 WHERE id = $1', [userId, role]);
+    // Owners already have access to the whole book. Keeping delegated rows for
+    // them would silently reserve those accounts and stop another entry-only
+    // user from being assigned later.
+    if (role === 'owner') await client.query('DELETE FROM user_accounts WHERE user_id = $1', [userId]);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function removeUser(userId: string): Promise<void> {
