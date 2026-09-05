@@ -1,96 +1,69 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { heuristicLanguage, protectTranslationText, restoreTranslationText, type SupportedLanguage } from '../../shared/language';
+import { translateStatic, type BookLanguage } from './locales';
 
-export type BookLanguage = 'en' | 'fr' | 'ar';
-
-const LANGUAGES: { id: BookLanguage; label: string; short: string }[] = [
-  { id: 'en', label: 'English', short: 'EN' },
-  { id: 'fr', label: 'Français', short: 'FR' },
-  { id: 'ar', label: 'العربية', short: 'AR' },
-];
-
-const LANGUAGE_KEY = 'book.language';
-const CACHE_KEY = 'book.translation-cache.v1';
-const MAX_BROWSER_CACHE = 1_500;
+export type { BookLanguage } from './locales';
 
 interface LanguageContextValue {
   language: BookLanguage;
   setLanguage: (language: BookLanguage) => void;
 }
 
-const LanguageContext = createContext<LanguageContextValue>({ language: 'en', setLanguage: () => {} });
+interface ChromeTranslator {
+  translate(text: string): Promise<string>;
+  destroy?: () => void;
+}
 
-/**
- * The only page that can appear before the translation API is authenticated is
- * the sign-in door. Keep its small vocabulary local so the language switch is
- * still complete before somebody signs in.
- */
-const LOCAL: Record<'fr' | 'ar', Record<string, string>> = {
-  fr: {
-    'Set up your book': 'Configurer votre livre',
-    'Financial Book': 'Livre financier',
-    'Nobody can open this book yet. Choose the email and password you will use.':
-      'Personne ne peut encore ouvrir ce livre. Choisissez l’adresse e-mail et le mot de passe que vous utiliserez.',
-    'Email': 'E-mail',
-    'Password': 'Mot de passe',
-    'Opening…': 'Ouverture…',
-    'Opening the book…': 'Ouverture du livre…',
-    'Create the book': 'Créer le livre',
-    'Open the book': 'Ouvrir le livre',
-    'At least 8 characters.': 'Au moins 8 caractères.',
-    'That email and password do not match.': 'Cet e-mail et ce mot de passe ne correspondent pas.',
-    'Too many tries. Wait fifteen minutes and try again.': 'Trop de tentatives. Attendez quinze minutes et réessayez.',
-    'Sign in to open the book.': 'Connectez-vous pour ouvrir le livre.',
-  },
-  ar: {
-    'Set up your book': 'إعداد الدفتر المالي',
-    'Financial Book': 'الدفتر المالي',
-    'Nobody can open this book yet. Choose the email and password you will use.':
-      'لا يمكن لأي شخص فتح هذا الدفتر بعد. اختر البريد الإلكتروني وكلمة المرور اللذين ستستخدمهما.',
-    'Email': 'البريد الإلكتروني',
-    'Password': 'كلمة المرور',
-    'Opening…': 'جارٍ الفتح…',
-    'Opening the book…': 'جارٍ فتح الدفتر…',
-    'Create the book': 'إنشاء الدفتر',
-    'Open the book': 'فتح الدفتر',
-    'At least 8 characters.': '8 أحرف على الأقل.',
-    'That email and password do not match.': 'البريد الإلكتروني وكلمة المرور غير متطابقين.',
-    'Too many tries. Wait fifteen minutes and try again.': 'محاولات كثيرة جدًا. انتظر خمس عشرة دقيقة ثم حاول مرة أخرى.',
-    'Sign in to open the book.': 'سجّل الدخول لفتح الدفتر.',
-  },
-};
+interface TranslatorFactory {
+  availability?: (options: { sourceLanguage: string; targetLanguage: string }) => Promise<string>;
+  create(options: { sourceLanguage: string; targetLanguage: string }): Promise<ChromeTranslator>;
+}
 
 interface TextState { source: string; display: string }
 interface AttrState { source: string; display: string }
 
+const LanguageContext = createContext<LanguageContextValue>({ language: 'en', setLanguage: () => {} });
+const LANGUAGE_KEY = 'book.language';
+const CACHE_KEY = 'book.dynamic-translation-cache.v2';
+const MAX_CACHE = 2_000;
 const textStates = new WeakMap<Text, TextState>();
 const attrStates = new WeakMap<Element, Map<string, AttrState>>();
 const memoryCache = new Map<string, string>();
+const translatorPromises = new Map<string, Promise<ChromeTranslator | null>>();
 let cacheLoaded = false;
 let cacheSaveTimer: number | null = null;
 
-function translationKey(language: BookLanguage, text: string) {
-  return `${language}\u0000${text}`;
+function isLanguage(value: unknown): value is BookLanguage {
+  return value === 'en' || value === 'fr' || value === 'ar';
 }
 
-function loadBrowserCache() {
+function factory(): TranslatorFactory | null {
+  return (globalThis as typeof globalThis & { Translator?: TranslatorFactory }).Translator ?? null;
+}
+
+function cacheKey(language: BookLanguage, source: string) {
+  return `${language}\u0000${source}`;
+}
+
+function loadCache() {
   if (cacheLoaded) return;
   cacheLoaded = true;
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return;
     const parsed = JSON.parse(raw) as Record<string, string>;
-    Object.entries(parsed).slice(-MAX_BROWSER_CACHE).forEach(([key, value]) => {
+    Object.entries(parsed).slice(-MAX_CACHE).forEach(([key, value]) => {
       if (typeof value === 'string') memoryCache.set(key, value);
     });
-  } catch { /* private mode or a stale cache: translation still works */ }
+  } catch { /* private mode or stale cache */ }
 }
 
-function rememberTranslation(language: BookLanguage, source: string, translated: string) {
-  loadBrowserCache();
-  const key = translationKey(language, source);
+function remember(language: BookLanguage, source: string, translated: string) {
+  loadCache();
+  const key = cacheKey(language, source);
   if (memoryCache.has(key)) memoryCache.delete(key);
   memoryCache.set(key, translated);
-  while (memoryCache.size > MAX_BROWSER_CACHE) {
+  while (memoryCache.size > MAX_CACHE) {
     const oldest = memoryCache.keys().next().value as string | undefined;
     if (!oldest) break;
     memoryCache.delete(oldest);
@@ -98,18 +71,141 @@ function rememberTranslation(language: BookLanguage, source: string, translated:
   if (cacheSaveTimer !== null) window.clearTimeout(cacheSaveTimer);
   cacheSaveTimer = window.setTimeout(() => {
     try { localStorage.setItem(CACHE_KEY, JSON.stringify(Object.fromEntries(memoryCache))); }
-    catch { /* the live in-memory cache is enough */ }
-  }, 500);
+    catch { /* in-memory cache remains usable */ }
+  }, 400);
 }
 
-function cachedTranslation(language: BookLanguage, source: string): string | undefined {
-  loadBrowserCache();
-  return memoryCache.get(translationKey(language, source));
+function cached(language: BookLanguage, source: string) {
+  loadCache();
+  return memoryCache.get(cacheKey(language, source));
 }
 
-function localTranslation(language: BookLanguage, source: string): string | undefined {
-  if (language === 'en') return undefined;
-  return LOCAL[language][source];
+function pairKey(source: SupportedLanguage, target: SupportedLanguage) {
+  return `${source}>${target}`;
+}
+
+async function getTranslator(source: SupportedLanguage, target: SupportedLanguage): Promise<ChromeTranslator | null> {
+  if (source === target) return null;
+  const api = factory();
+  if (!api) return null;
+  const key = pairKey(source, target);
+  const existing = translatorPromises.get(key);
+  if (existing) return existing;
+
+  const pending = (async () => {
+    try {
+      if (api.availability) {
+        const availability = await api.availability({ sourceLanguage: source, targetLanguage: target });
+        if (availability === 'unavailable' || availability === 'no') return null;
+      }
+      return await api.create({ sourceLanguage: source, targetLanguage: target });
+    } catch {
+      translatorPromises.delete(key);
+      return null;
+    }
+  })();
+  translatorPromises.set(key, pending);
+  return pending;
+}
+
+function snapshotNames(): string[] {
+  try {
+    const raw = localStorage.getItem('book.snapshot');
+    if (!raw) return [];
+    const book = JSON.parse(raw) as Record<string, unknown>;
+    const names = ['businesses', 'accounts', 'projects', 'people'].flatMap((key) => {
+      const rows = book[key];
+      if (!Array.isArray(rows)) return [];
+      return rows.flatMap((row) => {
+        if (!row || typeof row !== 'object') return [];
+        const name = (row as Record<string, unknown>).name;
+        return typeof name === 'string' && name.trim() ? [name.trim()] : [];
+      });
+    });
+    return [...new Set(names)].sort((a, b) => b.length - a.length);
+  } catch {
+    return [];
+  }
+}
+
+async function translateLocal(source: SupportedLanguage, target: SupportedLanguage, text: string): Promise<string | null> {
+  if (source === target) return text;
+  const direct = await getTranslator(source, target);
+  if (direct) {
+    try { return await direct.translate(text); }
+    catch { /* try English pivot below */ }
+  }
+  if (source !== 'en' && target !== 'en') {
+    const toEnglish = await getTranslator(source, 'en');
+    const fromEnglish = await getTranslator('en', target);
+    if (toEnglish && fromEnglish) {
+      try { return await fromEnglish.translate(await toEnglish.translate(text)); }
+      catch { /* server fallback below */ }
+    }
+  }
+  return null;
+}
+
+async function serverFallback(target: BookLanguage, texts: string[]): Promise<string[] | null> {
+  if (!texts.length) return [];
+  try {
+    const response = await fetch('/api/translate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-book': '1' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ language: target, texts }),
+    });
+    if (!response.ok) return null;
+    const data = await response.json() as { translations?: unknown; available?: unknown };
+    if (data.available === false || !Array.isArray(data.translations)
+      || data.translations.length !== texts.length
+      || data.translations.some((value) => typeof value !== 'string')) return null;
+    return data.translations as string[];
+  } catch {
+    return null;
+  }
+}
+
+async function translateDynamicBatch(language: BookLanguage, sources: string[]): Promise<string[]> {
+  if (language === 'en') return [...sources];
+  const names = snapshotNames();
+  const output = [...sources];
+  const unresolved: Array<{ index: number; source: string; masked: string; protectedText: ReturnType<typeof protectTranslationText> }> = [];
+  let cursor = 0;
+
+  const worker = async () => {
+    while (true) {
+      const index = cursor++;
+      if (index >= sources.length) return;
+      const source = sources[index];
+      const hit = cached(language, source);
+      if (hit !== undefined) { output[index] = hit; continue; }
+      const sourceLanguage = heuristicLanguage(source);
+      if (sourceLanguage === language) { output[index] = source; remember(language, source, source); continue; }
+      const protectedText = protectTranslationText(source, names);
+      const translated = await translateLocal(sourceLanguage, language, protectedText.masked);
+      if (translated !== null) {
+        const restored = restoreTranslationText(translated, protectedText);
+        output[index] = restored;
+        remember(language, source, restored);
+      } else {
+        unresolved.push({ index, source, masked: protectedText.masked, protectedText });
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(4, sources.length) }, () => worker()));
+  if (unresolved.length) {
+    const fallback = await serverFallback(language, unresolved.map((item) => item.masked));
+    if (fallback) {
+      unresolved.forEach((item, index) => {
+        const restored = restoreTranslationText(fallback[index] ?? item.masked, item.protectedText);
+        output[item.index] = restored;
+        remember(language, item.source, restored);
+      });
+    }
+  }
+  return output;
 }
 
 function splitSpace(value: string) {
@@ -125,37 +221,31 @@ function worthTranslating(text: string) {
   return true;
 }
 
-async function translateRemote(language: BookLanguage, texts: string[]) {
-  const response = await fetch('/api/translate', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-book': '1' },
-    credentials: 'same-origin',
-    body: JSON.stringify({ language, texts }),
-  });
-  if (!response.ok) throw new Error(`translation unavailable (${response.status})`);
-  const data = await response.json() as { translations?: unknown; available?: unknown };
-  if (!Array.isArray(data.translations) || data.translations.length !== texts.length
-      || data.translations.some((value) => typeof value !== 'string')) {
-    throw new Error('translation response was incomplete');
-  }
-  return { translations: data.translations as string[], available: data.available !== false };
-}
-
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [language, setLanguage] = useState<BookLanguage>(() => {
     try {
       const saved = localStorage.getItem(LANGUAGE_KEY);
-      if (saved === 'en' || saved === 'fr' || saved === 'ar') return saved;
+      if (isLanguage(saved)) return saved;
     } catch { /* default below */ }
     return 'en';
   });
   const activeLanguage = useRef(language);
 
   useEffect(() => {
+    const adopt = (event: Event) => {
+      const next = (event as CustomEvent<unknown>).detail;
+      if (isLanguage(next)) setLanguage(next);
+    };
+    window.addEventListener('book:language-preference', adopt);
+    return () => window.removeEventListener('book:language-preference', adopt);
+  }, []);
+
+  useEffect(() => {
     activeLanguage.current = language;
     document.documentElement.lang = language;
     document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
-    try { localStorage.setItem(LANGUAGE_KEY, language); } catch { /* no persistence in private mode */ }
+    try { localStorage.setItem(LANGUAGE_KEY, language); } catch { /* private mode */ }
+    window.dispatchEvent(new CustomEvent('book:language-change', { detail: language }));
   }, [language]);
 
   useEffect(() => {
@@ -163,78 +253,57 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     let flushTimer: number | null = null;
     const waiting = new Map<string, Set<(translation: string) => void>>();
 
-    const queue = (source: string, apply: (translation: string) => void) => {
-      const local = localTranslation(language, source);
-      if (local !== undefined) { apply(local); return; }
+    const flush = async () => {
+      flushTimer = null;
+      if (disposed || !waiting.size || language === 'en') return;
+      const sources = [...waiting.keys()].slice(0, 40);
+      const callbacks = sources.map((source) => waiting.get(source) ?? new Set<(translation: string) => void>());
+      sources.forEach((source) => waiting.delete(source));
+      const translations = await translateDynamicBatch(language, sources);
+      if (!disposed && activeLanguage.current === language) {
+        sources.forEach((source, index) => callbacks[index].forEach((apply) => apply(translations[index] ?? source)));
+      }
+      if (waiting.size && !disposed) flushTimer = window.setTimeout(() => { void flush(); }, 40);
+    };
 
-      const cached = cachedTranslation(language, source);
-      if (cached !== undefined) { apply(cached); return; }
-
+    const queueDynamic = (source: string, apply: (translation: string) => void) => {
+      const hit = cached(language, source);
+      if (hit !== undefined) { apply(hit); return; }
       const callbacks = waiting.get(source) ?? new Set<(translation: string) => void>();
       callbacks.add(apply);
       waiting.set(source, callbacks);
-      if (flushTimer === null) flushTimer = window.setTimeout(flush, 90);
-    };
-
-    const flush = async () => {
-      flushTimer = null;
-      if (disposed || !waiting.size) return;
-      const sources = [...waiting.keys()].slice(0, 80);
-      const callbackSets = sources.map((source) =>
-        waiting.get(source) ?? new Set<(translation: string) => void>());
-      sources.forEach((source) => waiting.delete(source));
-
-      try {
-        const answer = await translateRemote(language, sources);
-        if (!disposed && activeLanguage.current === language) {
-          sources.forEach((source, index) => {
-            const translated = answer.translations[index] ?? source;
-            if (answer.available) rememberTranslation(language, source, translated);
-            callbackSets[index].forEach((apply) => apply(translated));
-          });
-        }
-      } catch {
-        // Login can legitimately be unauthenticated. Local translations cover
-        // that door; elsewhere the original text is safer than a broken screen.
-        if (!disposed && activeLanguage.current === language) {
-          sources.forEach((source, index) => callbackSets[index].forEach((apply) => apply(source)));
-        }
-      }
-
-      if (waiting.size && !disposed) flushTimer = window.setTimeout(flush, 20);
+      // Dynamic/user-entered text is deliberately deferred so language switching
+      // never blocks startup or navigation. Reviewed structural copy translates
+      // synchronously from the local catalog above.
+      if (flushTimer === null) flushTimer = window.setTimeout(() => { void flush(); }, 160);
     };
 
     const skipped = (element: Element | null) =>
       !!element?.closest('[data-no-translate],script,style,noscript,code,pre,svg,[contenteditable="true"]');
 
+    const translateCore = (source: string, apply: (translation: string) => void) => {
+      if (language === 'en') { apply(source); return; }
+      const local = translateStatic(language, source);
+      if (local !== null) { apply(local); return; }
+      if (worthTranslating(source)) queueDynamic(source, apply);
+    };
+
     const processText = (node: Text) => {
       const parent = node.parentElement;
       if (!parent || skipped(parent)) return;
-
       const current = node.data;
       let state = textStates.get(node);
       if (!state) {
         state = { source: current, display: current };
         textStates.set(node, state);
       } else if (current !== state.display) {
-        // React changed the underlying content (for example a new comment or
-        // balance status). That new render becomes the source of truth.
         state.source = current;
         state.display = current;
       }
-
       const source = state.source;
       const { before, core, after } = splitSpace(source);
       if (!worthTranslating(core)) return;
-
-      // Never leave text from the previous selected language on screen while a
-      // new translation is being fetched.
-      if (state.display !== source) {
-        state.display = source;
-        node.data = source;
-      }
-
-      queue(core, (translated) => {
+      translateCore(core, (translated) => {
         const live = textStates.get(node);
         if (disposed || activeLanguage.current !== language || !node.isConnected || live?.source !== source) return;
         const next = `${before}${translated}${after}`;
@@ -243,12 +312,11 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       });
     };
 
-    const translatableAttrs = ['placeholder', 'title', 'aria-label', 'alt'] as const;
-    const processAttribute = (element: Element, name: typeof translatableAttrs[number]) => {
+    const attrs = ['placeholder', 'title', 'aria-label', 'alt'] as const;
+    const processAttribute = (element: Element, name: typeof attrs[number]) => {
       if (skipped(element)) return;
       const current = element.getAttribute(name);
-      if (!current) return;
-
+      if (!current || !worthTranslating(current)) return;
       let states = attrStates.get(element);
       if (!states) { states = new Map(); attrStates.set(element, states); }
       let state = states.get(name);
@@ -259,27 +327,18 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
         state.source = current;
         state.display = current;
       }
-
       const source = state.source;
-      const { before, core, after } = splitSpace(source);
-      if (!worthTranslating(core)) return;
-      if (state.display !== source) {
-        state.display = source;
-        element.setAttribute(name, source);
-      }
-
-      queue(core, (translated) => {
+      translateCore(source, (translated) => {
         const live = attrStates.get(element)?.get(name);
         if (disposed || activeLanguage.current !== language || !element.isConnected || live?.source !== source) return;
-        const next = `${before}${translated}${after}`;
-        live.display = next;
-        if (element.getAttribute(name) !== next) element.setAttribute(name, next);
+        live.display = translated;
+        if (element.getAttribute(name) !== translated) element.setAttribute(name, translated);
       });
     };
 
     const processElement = (element: Element) => {
       if (skipped(element)) return;
-      translatableAttrs.forEach((name) => processAttribute(element, name));
+      attrs.forEach((name) => processAttribute(element, name));
       for (const child of element.childNodes) {
         if (child.nodeType === Node.TEXT_NODE) processText(child as Text);
         else if (child.nodeType === Node.ELEMENT_NODE) processElement(child as Element);
@@ -292,16 +351,13 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     };
 
     if (document.body) processElement(document.body);
-
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         if (mutation.type === 'characterData') processNode(mutation.target);
         else if (mutation.type === 'attributes' && mutation.target instanceof Element && mutation.attributeName
-          && translatableAttrs.includes(mutation.attributeName as typeof translatableAttrs[number])) {
-          processAttribute(mutation.target, mutation.attributeName as typeof translatableAttrs[number]);
-        } else {
-          mutation.addedNodes.forEach(processNode);
-        }
+          && attrs.includes(mutation.attributeName as typeof attrs[number])) {
+          processAttribute(mutation.target, mutation.attributeName as typeof attrs[number]);
+        } else mutation.addedNodes.forEach(processNode);
       }
     });
     observer.observe(document.body, {
@@ -309,7 +365,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       subtree: true,
       characterData: true,
       attributes: true,
-      attributeFilter: [...translatableAttrs],
+      attributeFilter: [...attrs],
     });
 
     return () => {
@@ -321,17 +377,10 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   }, [language]);
 
   const value = useMemo(() => ({ language, setLanguage }), [language]);
-
   return (
     <LanguageContext.Provider value={value}>
       {children}
-      <div className="language-switch" data-no-translate role="group" aria-label="Language">
-        {LANGUAGES.map((item) => (
-          <button key={item.id} type="button" title={item.label} aria-pressed={language === item.id}
-            onClick={() => setLanguage(item.id)}>{item.short}</button>
-        ))}
-      </div>
-      <style>{LANGUAGE_CSS}</style>
+      <style>{I18N_CSS}</style>
     </LanguageContext.Provider>
   );
 }
@@ -340,58 +389,17 @@ export function useLanguage() {
   return useContext(LanguageContext);
 }
 
-const LANGUAGE_CSS = `
-.language-switch {
-  position: fixed;
-  z-index: 90;
-  top: 14px;
-  right: 16px;
-  display: flex;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--card) 94%, transparent);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(10px);
-}
-.language-switch button {
-  min-width: 34px;
-  height: 28px;
-  padding: 0 8px;
-  border-radius: 999px;
-  color: var(--ink-3);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .04em;
-}
-.language-switch button:hover { color: var(--ink); }
-.language-switch button[aria-pressed="true"] {
-  background: var(--accent);
-  color: var(--paper);
-}
+const I18N_CSS = `
 html[dir="rtl"] body { direction: rtl; }
-html[dir="rtl"] .rail { border-right: 0; border-left: 1px solid var(--line); }
-html[dir="rtl"] .navbtn,
-html[dir="rtl"] th,
-html[dir="rtl"] .row { text-align: right; }
 html[dir="rtl"] .num,
-html[dir="rtl"] .val,
+html[dir="rtl"] [data-ltr],
 html[dir="rtl"] input[type="number"],
-html[dir="rtl"] input[type="date"],
-html[dir="rtl"] input[type="email"],
-html[dir="rtl"] input[inputmode="decimal"] {
+html[dir="rtl"] input[type="date"] {
   direction: ltr;
   unicode-bidi: isolate;
 }
-html[dir="rtl"] .row .val,
-html[dir="rtl"] td.r,
-html[dir="rtl"] th.r { text-align: left; }
-@media (max-width: 760px) {
-  .language-switch {
-    top: calc(58px + env(safe-area-inset-top));
-    right: 10px;
-  }
-  html[dir="rtl"] .rail { border-left: 0; }
-}
+html[dir="rtl"] input:not([type="number"]):not([type="date"]),
+html[dir="rtl"] textarea { text-align: right; }
+html[dir="rtl"] .chev { transform: scaleX(-1); }
+html[dir="rtl"] .language-control { direction: rtl; }
 `;
