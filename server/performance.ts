@@ -302,7 +302,11 @@ router.get('/overview', wrap(async (req, res) => {
         `WITH chosen AS (
            SELECT id FROM entries WHERE occurred_on = $1::date
            UNION
-           SELECT id FROM entries ORDER BY occurred_on DESC, created_at DESC, id DESC LIMIT 40
+           SELECT id FROM (
+             SELECT id FROM entries
+             ORDER BY occurred_on DESC, created_at DESC, id DESC
+             LIMIT 40
+           ) recent
          )
          SELECT e.* FROM entries e JOIN chosen c ON c.id = e.id
          ORDER BY e.occurred_on, e.created_at, e.id`, [today])
@@ -314,7 +318,11 @@ router.get('/overview', wrap(async (req, res) => {
            ), chosen AS (
              SELECT id FROM visible WHERE occurred_on = $1::date
              UNION
-             SELECT id FROM visible ORDER BY occurred_on DESC, created_at DESC, id DESC LIMIT 40
+             SELECT id FROM (
+               SELECT id FROM visible
+               ORDER BY occurred_on DESC, created_at DESC, id DESC
+               LIMIT 40
+             ) recent
            )
            SELECT e.* FROM visible e JOIN chosen c ON c.id = e.id
            ORDER BY e.occurred_on, e.created_at, e.id`, [today, allowedAccounts])
