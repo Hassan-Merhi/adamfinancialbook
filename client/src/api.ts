@@ -219,14 +219,17 @@ async function addEntry(input: EntryInput): Promise<EntrySaveResult> {
 }
 
 function evidenceQuery(entryId?: string, requestId?: string) {
-  const params = new URLSearchParams();
-  if (entryId) params.set('entryId', entryId);
-  if (requestId) params.set('requestId', requestId);
-  return send<{ files: EvidenceFile[] }>(`/delegation/attachments?${params.toString()}`, 'GET');
+  if (entryId) {
+    return send<{ files: EvidenceFile[] }>(`/delegation/attachments/entries/${encodeURIComponent(entryId)}`, 'GET');
+  }
+  if (requestId) {
+    return send<{ files: EvidenceFile[] }>(`/delegation/attachments/approvals/${encodeURIComponent(requestId)}`, 'GET');
+  }
+  throw new ApiError('Choose an expense or approval request.', 400);
 }
 
 async function uploadEvidence(entryId: string, file: File): Promise<void> {
-  const res = await fetch(`/api/delegation/attachments?entryId=${encodeURIComponent(entryId)}`, {
+  const res = await fetch(`/api/delegation/attachments/entries/${encodeURIComponent(entryId)}`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: {
