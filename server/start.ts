@@ -8,6 +8,8 @@ console.log(JSON.stringify({
   node: process.version,
   port: config.PORT,
   pgssl: config.PGSSL,
+  release: process.env.RENDER_GIT_COMMIT ?? process.env.GIT_COMMIT ?? 'local',
+  service: process.env.RENDER_SERVICE_NAME ?? 'adam-financial-book',
 }));
 
 // Load database code only after environment validation, so a bad deployment
