@@ -9,6 +9,7 @@ import type { RequestHandler } from 'express';
 import { newId, pool, query } from './db.js';
 import { checkPassword, hashPassword, readCookie, readSession } from './session.js';
 import { runWithRequestActor } from './request-context.js';
+import { usernameKey } from './username.js';
 
 export type Role = 'owner' | 'entry';
 export type UserLanguage = 'en' | 'fr' | 'ar';
@@ -19,14 +20,6 @@ export interface UserRow extends User {
   passwordHash: string;
   tokenVersion: number;
   createdAt: string;
-}
-
-/**
- * Usernames ignore case and whitespace only. Missing or different letters remain
- * different usernames.
- */
-export function usernameKey(value: string): string {
-  return value.normalize('NFKC').replace(/\s+/gu, '').toLocaleLowerCase('en-US');
 }
 
 function cleanUsername(value: string): string {
@@ -184,3 +177,4 @@ export const ownerOnly: RequestHandler = (req, res, next) => {
 };
 
 export { checkPassword, readCookie } from './session.js';
+export { usernameKey } from './username.js';
