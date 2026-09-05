@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { usernameKey } from './auth.js';
+import { usernameKey } from './username.js';
 
 describe('usernameKey', () => {
   it('ignores spaces and letter case', () => {
