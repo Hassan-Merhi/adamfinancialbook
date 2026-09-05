@@ -24,6 +24,7 @@ const dashboard: EvidenceDashboard = {
   pendingTransfers: [],
   recentActivity: [],
   notifications: [],
+  expenseReviews: [],
 };
 
 describe('global search', () => {
