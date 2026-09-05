@@ -1,8 +1,29 @@
-import { runMigrations } from './migration.js';
+import 'dotenv/config';
+import { getConfig } from './config.js';
+import { getMigrationStatus, runMigrations } from './migration.js';
+
+const config = getConfig();
+console.log(JSON.stringify({
+  event: 'startup.validation.ok',
+  nodeEnv: config.NODE_ENV,
+  node: process.version,
+  port: config.PORT,
+  pgssl: config.PGSSL,
+}));
 
 const applied = await runMigrations();
 if (applied.length) {
-  console.log(`Database schema advanced through ${applied.at(-1)}.`);
+  console.log(JSON.stringify({ event: 'database.migrated', applied }));
 }
+
+const status = await getMigrationStatus();
+if (status.pending.length) {
+  throw new Error(`Database is not ready: ${status.pending.length} migration(s) remain pending.`);
+}
+console.log(JSON.stringify({
+  event: 'database.ready',
+  currentMigration: status.current,
+  latestMigration: status.latest,
+}));
 
 await import('./index.js');
