@@ -5,6 +5,9 @@ import { Card, Empty, money, shortDate } from '../ui';
 import type { Focus } from './Statement';
 import './Attention.css';
 
+const RECEIPT_BATCH = 30;
+const RECEIPT_KINDS = new Set(['expense', 'salary', 'supplier_payment', 'person_loan', 'credit_purchase']);
+
 export default function Attention({ book, dashboard, role, open, goto, refresh, say, onMissingCount }: {
   book: LoadedBook;
   dashboard: EvidenceDashboard | null;
@@ -18,6 +21,7 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
   const [missingEvidence, setMissingEvidence] = useState<EvidenceActivity[]>([]);
   const [checkingEvidence, setCheckingEvidence] = useState(false);
   const [evidenceEpoch, setEvidenceEpoch] = useState(0);
+  const [evidenceLimit, setEvidenceLimit] = useState(RECEIPT_BATCH);
   const [busy, setBusy] = useState('');
 
   const pendingApprovals = dashboard?.approvals.filter((item) => item.status === 'pending') ?? [];
@@ -26,12 +30,34 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
   const receiptsWaiting = book.projects.flatMap((project) => receiptsNotInCash(book, project.id));
   const unread = dashboard?.notifications.filter((item) => !item.read_at) ?? [];
 
-  // Delegated cash activity is where receipt evidence matters. Check the recent
-  // set only while this hub is open, instead of turning every app refresh into
-  // dozens of attachment requests.
+  // Receipt evidence is checked only while this hub is open. Start with a small
+  // batch for speed, then let the user expand the scan without a background
+  // polling storm. This covers owner-entered and delegated cash activity alike.
+  const allEvidenceCandidates = useMemo(() => {
+    const recentById = new Map((dashboard?.recentActivity ?? []).map((item) => [item.id, item]));
+    return [...book.entries]
+      .reverse()
+      .filter((entry) => !entry.voided && RECEIPT_KINDS.has(entry.kind))
+      .map((entry): EvidenceActivity => {
+        const dashboardEntry = recentById.get(entry.id);
+        const accountId = entry.accountId ?? entry.toAccountId ?? null;
+        return {
+          id: entry.id,
+          occurred_on: entry.occurredOn,
+          amount: entry.amount,
+          purpose: entry.purpose || entry.raw,
+          kind: entry.kind,
+          actor_email: dashboardEntry?.actor_email,
+          account_name: dashboardEntry?.account_name
+            ?? (accountId ? book.accounts.find((account) => account.id === accountId)?.name : undefined),
+          created_at: entry.createdAt,
+        };
+      });
+  }, [book.entries, book.accounts, dashboard?.recentActivity]);
+
   const evidenceCandidates = useMemo(
-    () => (dashboard?.recentActivity ?? []).filter((item) => item.kind !== 'transfer').slice(0, 30),
-    [dashboard?.recentActivity],
+    () => allEvidenceCandidates.slice(0, evidenceLimit),
+    [allEvidenceCandidates, evidenceLimit],
   );
   const candidateKey = evidenceCandidates.map((item) => item.id).join('|');
 
@@ -62,9 +88,10 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
   }, [candidateKey, evidenceEpoch]);
 
   useEffect(() => onMissingCount(missingEvidence.length), [missingEvidence.length, onMissingCount]);
-  useEffect(() => () => onMissingCount(0), [onMissingCount]);
 
   const total = pendingApprovals.length + transfers.length + reminders.length + receiptsWaiting.length + missingEvidence.length;
+  const checkedEvidence = Math.min(evidenceLimit, allEvidenceCandidates.length);
+  const hasOlderEvidence = checkedEvidence < allEvidenceCandidates.length;
 
   const after = async (key: string, work: () => Promise<unknown>, done: string, recheckEvidence = false) => {
     setBusy(key);
@@ -177,9 +204,10 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
         </Card>
       )}
 
-      {(checkingEvidence || missingEvidence.length > 0) && (
-        <Card title="Missing receipts" aside={checkingEvidence ? 'checking recent activity…' : `${missingEvidence.length} missing`}>
-          {checkingEvidence && missingEvidence.length === 0 && <Empty>Checking recent delegated spending for receipt evidence…</Empty>}
+      {(allEvidenceCandidates.length > 0 || checkingEvidence || missingEvidence.length > 0) && (
+        <Card title="Missing receipts" aside={checkingEvidence ? `checking ${checkedEvidence}…` : `${missingEvidence.length} missing · ${checkedEvidence} checked`}>
+          {checkingEvidence && missingEvidence.length === 0 && <Empty>Checking cash-out activity for receipt evidence…</Empty>}
+          {!checkingEvidence && missingEvidence.length === 0 && <Empty>No missing receipt evidence in the checked activity.</Empty>}
           {missingEvidence.map((entry) => (
             <AttentionRow
               key={entry.id}
@@ -194,6 +222,13 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
               {role === 'owner' && <button className="btn ghost small" onClick={() => goto('files')}>Files</button>}
             </AttentionRow>
           ))}
+          {hasOlderEvidence && (
+            <div className="attention-toolbar">
+              <button className="btn ghost small" disabled={checkingEvidence} onClick={() => setEvidenceLimit((value) => value + RECEIPT_BATCH)}>
+                Check {Math.min(RECEIPT_BATCH, allEvidenceCandidates.length - checkedEvidence)} older entries
+              </button>
+            </div>
+          )}
         </Card>
       )}
 
