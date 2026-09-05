@@ -1,4 +1,5 @@
 import { Router, type RequestHandler } from 'express';
+import { rateLimit } from 'express-rate-limit';
 import { z } from 'zod';
 import { newId, pool, query } from './db.js';
 import {
@@ -13,6 +14,16 @@ import { withLoanEffects } from '../shared/engine.js';
 import type { EntryInput } from '../shared/types.js';
 
 export const expenseReviewRouter = Router();
+
+// Keep the limiter directly on these database-heavy review routes. The app has
+// a broader API limiter too, but this local boundary protects batch review work
+// independently and makes the protection explicit to static analysis.
+const expenseReviewLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 120,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+});
 
 const wrap = (fn: RequestHandler): RequestHandler =>
   (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -42,7 +53,7 @@ interface ReviewRow {
  * Expenses entered by delegated users are already real cash movements. They
  * stay here until an owner says which business/project they belong to.
  */
-expenseReviewRouter.get('/delegation/expense-reviews', wrap(async (req, res) => {
+expenseReviewRouter.get('/delegation/expense-reviews', expenseReviewLimiter, wrap(async (req, res) => {
   if (req.user?.role !== 'owner') return res.json({ items: [] });
 
   const items = await query<ReviewRow>(
@@ -82,7 +93,7 @@ const assignment = z.object({
  * The previous effect set stays in history and is marked superseded; the new
  * active set and its immutable revision are written atomically.
  */
-expenseReviewRouter.post('/delegation/expense-reviews/assign', wrap(async (req, res) => {
+expenseReviewRouter.post('/delegation/expense-reviews/assign', expenseReviewLimiter, wrap(async (req, res) => {
   if (req.user?.role !== 'owner') {
     return res.status(403).json({ error: 'Only an owner can assign delegated expenses.' });
   }
