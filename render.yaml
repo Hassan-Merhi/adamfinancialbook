@@ -1,49 +1,57 @@
-# One Blueprint: the app and the nightly report. The database lives on Neon.
-#
-# On Render: New → Blueprint → pick this repo → Apply. Then paste your Neon
-# connection string into DATABASE_URL on both services. SESSION_SECRET is
-# generated for you; everything else marked sync: false is optional.
-#
-# Free while testing: set the web service to `plan: free` and delete the cron
-# service (Render has no free cron). Neon's free database is not deleted after
-# 30 days the way Render's is, which is why the database lives there.
+# Production Blueprint for Adam Financial Book.
+# The application database lives on Neon; Render owns the web process and report cron.
 services:
   - type: web
-    name: financial-book
+    name: adam-financial-book
     runtime: node
     plan: starter
-    buildCommand: npm ci && npm run build
-    # npm start runs ordered DB migrations first and refuses to open the HTTP
-    # server if a migration fails or an applied migration checksum has drifted.
+    branch: main
+    autoDeploy: true
+    buildCommand: npm ci && npm run typecheck && npm test -- --passWithNoTests && npm run build
+    # npm start validates the environment, applies ordered DB migrations under a
+    # PostgreSQL advisory lock, verifies schema currency, then opens HTTP.
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
       - key: DATABASE_URL
-        sync: false          # your Neon connection string (the pooled one)
+        sync: false
       - key: SESSION_SECRET
-        generateValue: true  # signs the login cookie; Render makes one
-      - key: ANTHROPIC_API_KEY
-        sync: false          # optional: Claude reads sentences and can translate dynamic text
-      - key: GOOGLE_TRANSLATE_API_KEY
-        sync: false          # optional: preferred server translation provider
+        generateValue: true
+      - key: NODE_ENV
+        value: production
       - key: NODE_VERSION
         value: "22"
+      - key: PGSSL
+        value: verify
+      - key: PGPOOL_MAX
+        value: "8"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GOOGLE_TRANSLATE_API_KEY
+        sync: false
 
-  # The day report, at your cut-off time. 19:00 in Lubumbashi (UTC+2) is 17:00 UTC.
   - type: cron
-    name: financial-book-day-report
+    name: adam-financial-book-day-report
     runtime: node
     plan: starter
+    branch: main
     schedule: "0 17 * * *"
     buildCommand: npm ci
-    # report:send also runs db:migrate first, so the cron cannot use stale schema.
     startCommand: npm run report:send
     envVars:
       - key: DATABASE_URL
-        sync: false          # the same Neon connection string
-      - key: REPORT_TO
-        sync: false          # where the report should land
-      - key: SMTP_URL
-        sync: false          # e.g. smtps://user:pass@smtp.gmail.com:465
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: NODE_ENV
+        value: production
       - key: NODE_VERSION
         value: "22"
+      - key: PGSSL
+        value: verify
+      - key: REPORT_TO
+        sync: false
+      - key: REPORT_FROM
+        sync: false
+      - key: SMTP_URL
+        sync: false
