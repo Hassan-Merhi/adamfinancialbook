@@ -6,7 +6,7 @@ const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), 'utf8');
 
 describe('mobile performance contract', () => {
-  it('keeps secondary pages out of the initial React dependency graph', () => {
+  it('keeps secondary pages out of the initial React dependency graph and avoids periodic polling', () => {
     const app = read('client/src/App.tsx');
     for (const page of ['Money', 'Projects', 'People', 'Attention', 'Report', 'Setup', 'History', 'Access', 'Files', 'Approvals', 'Statement']) {
       expect(app).not.toMatch(new RegExp(`import ${page} from ['\"]\\./views/${page}['\"]`));
@@ -14,7 +14,11 @@ describe('mobile performance contract', () => {
     }
     expect(app).not.toMatch(/import GlobalSearch from ['"]\.\/GlobalSearch['"]/);
     expect(app).toContain("import('./GlobalSearch')");
-    expect(app).toContain('DASHBOARD_REFRESH_MOBILE_MS = 120_000');
+    expect(app).not.toContain('DASHBOARD_REFRESH_MOBILE_MS');
+    expect(app).not.toContain('DASHBOARD_REFRESH_DESKTOP_MS');
+    expect(app).not.toContain('setInterval(');
+    expect(app).toContain("window.addEventListener('focus', resume)");
+    expect(app).toContain("document.addEventListener('visibilitychange', resume)");
   });
 
   it('keeps the phone viewport, safe areas, RTL and reduced-motion contracts', () => {
