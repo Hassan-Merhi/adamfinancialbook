@@ -20,6 +20,7 @@ import {
 import { dayReport } from './report.js';
 import { delegationGate } from './delegation.js';
 import { performanceRouter } from './performance.js';
+import { fileLibraryRouter } from './file-library.js';
 import {
   accountBalance,
   businessCash,
@@ -77,6 +78,7 @@ app.use('/api', (req, res, next) => {
 app.use('/api', protectedSecurityRouter);
 app.use('/api', delegationGate);
 app.use('/api', performanceRouter);
+app.use('/api', fileLibraryRouter);
 
 const wrap = (fn: express.RequestHandler): express.RequestHandler =>
   (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
