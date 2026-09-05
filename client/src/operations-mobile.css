@@ -1,0 +1,282 @@
+/* Phase 3 — mobile operations.
+   Projects, people, attention, approvals and delegated-expense review share
+   one task-oriented phone language so operational work stays fast and readable. */
+
+.operations-page { min-width:0; }
+.operations-hero {
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:20px;
+  margin-bottom:16px;
+  padding:2px 2px 0;
+}
+.operations-hero > div:first-child { min-width:0; }
+.operations-eyebrow {
+  display:block;
+  margin-bottom:3px;
+  color:var(--ink-3);
+  font-size:10px;
+  font-weight:750;
+  letter-spacing:.11em;
+  text-transform:uppercase;
+}
+.operations-hero h2 { margin:0; font-size:25px; letter-spacing:-.035em; }
+.operations-hero p { max-width:570px; margin:4px 0 0; color:var(--ink-3); font-size:13px; }
+.operations-stats {
+  min-width:420px;
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+}
+.operations-stats > div {
+  min-width:0;
+  padding:10px 12px;
+  border:1px solid var(--line);
+  border-radius:var(--r-ctl);
+  background:var(--card);
+  box-shadow:var(--shadow);
+}
+.operations-stats span { display:block; color:var(--ink-3); font-size:10px; font-weight:650; text-transform:uppercase; letter-spacing:.07em; }
+.operations-stats b { display:block; margin-top:2px; overflow:hidden; text-overflow:ellipsis; font-size:17px; white-space:nowrap; }
+.operations-stats .needs-action { background:var(--accent-soft); border-color:color-mix(in srgb,var(--accent) 20%,var(--line)); }
+.operations-section-note { padding:0 16px 9px; color:var(--ink-3); font-size:12px; }
+.operations-list { min-width:0; }
+.operations-explainer {
+  margin:10px 0 4px;
+  border:1px solid var(--line-soft);
+  border-radius:var(--r-ctl);
+  background:var(--sunk);
+}
+.operations-explainer summary {
+  min-height:44px;
+  display:flex;
+  align-items:center;
+  padding:9px 13px;
+  cursor:pointer;
+  font-size:12.5px;
+  font-weight:650;
+}
+.operations-explainer p { margin:0; padding:0 13px 12px; color:var(--ink-3); font-size:12.5px; line-height:1.5; }
+
+@media (max-width:980px) and (min-width:761px) {
+  .operations-hero { align-items:stretch; flex-direction:column; gap:10px; }
+  .operations-stats { min-width:0; width:100%; }
+}
+
+@media (max-width:760px) {
+  /* Project + people overviews */
+  .operations-page { padding-bottom:2px; }
+  .operations-hero {
+    display:block;
+    margin:0 0 12px;
+    padding:2px 2px 0;
+  }
+  .operations-eyebrow { margin-bottom:2px; font-size:9px; }
+  .operations-hero h2 { font-size:21px; }
+  .operations-hero p { margin-top:3px; font-size:12px; line-height:1.4; }
+  .operations-stats {
+    min-width:0;
+    width:100%;
+    margin-top:10px;
+    gap:6px;
+  }
+  .operations-stats > div { padding:8px 9px; border-radius:13px; box-shadow:none; }
+  .operations-stats span { font-size:8.5px; letter-spacing:.05em; }
+  .operations-stats b { font-size:14px; }
+  .operations-section-note { padding:0 12px 7px; font-size:11px; }
+  .operations-list .row { min-height:62px; padding:10px 12px; }
+  .operations-list .row .main b { font-size:14px; }
+  .operations-list .row .main small { margin-top:2px; line-height:1.3; }
+  .operations-list .row .val { font-size:14px; }
+  .operations-list .row .val small { display:block; margin-top:1px; font-size:9.5px; }
+  .operations-explainer { margin-top:6px; border-radius:14px; }
+
+  /* Needs Attention becomes an action inbox, not a dashboard grid. */
+  .attention-head {
+    align-items:flex-start;
+    gap:8px;
+    margin-bottom:9px;
+  }
+  .attention-head h2 { font-size:21px; }
+  .attention-head p { margin-top:2px; font-size:11.5px; line-height:1.35; }
+  .attention-head > .btn { flex:none; min-height:40px; padding-inline:11px; }
+  .attention-summary {
+    display:flex;
+    grid-template-columns:none;
+    gap:6px;
+    margin:0 -2px 12px;
+    padding:0 2px 2px;
+    overflow-x:auto;
+    overscroll-behavior-x:contain;
+    scrollbar-width:none;
+  }
+  .attention-summary::-webkit-scrollbar { display:none; }
+  .attention-stat,
+  .attention-stat:first-child {
+    grid-column:auto;
+    min-width:104px;
+    flex:0 0 auto;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:9px;
+    padding:8px 10px;
+    border-radius:999px;
+    box-shadow:none;
+  }
+  .attention-stat span { font-size:8.5px; letter-spacing:.04em; white-space:nowrap; }
+  .attention-stat b { margin:0; font-size:14px; }
+  .attention-clear { padding:22px 14px; }
+  .attention-row {
+    margin:7px 8px;
+    padding:11px;
+    align-items:flex-start;
+    gap:7px 9px;
+    border:1px solid var(--line-soft);
+    border-radius:14px;
+    background:var(--sunk);
+  }
+  .attention-row:last-child { border-bottom:1px solid var(--line-soft); }
+  .attention-copy { flex:1 1 calc(100% - 95px); }
+  .attention-copy b { font-size:13.5px; line-height:1.3; }
+  .attention-copy small { font-size:11px; line-height:1.35; overflow-wrap:anywhere; }
+  .attention-value { margin-left:auto; font-size:14px; }
+  .attention-actions {
+    width:100%;
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:7px;
+  }
+  .attention-actions > .btn,
+  .attention-actions > .attention-upload,
+  .attention-actions > .chip { min-width:0; width:100%; justify-content:center; }
+  .attention-actions > :only-child { grid-column:1 / -1; }
+  .attention-toolbar { padding:8px 10px; }
+  .attention-toolbar .btn { width:100%; }
+
+  /* Expense assignment: selectors first, then a clear commit action. */
+  .expense-review-note {
+    margin:0 8px 8px;
+    padding:10px 11px;
+    align-items:flex-start;
+    flex-direction:column;
+    gap:2px;
+    border:0;
+    border-radius:13px;
+  }
+  .expense-review-note b { font-size:12.5px; }
+  .expense-review-note span { font-size:11px; line-height:1.35; }
+  .expense-review-controls {
+    grid-template-columns:1fr;
+    gap:8px;
+    padding:8px 10px 10px;
+    border-bottom:0;
+  }
+  .expense-review-controls label > span { margin-bottom:3px; font-size:9px; }
+  .expense-review-controls select,
+  .expense-review-controls input { min-height:46px; font-size:16px; }
+  .expense-review-commit {
+    margin-top:2px;
+    padding:8px;
+    align-items:stretch;
+    flex-direction:column;
+    gap:6px;
+    border:1px solid var(--line-soft);
+    border-radius:13px;
+    background:var(--sunk);
+  }
+  .expense-review-commit > span { max-width:none; text-align:left; font-size:11.5px; }
+  .expense-review-commit .btn { width:100%; min-height:46px; }
+  .expense-review-selectbar {
+    padding:8px 10px;
+    align-items:center;
+    flex-direction:row;
+    gap:8px;
+  }
+  .expense-review-selectbar .muted { font-size:10.5px; line-height:1.25; }
+  .expense-review-list { max-height:min(45dvh,390px); padding:0 8px 8px; }
+  .expense-review-row {
+    margin-bottom:7px;
+    padding:11px;
+    align-items:flex-start;
+    gap:9px;
+    border:1px solid var(--line-soft);
+    border-radius:13px;
+    background:var(--paper);
+  }
+  .expense-review-row:last-child { border-bottom:1px solid var(--line-soft); }
+  .expense-review-row input[type="checkbox"] { width:20px; height:20px; margin-top:1px; }
+  .expense-review-copy b { white-space:normal; font-size:13px; line-height:1.3; }
+  .expense-review-copy small { font-size:10.5px; line-height:1.3; }
+  .expense-review-row strong { font-size:13.5px; }
+
+  /* Approvals / My Wallet */
+  .approvals-head {
+    align-items:flex-start;
+    gap:8px;
+    margin-bottom:10px;
+  }
+  .approvals-head h2 { font-size:21px; }
+  .approvals-head p { margin-top:2px; font-size:11.5px; line-height:1.35; }
+  .approvals-head > .btn { flex:none; min-height:40px; padding-inline:11px; }
+  .approval-card-note { padding:0 12px 9px; font-size:11.5px; }
+  .approval-user-list { gap:8px; padding:0 8px 8px; }
+  .approval-user-card { padding:10px; border-radius:14px; }
+  .approval-user-head { gap:8px; }
+  .approval-avatar { width:32px; height:32px; flex-basis:32px; }
+  .approval-user-copy b { font-size:12.5px; }
+  .approval-user-copy small { font-size:10.5px; }
+  .approval-user-head .btn { min-height:40px; padding-inline:11px; }
+  .approval-checks { grid-template-columns:1fr; gap:6px; margin-top:8px; }
+  .approval-checks label { min-height:46px; padding:8px 10px; border-radius:12px; }
+  .approval-checks label input { width:19px; height:19px; }
+  .approval-checks label span { font-size:12.5px; }
+  .approval-checks label small { font-size:11px; }
+  .approval-row {
+    margin:7px 8px;
+    padding:11px;
+    align-items:flex-start;
+    flex-direction:row;
+    flex-wrap:wrap;
+    gap:7px 9px;
+    border:1px solid var(--line-soft);
+    border-radius:14px;
+    background:var(--sunk);
+  }
+  .approval-row:last-child { border-bottom:1px solid var(--line-soft); }
+  .approval-main { flex:1 1 calc(100% - 90px); }
+  .approval-main b { font-size:13.5px; line-height:1.3; }
+  .approval-main span { font-size:12px; line-height:1.35; }
+  .approval-main small { font-size:10.5px; line-height:1.35; overflow-wrap:anywhere; }
+  .approval-balance { margin-left:auto; font-size:15px; }
+  .approval-actions {
+    width:100%;
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:7px;
+  }
+  .approval-actions > .btn { width:100%; min-height:44px; }
+  .approval-actions > :only-child { grid-column:1 / -1; }
+  .approval-note { padding:2px 12px 11px; font-size:11px; }
+  .approval-form { padding:10px 12px; gap:9px; }
+  .approval-form textarea { min-height:88px; font-size:16px; }
+  .approval-file { width:100%; min-width:0; }
+  .approval-file input { width:100%; min-height:44px; }
+  .approval-toolbar { padding:8px 10px; }
+  .approval-toolbar .btn { width:100%; }
+
+  /* Old floating utility affordances must not reappear over the Phase 1 phone shell. */
+  .approval-launcher,
+  html .language-switch { display:none !important; }
+}
+
+@media (max-width:390px) {
+  .operations-stats { grid-template-columns:1fr 1fr; }
+  .operations-stats > div:first-child { grid-column:1 / -1; }
+  .attention-actions,
+  .approval-actions { grid-template-columns:1fr; }
+  .attention-actions > *,
+  .approval-actions > * { grid-column:1 !important; }
+  .expense-review-selectbar { align-items:flex-start; flex-direction:column; }
+}
