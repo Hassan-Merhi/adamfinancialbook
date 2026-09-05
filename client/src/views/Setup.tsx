@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { api, type LoadedBook } from '../api';
 import { money, tone } from '../ui';
+import ResetData from './ResetData';
 
 export default function Setup({ book, run }: { book: LoadedBook; run: (w: () => Promise<unknown>, d: string) => void }) {
   const [biz, setBiz] = useState('');
@@ -10,19 +11,7 @@ export default function Setup({ book, run }: { book: LoadedBook; run: (w: () => 
   const [per, setPer] = useState({ name: '', businessId: '', kind: 'payable', role: '', opening: '', salary: '' });
   const [loan, setLoan] = useState({ fromBusiness: '', toBusiness: '', opening: '' });
   const [rem, setRem] = useState({ what: '', amount: '', accountId: '' });
-  const [resetOpen, setResetOpen] = useState(false);
-  const [resetWord, setResetWord] = useState('');
-  const [resetPassword, setResetPassword] = useState('');
   const first = book.businesses[0]?.id ?? '';
-
-  const resetReady = resetWord === 'RESET' && !!resetPassword;
-  const startFresh = () => {
-    if (!resetReady) return;
-    run(() => api.resetBook(resetPassword, 'RESET'), 'Book cleared. Your users and sign-in access were kept.');
-    setResetWord('');
-    setResetPassword('');
-    setResetOpen(false);
-  };
 
   return (
     <section className="setup-page">
@@ -143,22 +132,7 @@ export default function Setup({ book, run }: { book: LoadedBook; run: (w: () => 
         </div>
       )}
 
-      <div className="card setup-card danger-zone" id="setup-data">
-        <h3>Data & reset <span className="muted">owner only</span></h3>
-        <div className="danger-zone-copy">
-          <div><b>Start fresh</b><span>Clears businesses, accounts, projects, people, entries, receipts, reminders, approvals, transfers, files, and history. Usernames, passwords, roles, and language preferences stay.</span></div>
-          <a className="btn ghost small" href="/api/backup.json">Download backup first</a>
-        </div>
-        {!resetOpen ? (
-          <div className="danger-zone-actions"><button className="btn ghost danger" onClick={() => setResetOpen(true)}>Start fresh…</button></div>
-        ) : (
-          <div className="reset-confirm">
-            <div className="f"><label>Current password</label><input type="password" autoComplete="current-password" value={resetPassword} onChange={(e) => setResetPassword(e.target.value)} /></div>
-            <div className="f"><label>Type RESET</label><input value={resetWord} autoCapitalize="characters" onChange={(e) => setResetWord(e.target.value)} placeholder="RESET" /></div>
-            <div className="reset-actions"><button className="btn ghost" onClick={() => { setResetOpen(false); setResetWord(''); setResetPassword(''); }}>Cancel</button><button className="btn danger" disabled={!resetReady} onClick={startFresh}>Clear book data</button></div>
-          </div>
-        )}
-      </div>
+      <ResetData />
     </section>
   );
 }
