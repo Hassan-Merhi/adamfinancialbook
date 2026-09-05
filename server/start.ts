@@ -40,3 +40,10 @@ const [{ delegationGate }, { expenseReviewRouter }] = await Promise.all([
 delegationGate.use(expenseReviewRouter);
 
 await import('./index.js');
+
+// A low-frequency production check independently verifies that stored effects,
+// client references, handoffs, and relationship targets still agree with the
+// economic meaning of every live entry. The timer is unref'd and never blocks
+// shutdown or tests.
+const { startIntegrityMonitor } = await import('./integrity.js');
+startIntegrityMonitor();

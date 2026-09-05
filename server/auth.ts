@@ -7,6 +7,7 @@
 import type { RequestHandler } from 'express';
 import { newId, pool, query } from './db.js';
 import { checkPassword, hashPassword, readCookie, readSession } from './session.js';
+import { runWithRequestActor } from './request-context.js';
 
 export type Role = 'owner' | 'entry';
 export type UserLanguage = 'en' | 'fr' | 'ar';
@@ -153,9 +154,16 @@ export const requireLogin: RequestHandler = async (req, res, next) => {
     return res.json({ ok: true, language });
   }
 
-  if (OPEN.has(req.path)) return next();
-  if (!req.user) return res.status(401).json({ error: 'Sign in to open the book.' });
-  next();
+  if (!OPEN.has(req.path) && !req.user) {
+    return res.status(401).json({ error: 'Sign in to open the book.' });
+  }
+
+  // Financial services below the route layer can now record the authenticated
+  // actor inside the same PostgreSQL transaction as the accounting mutation.
+  return runWithRequestActor(
+    req.user ? { id: req.user.id, email: req.user.email } : null,
+    () => next(),
+  );
 };
 
 /** Someone with entry-only access can add entries; the rest is yours. */
