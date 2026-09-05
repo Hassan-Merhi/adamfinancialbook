@@ -17,6 +17,7 @@ import {
   checkPassword, cookieHeader, passwordComplaint, signSession, suggestPassword, SESSION_DAYS,
 } from './session.js';
 import { dayReport } from './report.js';
+import { allocationGate } from './allocation.js';
 import { delegationGate } from './delegation.js';
 import {
   accountBalance, businessCash, loanBalance, personBalance,
@@ -51,6 +52,9 @@ app.use('/api', (req, res, next) => {
   if (req.get('x-book') === '1') return next();
   res.status(403).json({ error: 'Refused: that request did not come from the app.' });
 });
+
+// Owner-only post-spend allocation sits beside the delegated wallet workflow.
+app.use('/api', allocationGate);
 
 // Delegated-account rules sit in front of the normal book routes. Owners fall
 // through to the original behavior; entry-only users receive a restricted book.
