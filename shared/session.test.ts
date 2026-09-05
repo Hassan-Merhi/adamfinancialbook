@@ -25,21 +25,33 @@ describe('passwords', () => {
     expect(await hashPassword('same')).not.toBe(await hashPassword('same'));
   });
 
-  it('asks for something long enough to be worth having', () => {
-    expect(passwordComplaint('short')).toContain('8 characters');
-    expect(passwordComplaint('long-enough-now')).toBeNull();
+  it('requires a strong password or a long passphrase', () => {
+    expect(passwordComplaint('short')).toContain('12 characters');
+    expect(passwordComplaint('lowercaseonly')).not.toBeNull();
+    expect(passwordComplaint('GoodPass!2026')).toBeNull();
+    expect(passwordComplaint('correct horse battery staple')).toBeNull();
   });
 
-  it('suggests one that can be read down the phone', () => {
+  it('suggests one that can be read down the phone and passes policy', () => {
     const suggested = suggestPassword();
     expect(suggested.length).toBeGreaterThan(11);
     expect(suggested).not.toMatch(/[l1O0]/);   // nothing anyone can mishear
+    expect(passwordComplaint(suggested)).toBeNull();
   });
 });
 
 describe('the session cookie', () => {
   it('comes back as the person it was made for', () => {
-    expect(readSession(signSession('usr_1', 3))).toEqual({ userId: 'usr_1', version: 3 });
+    const parsed = readSession(signSession('usr_1', 3));
+    expect(parsed).toMatchObject({ userId: 'usr_1', version: 3 });
+    expect(parsed?.expiresAt).toBeGreaterThan(Date.now());
+  });
+
+  it('carries a tracked session id in the Phase 6 format', () => {
+    const expires = Date.now() + 60_000;
+    expect(readSession(signSession('usr_1', 3, 'sid_abc', expires))).toEqual({
+      userId: 'usr_1', version: 3, sessionId: 'sid_abc', expiresAt: expires,
+    });
   });
 
   it('cannot be edited', () => {
