@@ -61,4 +61,7 @@ jobs:
         run: npm run db:migrate
       - name: Verify migration status is clean
         run: npm run db:status
-      - run: npm run test:integration
+      - name: Existing API integration suite
+        run: npm run test:integration
+      - name: Financial end-to-end reconciliation
+        run: npm run test:financial-e2e
