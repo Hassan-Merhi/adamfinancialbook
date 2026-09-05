@@ -160,16 +160,18 @@ router.post('/read', wrap(async (req, res, next) => {
   if (reading.draft.mode !== 'entry') {
     return res.status(403).json({ error: 'Your access is for spending from assigned cash accounts only.' });
   }
-  reading.draft.input.kind = 'expense';
-  reading.draft.input.toAccountId = null;
-  reading.draft.input.personId = null;
-  reading.draft.input.projectId = null;
-  reading.draft.input.forBusiness = null;
-  reading.draft.input.historical = false;
-  if (!reading.draft.input.accountId || !assignments.some((a) => a.account_id === reading.draft.input.accountId)) {
-    reading.draft.input.accountId = assignments[0].account_id;
+  const draft = reading.draft;
+  draft.input.kind = 'expense';
+  draft.input.toAccountId = null;
+  draft.input.personId = null;
+  draft.input.projectId = null;
+  draft.input.forBusiness = null;
+  draft.input.historical = false;
+  const chosenAccountId = draft.input.accountId;
+  if (!chosenAccountId || !assignments.some((a) => a.account_id === chosenAccountId)) {
+    draft.input.accountId = assignments[0].account_id;
   }
-  res.json({ ...reading, duplicate: null });
+  res.json({ ...reading, draft, duplicate: null });
 }));
 
 router.post('/entries', wrap(async (req, res, next) => {
