@@ -512,33 +512,61 @@ router.post('/delegation/approvals/:id/decision', wrap(async (req, res) => {
 /* -------------------------------------------------------------------------- */
 
 const imageBody = express.raw({
-  type: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
+  type: () => true,
   limit: '6mb',
 });
 
-router.post('/delegation/attachments', imageBody, wrap(async (req, res) => {
-  const params = new URL(req.originalUrl, 'http://localhost').searchParams;
-  const entryIds = params.getAll('entryId');
-  const requestIds = params.getAll('requestId');
-  if (entryIds.length > 1 || requestIds.length > 1) {
-    return res.status(400).json({ error: 'Attachment query parameters must be supplied once as text.' });
-  }
-  const entryId = entryIds[0];
-  const requestId = requestIds[0];
-  if ((!entryId && !requestId) || (entryId && requestId)) {
-    return res.status(400).json({ error: 'Attach the file to one expense or one approval request.' });
-  }
-  if (entryId && !(await canSeeEntry(req, entryId))) return res.status(403).json({ error: 'You cannot attach to that expense.' });
-  if (requestId && !(await canSeeApproval(req, requestId))) return res.status(403).json({ error: 'You cannot attach to that request.' });
-  const data = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
-  if (!data.length) return res.status(400).json({ error: 'Choose a receipt or photo first.' });
+type AttachmentTarget =
+  | { type: 'entry'; id: string }
+  | { type: 'approval'; id: string };
 
-  const requestedMime = req.get('content-type');
-  const mime = requestedMime === 'image/jpeg' ? 'image/jpeg'
-    : requestedMime === 'image/png' ? 'image/png'
-    : requestedMime === 'image/webp' ? 'image/webp'
-    : requestedMime === 'application/pdf' ? 'application/pdf'
-    : null;
+type AttachmentMime = 'image/jpeg' | 'image/png' | 'image/webp' | 'application/pdf';
+
+function sniffAttachmentMime(data: Buffer): AttachmentMime | null {
+  if (data.length >= 5 && data.subarray(0, 5).toString('ascii') === '%PDF-') return 'application/pdf';
+  if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return 'image/jpeg';
+  if (
+    data.length >= 8
+    && data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47
+    && data[4] === 0x0d && data[5] === 0x0a && data[6] === 0x1a && data[7] === 0x0a
+  ) return 'image/png';
+  if (
+    data.length >= 12
+    && data.subarray(0, 4).toString('ascii') === 'RIFF'
+    && data.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) return 'image/webp';
+  return null;
+}
+
+async function canSeeAttachmentTarget(req: Request, target: AttachmentTarget): Promise<boolean> {
+  return target.type === 'entry'
+    ? canSeeEntry(req, target.id)
+    : canSeeApproval(req, target.id);
+}
+
+function canonicalAttachmentTargetId(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const match = /^[A-Za-z0-9_-]{1,120}$/.exec(raw);
+  return match?.[0] ?? null;
+}
+
+async function saveAttachment(req: Request, res: express.Response, target: AttachmentTarget) {
+  const targetId = canonicalAttachmentTargetId(target.id);
+  if (!targetId) return res.status(400).json({ error: 'Invalid attachment target.' });
+  const safeTarget: AttachmentTarget = target.type === 'entry'
+    ? { type: 'entry', id: targetId }
+    : { type: 'approval', id: targetId };
+
+  if (!(await canSeeAttachmentTarget(req, safeTarget))) {
+    return res.status(403).json({ error: safeTarget.type === 'entry' ? 'You cannot attach to that expense.' : 'You cannot attach to that request.' });
+  }
+  const rawBody: unknown = req.body;
+  if (typeof rawBody === 'string' || Array.isArray(rawBody) || !Buffer.isBuffer(rawBody) || rawBody.length === 0) {
+    return res.status(400).json({ error: 'Choose a receipt or photo first.' });
+  }
+  const data = Buffer.from(rawBody);
+  const byteSize = data.byteLength;
+  const mime = sniffAttachmentMime(data);
   if (!mime) return res.status(415).json({ error: 'Use a JPG, PNG, WebP or PDF.' });
 
   const id = newId('att');
@@ -547,43 +575,73 @@ router.post('/delegation/attachments', imageBody, wrap(async (req, res) => {
     : mime === 'image/webp' ? 'webp'
     : 'pdf';
   const filename = `evidence-${id}.${extension}`;
+  const entryId = safeTarget.type === 'entry' ? targetId : null;
+  const requestId = safeTarget.type === 'approval' ? targetId : null;
 
   await query(
     `INSERT INTO attachments
       (id, uploaded_by, entry_id, approval_request_id, filename, mime_type, byte_size, data)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-    [id, req.user!.id, entryId ?? null, requestId ?? null, filename, mime, data.length, data]);
+    [id, req.user!.id, entryId, requestId, filename, mime, byteSize, data]);
   if (req.user?.role === 'entry') {
     await notifyOwners(
       'evidence_added',
       `${req.user!.email} added evidence`,
-      `${filename} was attached to ${entryId ? 'an expense' : 'an approval request'}.`,
-      entryId ? 'entry' : 'approval', entryId ?? requestId,
+      `${filename} was attached to ${safeTarget.type === 'entry' ? 'an expense' : 'an approval request'}.`,
+      safeTarget.type === 'entry' ? 'entry' : 'approval', targetId,
     );
   }
-  await record(req, 'evidence attached', id, { filename, bytes: data.length, entryId: entryId ?? null, requestId: requestId ?? null });
-  res.status(201).json({ id, filename, mimeType: mime, byteSize: data.length });
+  await record(req, 'evidence attached', id, {
+    filename,
+    bytes: byteSize,
+    entryId,
+    requestId,
+  });
+  return res.status(201).json({ id, filename, mimeType: mime, byteSize });
+}
+
+async function listAttachments(req: Request, res: express.Response, target: AttachmentTarget) {
+  const targetId = canonicalAttachmentTargetId(target.id);
+  if (!targetId) return res.status(400).json({ error: 'Invalid attachment target.' });
+  const safeTarget: AttachmentTarget = target.type === 'entry'
+    ? { type: 'entry', id: targetId }
+    : { type: 'approval', id: targetId };
+
+  if (!(await canSeeAttachmentTarget(req, safeTarget))) {
+    return res.status(403).json({ error: safeTarget.type === 'entry' ? 'You cannot view that expense.' : 'You cannot view that request.' });
+  }
+  const rows = safeTarget.type === 'entry'
+    ? await query(
+      `SELECT id, filename, mime_type, byte_size, created_at
+         FROM attachments WHERE entry_id = $1 ORDER BY created_at`, [targetId])
+    : await query(
+      `SELECT id, filename, mime_type, byte_size, created_at
+         FROM attachments WHERE approval_request_id = $1 ORDER BY created_at`, [targetId]);
+  return res.json({ files: rows });
+}
+
+router.post('/delegation/attachments/entry/:entryId', imageBody, wrap(async (req, res) => {
+  const entryId = canonicalAttachmentTargetId(req.params.entryId);
+  if (!entryId) return res.status(400).json({ error: 'Invalid attachment target.' });
+  return saveAttachment(req, res, { type: 'entry', id: entryId });
 }));
 
-router.get('/delegation/attachments', wrap(async (req, res) => {
-  const params = new URL(req.originalUrl, 'http://localhost').searchParams;
-  const entryIds = params.getAll('entryId');
-  const requestIds = params.getAll('requestId');
-  if (entryIds.length > 1 || requestIds.length > 1) {
-    return res.status(400).json({ error: 'Attachment query parameters must be supplied once as text.' });
-  }
-  const entryId = entryIds[0];
-  const requestId = requestIds[0];
-  if (entryId && !(await canSeeEntry(req, entryId))) return res.status(403).json({ error: 'You cannot view that expense.' });
-  if (requestId && !(await canSeeApproval(req, requestId))) return res.status(403).json({ error: 'You cannot view that request.' });
-  if (!entryId && !requestId) return res.status(400).json({ error: 'Say which expense or request.' });
-  const rows = await query(
-    `SELECT id, filename, mime_type, byte_size, created_at
-       FROM attachments
-      WHERE ($1::text IS NOT NULL AND entry_id = $1)
-         OR ($2::text IS NOT NULL AND approval_request_id = $2)
-      ORDER BY created_at`, [entryId ?? null, requestId ?? null]);
-  res.json({ files: rows });
+router.post('/delegation/attachments/request/:requestId', imageBody, wrap(async (req, res) => {
+  const requestId = canonicalAttachmentTargetId(req.params.requestId);
+  if (!requestId) return res.status(400).json({ error: 'Invalid attachment target.' });
+  return saveAttachment(req, res, { type: 'approval', id: requestId });
+}));
+
+router.get('/delegation/attachments/entry/:entryId', wrap(async (req, res) => {
+  const entryId = canonicalAttachmentTargetId(req.params.entryId);
+  if (!entryId) return res.status(400).json({ error: 'Invalid attachment target.' });
+  return listAttachments(req, res, { type: 'entry', id: entryId });
+}));
+
+router.get('/delegation/attachments/request/:requestId', wrap(async (req, res) => {
+  const requestId = canonicalAttachmentTargetId(req.params.requestId);
+  if (!requestId) return res.status(400).json({ error: 'Invalid attachment target.' });
+  return listAttachments(req, res, { type: 'approval', id: requestId });
 }));
 
 router.get('/delegation/attachments/:id', wrap(async (req, res) => {
