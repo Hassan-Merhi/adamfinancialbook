@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { EvidenceDashboard, LoadedBook } from './api';
-import { searchEverything, type SearchAction } from './search';
+import { api, type EvidenceDashboard, type LoadedBook } from './api';
+import { searchEverything, type SearchAction, type SearchHit } from './search';
 import './global-search.css';
 
 export default function GlobalSearch({ open, onOpen, onClose, book, dashboard, owner, onChoose }: {
@@ -14,11 +14,22 @@ export default function GlobalSearch({ open, onOpen, onClose, book, dashboard, o
 }) {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
+  const [remote, setRemote] = useState<SearchHit[]>([]);
   const input = useRef<HTMLInputElement>(null);
-  const results = useMemo(
-    () => searchEverything(query, book, dashboard, owner),
+  const local = useMemo(
+    () => searchEverything(query, book, dashboard, owner, 20),
     [query, book, dashboard, owner],
   );
+  const results = useMemo(() => {
+    const found = new Map<string, SearchHit>();
+    for (const hit of [...local, ...remote]) {
+      const previous = found.get(hit.id);
+      if (!previous || hit.score > previous.score) found.set(hit.id, hit);
+    }
+    return [...found.values()]
+      .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
+      .slice(0, 14);
+  }, [local, remote]);
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -42,9 +53,40 @@ export default function GlobalSearch({ open, onOpen, onClose, book, dashboard, o
 
   useEffect(() => setActive(0), [query]);
 
+  useEffect(() => {
+    const term = query.trim();
+    if (!open || term.length < 2) {
+      setRemote([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      api.searchEntries(term, 12)
+        .then(({ items }) => {
+          if (cancelled) return;
+          setRemote(items.map((item, index): SearchHit => ({
+            id: item.id,
+            title: item.title,
+            subtitle: item.subtitle,
+            group: 'Activity',
+            score: 72 - index,
+            action: item.targetType && item.targetId
+              ? { mode: 'focus', target: { type: item.targetType, id: item.targetId } }
+              : { mode: 'view', view: owner ? 'history' : 'today' },
+          })));
+        })
+        .catch(() => { if (!cancelled) setRemote([]); });
+    }, 220);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [open, query, owner]);
+
   const choose = (action: SearchAction) => {
     onChoose(action);
     setQuery('');
+    setRemote([]);
     onClose();
   };
 
