@@ -34,20 +34,16 @@ export default function Setup({ book, run }: { book: LoadedBook; run: (w: () => 
       <div className="card">
         <h3>Accounts</h3>
         {book.accounts.map((a) => <div className="row" key={a.id}>
-          <span>{a.name}<small>{book.businesses.find((b) => b.id === a.businessId)?.name}</small></span>
+          <span>{a.name}{a.businessId && <small>{book.businesses.find((b) => b.id === a.businessId)?.name}</small>}</span>
           <span className="num">{money(book.balances.accounts[a.id] ?? 0)}</span></div>)}
         <div className="form">
           <div className="f"><label>Name</label>
             <input value={acc.name} onChange={(e) => setAcc({ ...acc, name: e.target.value })} placeholder="Soficom" /></div>
-          <div className="f"><label>Under</label>
-            <select value={acc.businessId || first} onChange={(e) => setAcc({ ...acc, businessId: e.target.value })}>
-              {book.businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select></div>
           <div className="f"><label>Opening balance</label>
             <input inputMode="decimal" value={acc.opening} onChange={(e) => setAcc({ ...acc, opening: e.target.value })} placeholder="0" /></div>
-          <button className="btn" disabled={!acc.name.trim() || !book.businesses.length}
+          <button className="btn" disabled={!acc.name.trim()}
             onClick={() => {
-              run(() => api.addAccount({ name: acc.name.trim(), businessId: acc.businessId || first, opening: Number(acc.opening) || 0 }), 'Account created.');
+              run(() => api.addAccount({ name: acc.name.trim(), businessId: null, opening: Number(acc.opening) || 0 }), 'Account created.');
               setAcc({ name: '', businessId: '', opening: '' });
             }}>Add</button>
         </div>
