@@ -73,6 +73,11 @@ export function readPromptAction(text: string, catalog: Catalog): PromptAction |
   const exact = candidates.find((item) => normalize(item.name) === entityTarget);
   if (exact) return { mode: 'focus', target: { type: exact.type, id: exact.id }, label: exact.name };
 
+  // A business name should beat a partial account name (for example,
+  // "Construction" should open Money rather than guessing "Construction Cash").
+  const business = catalog.businesses.find((item) => normalize(item.name) === entityTarget);
+  if (business) return { mode: 'view', view: 'money', label: `${business.name} money` };
+
   // A short everyday nickname is useful only when it identifies exactly one
   // thing. Ambiguous words such as "cash" intentionally fall through.
   if (entityTarget.length >= 3) {
@@ -85,9 +90,6 @@ export function readPromptAction(text: string, catalog: Catalog): PromptAction |
       return { mode: 'focus', target: { type: item.type, id: item.id }, label: item.name };
     }
   }
-
-  const business = catalog.businesses.find((item) => normalize(item.name) === entityTarget);
-  if (business) return { mode: 'view', view: 'money', label: `${business.name} money` };
 
   return null;
 }
