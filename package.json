@@ -17,6 +17,7 @@
     "db:setup": "tsx server/setup-db.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm test -- --passWithNoTests && npm run build",
     "user:add": "npm run db:migrate && tsx server/add-user.ts",
     "report:send": "npm run db:migrate && tsx server/send-report.ts",
     "backup": "npm run db:migrate && tsx server/backup.ts"
