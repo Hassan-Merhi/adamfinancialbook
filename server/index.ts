@@ -285,6 +285,7 @@ app.post('/api/translate', wrap(async (req, res) => {
 /* ---------------- setting the book up ---------------- */
 
 const nameOnly = z.object({ name: z.string().min(1).max(80) });
+const accountInput = nameOnly.extend({ businessId: z.string().nullish(), opening: z.number().default(0) });
 const under = nameOnly.extend({ businessId: z.string().min(1), opening: z.number().default(0) });
 
 app.post('/api/businesses', ownerOnly, wrap(async (req, res) => {
@@ -299,12 +300,12 @@ app.post('/api/businesses', ownerOnly, wrap(async (req, res) => {
 }));
 
 app.post('/api/accounts', ownerOnly, wrap(async (req, res) => {
-  const { name, businessId, opening } = under.parse(req.body);
+  const { name, businessId, opening } = accountInput.parse(req.body);
   const id = newId('acc');
   await query('INSERT INTO accounts (id, name, business_id, opening) VALUES ($1,$2,$3,$4)',
-    [id, name, businessId, opening]);
-  await record(req, 'account created', id, { name, opening });
-  res.status(201).json({ id, name, businessId, opening });
+    [id, name, businessId ?? null, opening]);
+  await record(req, 'account created', id, { name, opening, businessId: businessId ?? null });
+  res.status(201).json({ id, name, businessId: businessId ?? null, opening });
 }));
 
 app.post('/api/projects', ownerOnly, wrap(async (req, res) => {
