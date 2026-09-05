@@ -5,10 +5,32 @@
  * password primitive and the signed cookie format, so the crypto stays easy to
  * test and reason about in isolation.
  */
-import { createHmac, randomBytes, randomInt, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
-import { promisify } from 'node:util';
+import {
+  createHmac,
+  randomBytes,
+  randomInt,
+  scrypt as scryptCb,
+  timingSafeEqual,
+  type ScryptOptions,
+} from 'node:crypto';
 
-const scrypt = promisify(scryptCb) as (secret: string, salt: Buffer, len: number) => Promise<Buffer>;
+const STRONG_SCRYPT: ScryptOptions = {
+  N: 1 << 17,
+  r: 8,
+  p: 1,
+  maxmem: 192 * 1024 * 1024,
+};
+
+function deriveScrypt(secret: string, salt: Buffer, len: number, options?: ScryptOptions): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const done = (error: Error | null, derivedKey: Buffer) => {
+      if (error) reject(error);
+      else resolve(derivedKey);
+    };
+    if (options) scryptCb(secret, salt, len, options, done);
+    else scryptCb(secret, salt, len, done);
+  });
+}
 
 // Kept for backward compatibility with pre-Phase-6 cookies. New sessions use a
 // role-specific lifetime from security.ts and always carry a persistent session id.
@@ -23,15 +45,40 @@ function secret(): string {
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
-  const key = await scrypt(password, salt, 64);
-  return `scrypt$${salt.toString('base64')}$${key.toString('base64')}`;
+  const key = await deriveScrypt(password, salt, 64, STRONG_SCRYPT);
+  return `scrypt-v2$${STRONG_SCRYPT.N}$${STRONG_SCRYPT.r}$${STRONG_SCRYPT.p}$${salt.toString('base64')}$${key.toString('base64')}`;
 }
 
 export async function checkPassword(password: string, stored: string): Promise<boolean> {
-  const [scheme, saltB64, keyB64] = stored.split('$');
-  if (scheme !== 'scrypt' || !saltB64 || !keyB64) return false;
-  const key = await scrypt(password, Buffer.from(saltB64, 'base64'), 64);
-  const expected = Buffer.from(keyB64, 'base64');
+  const parts = stored.split('$');
+  let key: Buffer;
+  let expected: Buffer;
+
+  if (parts[0] === 'scrypt-v2' && parts.length === 6) {
+    const [, nRaw, rRaw, pRaw, saltB64, keyB64] = parts;
+    const N = Number(nRaw);
+    const r = Number(rRaw);
+    const p = Number(pRaw);
+    if (!Number.isInteger(N) || N < (1 << 14) || N > (1 << 20)) return false;
+    if (!Number.isInteger(r) || r < 1 || r > 32) return false;
+    if (!Number.isInteger(p) || p < 1 || p > 16) return false;
+    key = await deriveScrypt(password, Buffer.from(saltB64, 'base64'), 64, {
+      N,
+      r,
+      p,
+      maxmem: Math.max(192 * 1024 * 1024, 128 * N * r + 32 * 1024 * 1024),
+    });
+    expected = Buffer.from(keyB64, 'base64');
+  } else if (parts[0] === 'scrypt' && parts.length === 3) {
+    // Legacy hashes used Node's historical defaults. Keep verification so
+    // existing users are not locked out; newly set passwords use scrypt-v2.
+    const [, saltB64, keyB64] = parts;
+    key = await deriveScrypt(password, Buffer.from(saltB64, 'base64'), 64);
+    expected = Buffer.from(keyB64, 'base64');
+  } else {
+    return false;
+  }
+
   return key.length === expected.length && timingSafeEqual(key, expected);
 }
 
