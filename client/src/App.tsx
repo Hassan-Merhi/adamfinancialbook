@@ -29,7 +29,7 @@ const NAV: { id: View; label: string; short: string; icon: string }[] = [
   { id: 'today', label: 'Today', short: 'Today',
     icon: 'M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
   { id: 'money', label: 'Accounts & loans', short: 'Money',
-    icon: 'M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z' },
+    icon: 'M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z' },
   { id: 'projects', label: 'Projects', short: 'Projects',
     icon: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' },
   { id: 'people', label: 'People', short: 'People',
