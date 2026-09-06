@@ -54,7 +54,10 @@ const [
 ]);
 
 publicSecurityRouter.use(healthRouter);
-delegationGate.use(requestTelemetry);
+// publicSecurityRouter is mounted before requireAuthenticatedApi. Its fixed
+// public routes finish first; this fallthrough therefore observes every other
+// /api request before protected/delegated/core routing can finish it.
+publicSecurityRouter.use(requestTelemetry);
 delegationGate.use(expenseReviewRouter);
 delegationGate.use(resetRouter);
 delegationGate.use(operationsRouter);
