@@ -160,11 +160,17 @@ export default function App() {
 
   const say = (text: string, bad?: boolean) => setNote({ text, bad });
 
+  const refreshProjection = () => {
+    setWaiting(outbox.all().length);
+    const projected = snapshot.load<LoadedBook>();
+    if (projected) setBook(projected);
+  };
+
   const reload = async () => {
     try {
       const fresh = await api.overview();
-      setBook(fresh);
-      snapshot.save(fresh);
+      await snapshot.save(fresh);
+      setBook(snapshot.load<LoadedBook>() ?? fresh);
       setOffline(false);
     } catch (e) {
       if (e instanceof NotSignedIn) {
@@ -224,13 +230,13 @@ export default function App() {
     if (!outbox.all().length) return;
     try {
       const sent = await flushOutbox((input) => api.addEntry(input));
-      setWaiting(outbox.all().length);
+      refreshProjection();
       if (sent) {
         await Promise.all([reload(), refreshDashboard(true)]);
         say(`${sent} ${sent === 1 ? 'entry' : 'entries'} logged from the outbox.`);
       }
     } catch (e) {
-      setWaiting(outbox.all().length);
+      refreshProjection();
       say(`One queued entry was refused: ${(e as Error).message}`, true);
     }
   };
@@ -475,14 +481,20 @@ export default function App() {
           <div className="dockable">
             {(offline || waiting > 0) && (
               <div className="note docknote" role="status" aria-live="polite">
-                {offline ? 'No signal — these are the figures from the last time the book loaded. ' : ''}
+                {offline
+                  ? waiting > 0
+                    ? 'No signal — balances below are projected from the last confirmed book plus your unsynced entries. '
+                    : 'No signal — showing the last server-confirmed book. '
+                  : waiting > 0
+                    ? 'Sync pending — balances include unsynced entries until the server confirms them. '
+                    : ''}
                 {waiting > 0
                   ? `${waiting} ${waiting === 1 ? 'entry is' : 'entries are'} waiting to be sent, and will go the moment there is a network.`
                   : 'Anything you log now will be sent when you are back.'}
               </div>
             )}
             <Entry book={book} reload={reload} say={say}
-              onQueued={() => setWaiting(outbox.all().length)} onAction={handlePromptAction} />
+              onQueued={refreshProjection} onAction={handlePromptAction} />
           </div>
         )}
 

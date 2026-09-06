@@ -1,6 +1,8 @@
-/** Paginated target statement with server-side filtering and running balances. */
+/** Paginated target statement with server-side filtering and projected offline rows. */
 import { useEffect, useRef, useState } from 'react';
 import { api, type LoadedBook, type StatementRowView, type StatementTarget } from '../api';
+import { isProjectedEntry } from '../offline-projection';
+import { deltaFor } from '../../../shared/engine';
 import type { Entry } from '../../../shared/types';
 import { Card, Empty, KINDS, money, shortDate, signed, tone } from '../ui';
 
@@ -62,6 +64,13 @@ export default function Statement({ book, focus, back, run }: {
     }
   };
 
+  const person = focus.type === 'person' ? book.people.find((candidate) => candidate.id === focus.id) : undefined;
+  const pendingForTarget = book.entries
+    .filter(isProjectedEntry)
+    .map((entry) => ({ entry, delta: deltaFor(entry, focus, person) }))
+    .filter((row) => row.delta !== 0);
+  const pendingRows = pendingForTarget.filter(({ entry }) => matchesFilters(entry, filters));
+
   const head = describe(book, focus);
   const filtered = !!(q || kind || from || to);
 
@@ -75,7 +84,7 @@ export default function Statement({ book, focus, back, run }: {
           <p className="muted">{head.sub}</p>
         </div>
         <div className="bal">
-          <small>{head.balanceLabel}</small>
+          <small>{head.balanceLabel}{pendingForTarget.length ? ' · projected' : ''}</small>
           <span className={`num ${head.signed ? tone(head.balance) : ''}`}>{money(head.balance)}</span>
         </div>
       </div>
@@ -94,11 +103,27 @@ export default function Statement({ book, focus, back, run }: {
         )}
       </div>
 
+      {pendingForTarget.length > 0 && (
+        <Card title="Pending sync" aside={`${pendingForTarget.length} projected`}>
+          {pendingRows.length === 0
+            ? <Empty>No pending entries match these filters.</Empty>
+            : pendingRows.map(({ entry, delta }) => (
+                <div className="row" key={entry.id}>
+                  <span className="main">
+                    <b>{entry.purpose}</b>
+                    <small>{shortDate(entry.occurredOn)} · {KINDS[entry.kind]} · not server-confirmed yet</small>
+                  </span>
+                  <span className={`val num ${tone(delta)}`}>{delta ? signed(delta) : '—'}</span>
+                </div>
+              ))}
+        </Card>
+      )}
+
       <Card
         title="Statement"
-        aside={!loading ? `${summary.total} matching · in ${money(summary.inSum)} · out ${money(Math.abs(summary.outSum))}` : undefined}
+        aside={!loading ? `${summary.total} server-confirmed matching · in ${money(summary.inSum)} · out ${money(Math.abs(summary.outSum))}` : undefined}
       >
-        {error && <Empty>{error}</Empty>}
+        {error && <Empty>{pendingForTarget.length ? 'Server-confirmed statement is unavailable right now. Pending projected entries are shown above.' : error}</Empty>}
         {loading && !error && <Empty>Reading the statement…</Empty>}
         {!loading && !error && rows.length === 0 && <Empty>Nothing matches these filters.</Empty>}
         {rows.length > 0 && (
@@ -168,6 +193,18 @@ export default function Statement({ book, focus, back, run }: {
       )}
     </>
   );
+}
+
+function matchesFilters(entry: Entry, filters: { q: string; kind: string; from: string; to: string }): boolean {
+  if (filters.kind && entry.kind !== filters.kind) return false;
+  if (filters.from && entry.occurredOn < filters.from) return false;
+  if (filters.to && entry.occurredOn > filters.to) return false;
+  if (filters.q.trim()) {
+    const needle = filters.q.trim().toLowerCase();
+    const haystack = `${entry.purpose} ${entry.raw}`.toLowerCase();
+    if (!haystack.includes(needle)) return false;
+  }
+  return true;
 }
 
 function describe(book: LoadedBook, focus: Focus) {

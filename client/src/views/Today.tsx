@@ -1,4 +1,5 @@
 import type { LoadedBook } from '../api';
+import { isProjectedEntry } from '../offline-projection';
 import { ordered } from '../../../shared/engine';
 import { Card, Empty, KINDS, Row, longDate, money, shortDate, signed, today, tone } from '../ui';
 import type { Focus } from './Statement';
@@ -13,6 +14,7 @@ export default function Today({ book, open, goto, attentionCount }: {
   const activity = ordered(book.entries);
   const enteredToday = activity.filter((entry) => entry.occurredOn === date);
   const recent = [...activity].reverse().slice(0, 6);
+  const pendingToday = enteredToday.filter(isProjectedEntry).length;
 
   const accountMoves = enteredToday.flatMap((entry) =>
     entry.effects.filter((effect) => effect.type === 'account'),
@@ -77,14 +79,15 @@ export default function Today({ book, open, goto, attentionCount }: {
                 .filter((effect) => effect.type === 'account')
                 .reduce((sum, effect) => sum + effect.delta, 0);
               const account = accountName(entry.accountId);
+              const projected = isProjectedEntry(entry);
               return (
                 <Row
                   key={entry.id}
                   title={entry.purpose}
-                  sub={[shortDate(entry.occurredOn), KINDS[entry.kind], account].filter(Boolean).join(' · ')}
+                  sub={[projected ? 'Pending sync · projected' : shortDate(entry.occurredOn), KINDS[entry.kind], account].filter(Boolean).join(' · ')}
                   value={money(entry.amount)}
                   valueTone={tone(cashDelta)}
-                  onOpen={entry.accountId ? () => open({ type: 'account', id: entry.accountId! }) : undefined}
+                  onOpen={!projected && entry.accountId ? () => open({ type: 'account', id: entry.accountId! }) : undefined}
                 />
               );
             })}
@@ -92,7 +95,8 @@ export default function Today({ book, open, goto, attentionCount }: {
 
       {enteredToday.length > 0 && (
         <div className="today-footnote">
-          {enteredToday.length} {enteredToday.length === 1 ? 'entry' : 'entries'} recorded today · net cash movement {signed(netMovement)}
+          {enteredToday.length} {enteredToday.length === 1 ? 'entry' : 'entries'} today · net cash movement {signed(netMovement)}
+          {pendingToday > 0 ? ` · ${pendingToday} pending sync` : ''}
         </div>
       )}
     </div>
