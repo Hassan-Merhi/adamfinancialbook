@@ -202,14 +202,34 @@ async function exerciseNavigation(page, label) {
 async function certifyOfflineRestart(context, page) {
   await page.getByRole('button', { name: 'Today' }).click();
   await page.evaluate(() => navigator.serviceWorker?.ready);
+
+  // Treat this like an installed app being killed: destroy the page itself,
+  // leave the browser profile (cookies, IndexedDB and service worker) intact,
+  // then open a brand-new page after the network is gone.
+  await page.close();
   await context.setOffline(true);
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await waitForShell(page);
-  await page.getByText(/No signal/i).first().waitFor({ state: 'visible', timeout: 10_000 });
-  await assertNoHorizontalOverflow(page, 'offline-restart');
+  const offlinePage = await context.newPage();
+  let offlineNavigationError = null;
+  try {
+    await offlinePage.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 15_000 });
+  } catch (error) {
+    // WebKit can report an offline navigation error even when the registered
+    // service worker fulfilled the request. We only tolerate that protocol
+    // error when the fresh page independently proves the signed-in shell loaded.
+    offlineNavigationError = error;
+  }
+  try {
+    await waitForShell(offlinePage);
+  } catch (shellError) {
+    throw offlineNavigationError ?? shellError;
+  }
+  await offlinePage.getByText(/No signal/i).first().waitFor({ state: 'visible', timeout: 10_000 });
+  await assertNoHorizontalOverflow(offlinePage, 'offline-restart');
+
   await context.setOffline(false);
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await waitForShell(page);
+  await offlinePage.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 15_000 });
+  await waitForShell(offlinePage);
+  await offlinePage.close();
 }
 
 const browser = await webkit.launch({ headless: true });
