@@ -140,10 +140,14 @@ describe('Offline Correct + Void Phase 1', () => {
   });
 
   it('routes a queued correction to its revision endpoint instead of the ordinary entry sender', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    }));
+    const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push([input, init]);
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
     vi.stubGlobal('fetch', fetchMock);
     const ordinarySender = vi.fn(async () => ({ ok: true }));
 
@@ -153,10 +157,10 @@ describe('Offline Correct + Void Phase 1', () => {
 
     expect(ordinarySender).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [path, options] = fetchMock.mock.calls[0];
+    const [path, options] = calls[0];
     expect(path).toBe('/api/entries/entry-1');
-    expect((options as RequestInit).method).toBe('PATCH');
-    const body = JSON.parse(String((options as RequestInit).body));
+    expect(options?.method).toBe('PATCH');
+    const body = JSON.parse(String(options?.body));
     expect(body.amount).toBe(30);
     expect(body.clientRef).toMatch(/^q_/);
     expect(body.offlineContext.entry.amount).toBe(20);
