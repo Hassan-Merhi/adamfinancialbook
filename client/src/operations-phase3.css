@@ -1,0 +1,338 @@
+/* Phase 3 — phone-first operational drill-downs.
+   Desktop remains expanded. Phones show one category/workflow at a time. */
+
+.projects-waiting-mobile,
+.people-mobile-groups,
+.attention-mobile-nav,
+.approval-mobile-nav,
+.approval-history-toggle {
+  display:none;
+}
+
+.attention-section,
+.approval-section {
+  display:block;
+}
+
+@media (max-width:760px) {
+  /* Projects / People: keep the headline, remove dashboard density. */
+  .operations-stats {
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:7px;
+  }
+
+  .operations-count-stat {
+    display:none !important;
+  }
+
+  .operations-stats > div {
+    min-height:52px;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    padding:9px 10px;
+  }
+
+  .operations-stats span {
+    font-size:10px;
+    line-height:1.2;
+    letter-spacing:.035em;
+  }
+
+  .operations-stats b {
+    margin-top:3px;
+    font-size:15px;
+  }
+
+  .operations-eyebrow {
+    font-size:10px;
+  }
+
+  .projects-waiting-desktop,
+  .people-desktop-groups {
+    display:none;
+  }
+
+  .projects-waiting-mobile,
+  .people-mobile-groups {
+    display:block;
+  }
+
+  .operations-mobile-fold,
+  .operations-mobile-group {
+    margin:0 0 10px;
+    overflow:hidden;
+    border:1px solid var(--line);
+    border-radius:15px;
+    background:var(--card);
+    box-shadow:var(--shadow);
+  }
+
+  .operations-mobile-fold > summary,
+  .operations-mobile-group > summary {
+    min-height:60px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:11px 12px;
+    cursor:pointer;
+    list-style:none;
+  }
+
+  .operations-mobile-fold > summary::-webkit-details-marker,
+  .operations-mobile-group > summary::-webkit-details-marker {
+    display:none;
+  }
+
+  .operations-mobile-fold > summary::after,
+  .operations-mobile-group > summary::after {
+    content:'›';
+    flex:none;
+    color:var(--ink-3);
+    font-size:20px;
+    line-height:1;
+    transform:rotate(90deg);
+  }
+
+  .operations-mobile-fold[open] > summary::after,
+  .operations-mobile-group[open] > summary::after {
+    transform:rotate(-90deg);
+  }
+
+  .operations-mobile-fold > summary > span,
+  .operations-mobile-group-copy {
+    min-width:0;
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+  }
+
+  .operations-mobile-fold > summary b,
+  .operations-mobile-group-copy b {
+    font-size:14px;
+    line-height:1.25;
+  }
+
+  .operations-mobile-fold > summary small,
+  .operations-mobile-group-copy small {
+    color:var(--ink-3);
+    font-size:11.5px;
+    line-height:1.3;
+  }
+
+  .operations-mobile-fold > summary strong,
+  .operations-mobile-group > summary strong {
+    flex:none;
+    max-width:38%;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    font-size:13.5px;
+  }
+
+  .operations-mobile-fold[open] > summary,
+  .operations-mobile-group[open] > summary {
+    border-bottom:1px solid var(--line-soft);
+    background:var(--sunk);
+  }
+
+  .operations-mobile-fold .row,
+  .operations-mobile-group .row {
+    margin:0;
+    border:0;
+    border-bottom:1px solid var(--line-soft);
+    border-radius:0;
+    background:var(--card);
+  }
+
+  .operations-mobile-fold .row:last-child,
+  .operations-mobile-group .row:last-child {
+    border-bottom:0;
+  }
+
+  /* Needs Attention: four inbox categories, one visible queue at a time. */
+  .attention-summary-desktop {
+    display:none !important;
+  }
+
+  .attention-mobile-nav {
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:7px;
+    margin:0 0 12px;
+  }
+
+  .attention-mobile-nav button {
+    min-height:48px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    padding:9px 11px;
+    border:1px solid var(--line);
+    border-radius:13px;
+    background:var(--card);
+    color:var(--ink-2);
+    text-align:left;
+  }
+
+  .attention-mobile-nav button span {
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    font-size:12.5px;
+    font-weight:700;
+  }
+
+  .attention-mobile-nav button b {
+    min-width:24px;
+    height:24px;
+    display:grid;
+    place-items:center;
+    padding:0 6px;
+    border-radius:999px;
+    background:var(--sunk);
+    color:var(--ink-2);
+    font-size:11.5px;
+  }
+
+  .attention-mobile-nav button.is-active {
+    border-color:color-mix(in srgb,var(--accent) 30%,var(--line));
+    background:var(--accent-soft);
+    color:var(--ink);
+  }
+
+  .attention-mobile-nav button.is-active b {
+    background:var(--card);
+    color:var(--ink);
+  }
+
+  .attention-section {
+    display:none;
+  }
+
+  .attention-section.is-active {
+    display:block;
+  }
+
+  .attention-section > .card:last-child {
+    margin-bottom:10px;
+  }
+
+  /* Approvals / My Wallet: one workflow at a time on phones. */
+  .approval-mobile-nav {
+    display:flex;
+    gap:7px;
+    margin:0 -2px 12px;
+    padding:0 2px 3px;
+    overflow-x:auto;
+    overscroll-behavior-x:contain;
+    scrollbar-width:none;
+  }
+
+  .approval-mobile-nav::-webkit-scrollbar {
+    display:none;
+  }
+
+  .approval-mobile-nav button {
+    min-height:46px;
+    flex:0 0 auto;
+    display:flex;
+    align-items:center;
+    gap:7px;
+    padding:8px 11px;
+    border:1px solid var(--line);
+    border-radius:999px;
+    background:var(--card);
+    color:var(--ink-2);
+  }
+
+  .approval-mobile-nav button span {
+    font-size:12px;
+    font-weight:700;
+    white-space:nowrap;
+  }
+
+  .approval-mobile-nav button b {
+    min-width:20px;
+    height:20px;
+    display:grid;
+    place-items:center;
+    padding:0 5px;
+    border-radius:999px;
+    background:var(--sunk);
+    font-size:10.5px;
+  }
+
+  .approval-mobile-nav button.is-active {
+    border-color:color-mix(in srgb,var(--accent) 30%,var(--line));
+    background:var(--accent-soft);
+    color:var(--ink);
+  }
+
+  .approval-mobile-nav button.is-active b {
+    background:var(--card);
+  }
+
+  .approval-section {
+    display:none;
+  }
+
+  .approval-section.is-active {
+    display:block;
+  }
+
+  .approval-section > .card:last-child {
+    margin-bottom:10px;
+  }
+
+  .approval-history-toggle {
+    display:block;
+    padding:8px 10px;
+    border-bottom:1px solid var(--line-soft);
+  }
+
+  .approval-history-toggle .btn {
+    width:100%;
+    min-height:44px;
+  }
+
+  .approval-history-row:not(.is-shown) {
+    display:none;
+  }
+
+  /* Phase 3 replaces tiny compression with fewer, readable controls. */
+  .operations-section-note,
+  .attention-copy small,
+  .approval-main small,
+  .approval-user-copy small,
+  .expense-review-copy small {
+    font-size:11.5px;
+  }
+
+  .attention-copy b,
+  .approval-main b,
+  .approval-user-copy b,
+  .expense-review-copy b {
+    font-size:13.5px;
+  }
+}
+
+@media (max-width:360px) {
+  .attention-mobile-nav {
+    grid-template-columns:1fr;
+  }
+}
+
+html[dir="rtl"] .operations-mobile-fold > summary::after,
+html[dir="rtl"] .operations-mobile-group > summary::after {
+  transform:rotate(-90deg);
+}
+
+html[dir="rtl"] .operations-mobile-fold[open] > summary::after,
+html[dir="rtl"] .operations-mobile-group[open] > summary::after {
+  transform:rotate(90deg);
+}
