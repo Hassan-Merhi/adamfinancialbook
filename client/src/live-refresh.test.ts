@@ -31,10 +31,10 @@ describe('live mutation refresh classification', () => {
       .toEqual({ book: true, dashboard: true });
   });
 
-  it('refreshes delegation state after user/access writes', () => {
+  it('refreshes delegation state and the affected delegate book after access writes', () => {
     expect(classifyLiveMutation('/api/users/usr_1/role', 'POST'))
       .toEqual({ book: false, dashboard: true });
     expect(classifyLiveMutation('/api/delegation/users/usr_1/accounts', 'PUT'))
-      .toEqual({ book: false, dashboard: true });
+      .toEqual({ book: true, dashboard: true });
   });
 });
