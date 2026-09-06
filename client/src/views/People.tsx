@@ -25,7 +25,7 @@ export default function People({ book, open }: { book: LoadedBook; open: (f: Foc
           <p>People stay separated by role so supplier, payroll and loan balances never get mixed.</p>
         </div>
         <div className="operations-stats" aria-label="People summary">
-          <div><span>People</span><b className="num">{book.people.length}</b></div>
+          <div className="operations-count-stat"><span>People</span><b className="num">{book.people.length}</b></div>
           <div><span>Owed to you</span><b className="num pos">{money(owedToYou)}</b></div>
           <div className={youOwe ? 'needs-action' : ''}><span>You owe</span><b className="num">{money(youOwe)}</b></div>
         </div>
@@ -35,40 +35,73 @@ export default function People({ book, open }: { book: LoadedBook; open: (f: Foc
         <Card title="People"><Empty>Nobody yet. Say “add supplier …” or “add payroll worker … salary …”.</Empty></Card>
       )}
 
-      {GROUPS.map(({ kind, label, hint }) => {
-        const list = book.people.filter((person) => person.kind === kind);
-        if (!list.length) return null;
-        const groupBalance = list.reduce((sum, person) => sum + (book.balances.people[person.id] ?? 0), 0);
-        return (
-          <Card key={kind} title={label} aside={`${list.length} · ${money(groupBalance)}`}>
-            <div className="operations-section-note">{hint}</div>
-            <div className="operations-list">
-              {list.map((person) => {
-                const balance = book.balances.people[person.id] ?? 0;
-                const business = book.businesses.find((item) => item.id === person.businessId)?.name;
-                return (
-                  <Row
-                    key={person.id}
-                    title={person.name}
-                    sub={kind === 'salary'
-                      ? [business, person.role, `salary ${money(person.salary)}`].filter(Boolean).join(' · ')
-                      : [business, person.role].filter(Boolean).join(' · ')}
-                    value={money(balance)}
-                    valueTone={tone(balance)}
-                    valueSub={balance < 0 ? 'you owe' : balance > 0 ? 'owes you' : 'settled'}
-                    onOpen={() => open({ type: 'person', id: person.id })}
-                  />
-                );
-              })}
-            </div>
-          </Card>
-        );
-      })}
+      <div className="people-desktop-groups">
+        {GROUPS.map(({ kind, label, hint }) => {
+          const list = book.people.filter((person) => person.kind === kind);
+          if (!list.length) return null;
+          const groupBalance = list.reduce((sum, person) => sum + (book.balances.people[person.id] ?? 0), 0);
+          return (
+            <Card key={kind} title={label} aside={`${list.length} · ${money(groupBalance)}`}>
+              <div className="operations-section-note">{hint}</div>
+              <PeopleRows book={book} list={list} kind={kind} open={open} />
+            </Card>
+          );
+        })}
+      </div>
+
+      <div className="people-mobile-groups" aria-label="People categories">
+        {GROUPS.map(({ kind, label, hint }) => {
+          const list = book.people.filter((person) => person.kind === kind);
+          if (!list.length) return null;
+          const groupBalance = list.reduce((sum, person) => sum + (book.balances.people[person.id] ?? 0), 0);
+          return (
+            <details className="operations-mobile-group" key={kind}>
+              <summary>
+                <span className="operations-mobile-group-copy">
+                  <b>{label}</b>
+                  <small>{hint} · {list.length}</small>
+                </span>
+                <strong className={`num ${tone(groupBalance)}`}>{money(groupBalance)}</strong>
+              </summary>
+              <PeopleRows book={book} list={list} kind={kind} open={open} />
+            </details>
+          );
+        })}
+      </div>
 
       <details className="operations-explainer">
         <summary>How to read these balances</summary>
         <p>Minus means you owe them. Plus means they owe you. A person can appear in different roles, but each role keeps its own balance.</p>
       </details>
+    </div>
+  );
+}
+
+function PeopleRows({ book, list, kind, open }: {
+  book: LoadedBook;
+  list: LoadedBook['people'];
+  kind: 'receivable' | 'salary' | 'payable';
+  open: (f: Focus) => void;
+}) {
+  return (
+    <div className="operations-list">
+      {list.map((person) => {
+        const balance = book.balances.people[person.id] ?? 0;
+        const business = book.businesses.find((item) => item.id === person.businessId)?.name;
+        return (
+          <Row
+            key={person.id}
+            title={person.name}
+            sub={kind === 'salary'
+              ? [business, person.role, `salary ${money(person.salary)}`].filter(Boolean).join(' · ')
+              : [business, person.role].filter(Boolean).join(' · ')}
+            value={money(balance)}
+            valueTone={tone(balance)}
+            valueSub={balance < 0 ? 'you owe' : balance > 0 ? 'owes you' : 'settled'}
+            onOpen={() => open({ type: 'person', id: person.id })}
+          />
+        );
+      })}
     </div>
   );
 }
