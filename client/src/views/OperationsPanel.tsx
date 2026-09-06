@@ -6,16 +6,11 @@ type Status = {
   database: { status: string; latencyMs: number | null; pool: { total: number; idle: number; waiting: number } };
   migrations: { current: number | null; latest: number | null; pending: string[] };
   backup: null | {
-    id: string;
-    completedAt: string | null;
-    status: string;
-    destination: string;
-    bytes: number | null;
-    ageHours: number | null;
-    encrypted: boolean;
-    error: string | null;
+    id: string; completedAt: string | null; status: string; destination: string;
+    bytes: number | null; ageHours: number | null; encrypted: boolean; error: string | null; stale: boolean;
   };
   requests: { total: number; responses5xx: number; p95Ms: number; maxMs: number };
+  security: { failedLogins24h: number };
   events24h: { warn: number; error: number; critical: number };
 };
 
@@ -49,14 +44,13 @@ export default function OperationsPanel() {
     setError('');
     try {
       const response = await fetch('/api/operations/backup', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'x-book': '1' },
+        method: 'POST', credentials: 'same-origin', headers: { 'x-book': '1' },
       });
       if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? 'Backup failed.');
       const blob = await response.blob();
       const disposition = response.headers.get('content-disposition') ?? '';
-      const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? `adam-financial-book-${new Date().toISOString().slice(0, 10)}.afb`;
+      const filename = disposition.match(/filename="([^"]+)"/)?.[1]
+        ?? `adam-financial-book-${new Date().toISOString().slice(0, 10)}.afb`;
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
@@ -87,11 +81,13 @@ export default function OperationsPanel() {
       {!status ? <div className="muted">Loading operations status…</div> : <>
         <div className="setup-existing">
           <div className="row"><span className="main"><b>Database</b><small>connection + migrations</small></span><span className="val">{status.database.status === 'ok' && status.migrations.pending.length === 0 ? 'Healthy' : 'Needs attention'}<small>{status.database.latencyMs === null ? 'no response' : `${status.database.latencyMs} ms`}</small></span></div>
-          <div className="row"><span className="main"><b>Latest encrypted backup</b><small>{status.backup?.destination ?? 'no successful run recorded yet'}</small></span><span className="val">{status.backup?.status ?? 'None'}<small>{status.backup?.completedAt ? `${status.backup.ageHours ?? 0}h ago · ${fmtBytes(status.backup.bytes)}` : ''}</small></span></div>
+          <div className="row"><span className="main"><b>Latest encrypted backup</b><small>{status.backup?.destination ?? 'no run recorded yet'}</small></span><span className="val">{status.backup?.stale ? 'Stale' : status.backup?.status ?? 'None'}<small>{status.backup?.completedAt ? `${status.backup.ageHours ?? 0}h ago · ${fmtBytes(status.backup.bytes)}` : ''}</small></span></div>
           <div className="row"><span className="main"><b>API health</b><small>{status.requests.total} observed requests</small></span><span className="val">p95 {status.requests.p95Ms} ms<small>{status.requests.responses5xx} server errors</small></span></div>
+          <div className="row"><span className="main"><b>Sign-in safety</b><small>last 24 hours</small></span><span className="val">{status.security.failedLogins24h} failed<small>lockouts already notify owners</small></span></div>
           <div className="row"><span className="main"><b>Operational events</b><small>last 24 hours</small></span><span className="val">{status.events24h.critical} critical<small>{status.events24h.error} errors · {status.events24h.warn} warnings</small></span></div>
         </div>
         {status.backup?.status === 'failed' && status.backup.error && <div className="note danger">Last backup failed: {status.backup.error}</div>}
+        {status.backup?.stale && <div className="note danger">The last successful backup is older than the configured freshness window.</div>}
       </>}
 
       <div className="note">
