@@ -1,11 +1,17 @@
-import { classifyLiveMutation, type LiveMutationImpact } from '../../shared/live-updates';
+import {
+  classifyLiveMutation,
+  classifyLiveTopics,
+  type LiveMutationImpact,
+  type LiveTopic,
+} from '../../shared/live-updates';
 
-export { classifyLiveMutation } from '../../shared/live-updates';
-export type { LiveMutationImpact } from '../../shared/live-updates';
+export { classifyLiveMutation, classifyLiveTopics } from '../../shared/live-updates';
+export type { LiveMutationImpact, LiveTopic } from '../../shared/live-updates';
 
 export const LIVE_MUTATION_EVENT = 'book:live-mutation';
 
 export interface LiveMutationDetail extends LiveMutationImpact {
+  topics: LiveTopic[];
   path: string;
   method: string;
   at: number;
@@ -26,6 +32,17 @@ function liveClientId(target: Window): string {
   } catch {
     return `live_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   }
+}
+
+function topicsFromRemote(payload: LiveMutationImpact & { topics?: unknown }): LiveTopic[] {
+  if (Array.isArray(payload.topics)) {
+    return payload.topics.filter((topic): topic is LiveTopic =>
+      topic === 'approvals' || topic === 'access' || topic === 'files' || topic === 'history');
+  }
+  if (!payload.book && !payload.dashboard) return [];
+  // Compatibility with a Phase 3 server during a rolling deploy. Correctness
+  // wins over a few temporary extra reads; Phase 4 servers send precise topics.
+  return ['approvals', 'access', 'files', 'history'];
 }
 
 /**
@@ -53,11 +70,12 @@ export function installLiveMutationBridge(target: Window = window): () => void {
     const next = new EventSource(`/api/live-updates?client=${encodeURIComponent(clientId)}`);
     next.addEventListener('mutation', (event) => {
       try {
-        const payload = JSON.parse((event as MessageEvent<string>).data) as LiveMutationImpact & { at?: number };
+        const payload = JSON.parse((event as MessageEvent<string>).data) as LiveMutationImpact & { topics?: unknown; at?: number };
         if (typeof payload.book !== 'boolean' || typeof payload.dashboard !== 'boolean') return;
         dispatch({
           book: payload.book,
           dashboard: payload.dashboard,
+          topics: topicsFromRemote(payload),
           path: '/api/live-updates',
           method: 'REMOTE',
           at: typeof payload.at === 'number' ? payload.at : Date.now(),
@@ -94,7 +112,13 @@ export function installLiveMutationBridge(target: Window = window): () => void {
     if (READ_METHODS.has(method)) return response;
     const impact = classifyLiveMutation(url.pathname, method);
     if (impact) {
-      dispatch({ ...impact, path: url.pathname, method, at: Date.now() });
+      dispatch({
+        ...impact,
+        topics: classifyLiveTopics(url.pathname, method),
+        path: url.pathname,
+        method,
+        at: Date.now(),
+      });
     }
     return response;
   };
