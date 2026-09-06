@@ -1,14 +1,17 @@
+import type { LoadedBook } from './api';
 import type { EntryInput } from '../../shared/types';
 import { offlineRepository, type OfflineUser, type Queued } from './offline-db';
+import { projectOfflineBook } from './offline-projection';
 
 export type { Queued } from './offline-db';
 
 /**
- * Phase 1 offline foundation.
+ * Phase 1 durable storage + Phase 2 projected-book facade.
  *
- * The browser boots the IndexedDB repository before React renders. These small
- * facades keep the rest of the app simple while all sensitive cached state is
- * stored per user instead of in global localStorage keys.
+ * IndexedDB keeps the last server-confirmed snapshot untouched. Reads used by
+ * the app derive a projected view by layering the active user's queued entries
+ * on top, so offline balances move immediately without ever becoming confirmed
+ * data until the server accepts those entries.
  */
 export async function initializeOfflineStorage(): Promise<void> {
   await offlineRepository.initialize();
@@ -20,8 +23,24 @@ export async function resetOfflineStorageForTests(): Promise<void> {
 
 export const snapshot = {
   save: (book: unknown) => offlineRepository.saveSnapshot(book),
-  load: <T>(): T | null => offlineRepository.loadSnapshot<T>(),
+  load: <T>(): T | null => {
+    const confirmed = offlineRepository.loadSnapshot<T>();
+    if (!confirmed || !looksLikeLoadedBook(confirmed)) return confirmed;
+    return projectOfflineBook(confirmed, offlineRepository.queueAll()) as T;
+  },
+  /** Useful for tests/diagnostics that must prove queued writes never rewrite the server snapshot. */
+  loadConfirmed: <T>(): T | null => offlineRepository.loadSnapshot<T>(),
 };
+
+function looksLikeLoadedBook(value: unknown): value is LoadedBook {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<LoadedBook>;
+  return Array.isArray(candidate.accounts)
+    && Array.isArray(candidate.entries)
+    && !!candidate.balances
+    && typeof candidate.balances === 'object'
+    && typeof candidate.balances.totalCash === 'number';
+}
 
 /**
  * Who was holding the book last time. The repository stores only a global
@@ -70,7 +89,7 @@ async function runFlush(send: (input: EntryInput) => Promise<unknown>): Promise<
     } catch (err) {
       if (looksOffline(err)) break;
       // Phase 3 will replace this terminal refusal behavior with richer durable
-      // rejected/conflict states. Phase 1 preserves the existing semantics.
+      // rejected/conflict states. Phase 2 preserves the existing semantics.
       await outbox.drop(item.id);
       throw err;
     }
