@@ -160,14 +160,31 @@ export async function runIntegrityCheck(): Promise<IntegrityResult> {
        LEFT JOIN entries e ON e.id = pt.entry_id
       WHERE pt.status = 'confirmed'
         AND (
-          pt.entry_id IS NULL OR e.id IS NULL OR e.voided = true OR e.kind <> 'transfer'
+          pt.entry_id IS NULL OR e.id IS NULL OR e.kind <> 'transfer'
           OR e.account_id IS DISTINCT FROM pt.from_account_id
           OR e.to_account_id IS DISTINCT FROM pt.to_account_id
           OR e.amount IS DISTINCT FROM pt.amount
         )`,
   );
   for (const row of brokenConfirmed) {
-    issue(issues, 'confirmed_transfer_broken', 'Confirmed delegated transfer is missing its matching live ledger entry.', row.id);
+    issue(issues, 'confirmed_transfer_broken', 'Confirmed delegated transfer is missing its matching ledger entry.', row.id);
+  }
+
+  // A handoff may remain historically confirmed after the owner later voids its
+  // ledger entry. That is valid only if the void actually stopped every effect.
+  const voidedConfirmedStillActive = await query<{ id: string; entry_id: string }>(
+    `SELECT pt.id, pt.entry_id
+       FROM pending_transfers pt
+       JOIN entries e ON e.id = pt.entry_id
+      WHERE pt.status = 'confirmed'
+        AND e.voided = true
+        AND EXISTS (
+          SELECT 1 FROM effects ef
+           WHERE ef.entry_id = e.id AND ef.active = true
+        )`,
+  );
+  for (const row of voidedConfirmedStillActive) {
+    issue(issues, 'voided_transfer_still_active', 'Voided delegated transfer still has active accounting effects.', row.id);
   }
 
   const pendingWithEntry = await query<{ id: string; entry_id: string }>(
