@@ -17,6 +17,7 @@ import {
   snapshot,
   type OfflineAutoSyncResult,
 } from './offline';
+import { LIVE_MUTATION_EVENT, type LiveMutationDetail } from './live-refresh';
 import Entry from './Entry';
 import Today from './views/Today';
 import type { Focus } from './views/Statement';
@@ -131,6 +132,8 @@ export default function App() {
   const [missingReceiptCount, setMissingReceiptCount] = useState(0);
   const dashboardRefreshing = useRef(false);
   const lastDashboardRefresh = useRef(0);
+  const lastBookRefreshStarted = useRef(0);
+  const lastDashboardRefreshStarted = useRef(0);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const moreDialogRef = useRef<HTMLElement>(null);
   const moreCloseRef = useRef<HTMLButtonElement>(null);
@@ -176,6 +179,7 @@ export default function App() {
   };
 
   const reload = async () => {
+    lastBookRefreshStarted.current = Date.now();
     try {
       const fresh = await api.overview();
       await snapshot.save(fresh);
@@ -201,6 +205,7 @@ export default function App() {
     const now = Date.now();
     if (dashboardRefreshing.current || (!force && now - lastDashboardRefresh.current < DASHBOARD_DEDUPE_MS)) return;
     dashboardRefreshing.current = true;
+    lastDashboardRefreshStarted.current = now;
     try {
       setDashboard(await api.evidenceDashboard());
       lastDashboardRefresh.current = Date.now();
@@ -210,6 +215,44 @@ export default function App() {
       dashboardRefreshing.current = false;
     }
   };
+
+  useEffect(() => {
+    if (!me?.user) return;
+    let timer: number | null = null;
+    let needsBook = false;
+    let needsDashboard = false;
+    let newestMutation = 0;
+
+    const changed = (event: Event) => {
+      const detail = (event as CustomEvent<LiveMutationDetail>).detail;
+      if (!detail) return;
+      needsBook ||= detail.book;
+      needsDashboard ||= detail.dashboard;
+      newestMutation = Math.max(newestMutation, detail.at);
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = null;
+        const refreshBook = needsBook;
+        const refreshDelegation = needsDashboard;
+        const mutationAt = newestMutation;
+        needsBook = false;
+        needsDashboard = false;
+        newestMutation = 0;
+
+        // Most existing mutation callers already start their own refresh. If
+        // one started after this mutation, it already contains the new server
+        // state and there is no reason to issue the same read twice.
+        if (refreshBook && lastBookRefreshStarted.current < mutationAt) void reload();
+        if (refreshDelegation && lastDashboardRefreshStarted.current < mutationAt) void refreshDashboard(true);
+      }, 180);
+    };
+
+    window.addEventListener(LIVE_MUTATION_EVENT, changed);
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+      window.removeEventListener(LIVE_MUTATION_EVENT, changed);
+    };
+  }, [me?.user?.id]);
 
   useEffect(() => {
     api.me()
