@@ -160,11 +160,17 @@ export default function App() {
 
   const say = (text: string, bad?: boolean) => setNote({ text, bad });
 
+  const refreshProjection = () => {
+    setWaiting(outbox.all().length);
+    const projected = snapshot.load<LoadedBook>();
+    if (projected) setBook(projected);
+  };
+
   const reload = async () => {
     try {
       const fresh = await api.overview();
-      setBook(fresh);
-      snapshot.save(fresh);
+      await snapshot.save(fresh);
+      setBook(snapshot.load<LoadedBook>() ?? fresh);
       setOffline(false);
     } catch (e) {
       if (e instanceof NotSignedIn) {
@@ -224,13 +230,13 @@ export default function App() {
     if (!outbox.all().length) return;
     try {
       const sent = await flushOutbox((input) => api.addEntry(input));
-      setWaiting(outbox.all().length);
+      refreshProjection();
       if (sent) {
         await Promise.all([reload(), refreshDashboard(true)]);
         say(`${sent} ${sent === 1 ? 'entry' : 'entries'} logged from the outbox.`);
       }
     } catch (e) {
-      setWaiting(outbox.all().length);
+      refreshProjection();
       say(`One queued entry was refused: ${(e as Error).message}`, true);
     }
   };
@@ -488,7 +494,7 @@ export default function App() {
               </div>
             )}
             <Entry book={book} reload={reload} say={say}
-              onQueued={() => setWaiting(outbox.all().length)} onAction={handlePromptAction} />
+              onQueued={refreshProjection} onAction={handlePromptAction} />
           </div>
         )}
 
