@@ -4,6 +4,7 @@ import App from './App';
 import { LanguageProvider } from './i18n';
 import { initializeOfflineStorage } from './offline';
 import { installOfflineExitGuards } from './offline-exit-guard';
+import { installLiveMutationBridge } from './live-refresh';
 import './multilingual-offline';
 
 // Apply an explicit appearance before React renders so returning users do not
@@ -14,6 +15,11 @@ try {
     document.documentElement.setAttribute('data-theme', savedTheme);
   }
 } catch { /* private mode */ }
+
+// Every successful write emits one small in-app event. App.tsx uses it to
+// revalidate only the affected snapshots, so older screens that own their own
+// request helper still update the rest of the app without polling or reloading.
+installLiveMutationBridge();
 
 // Installed to the home screen, the app must still open with no signal.
 // This lives here rather than inline in the page: the Content-Security-Policy
