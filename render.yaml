@@ -1,5 +1,5 @@
 # Production Blueprint for Adam Financial Book.
-# The application database lives on Neon; Render owns the web process and report cron.
+# The application database lives on Neon; Render owns the web process and operational cron jobs.
 services:
   - type: web
     name: adam-financial-book
@@ -11,11 +11,13 @@ services:
     # npm start validates the environment, applies ordered DB migrations under a
     # PostgreSQL advisory lock, verifies schema currency, then opens HTTP.
     startCommand: npm start
-    healthCheckPath: /api/health
+    healthCheckPath: /api/health/ready
     envVars:
       - key: DATABASE_URL
         sync: false
       - key: SESSION_SECRET
+        generateValue: true
+      - key: BACKUP_ENCRYPTION_KEY
         generateValue: true
       - key: NODE_ENV
         value: production
@@ -25,10 +27,28 @@ services:
         value: verify
       - key: PGPOOL_MAX
         value: "8"
+      - key: SLOW_REQUEST_MS
+        value: "2000"
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: GOOGLE_TRANSLATE_API_KEY
         sync: false
+      # Reuse the already-configured report mail transport for operational alerts.
+      - key: SMTP_URL
+        fromService:
+          type: cron
+          name: adam-financial-book-day-report
+          envVarKey: SMTP_URL
+      - key: ALERT_TO
+        fromService:
+          type: cron
+          name: adam-financial-book-day-report
+          envVarKey: REPORT_TO
+      - key: ALERT_FROM
+        fromService:
+          type: cron
+          name: adam-financial-book-day-report
+          envVarKey: REPORT_FROM
 
   - type: cron
     name: adam-financial-book-day-report
@@ -55,3 +75,87 @@ services:
         sync: false
       - key: SMTP_URL
         sync: false
+
+  # Daily off-site encrypted logical PostgreSQL backup. The encryption key is
+  # generated once on the web service and securely referenced here so both
+  # manual and scheduled backups remain mutually restorable.
+  - type: cron
+    name: adam-financial-book-encrypted-backup
+    runtime: node
+    plan: starter
+    branch: main
+    schedule: "30 1 * * *"
+    buildCommand: npm ci
+    startCommand: npm run backup:send
+    envVars:
+      - key: DATABASE_URL
+        fromService:
+          type: web
+          name: adam-financial-book
+          envVarKey: DATABASE_URL
+      - key: BACKUP_ENCRYPTION_KEY
+        fromService:
+          type: web
+          name: adam-financial-book
+          envVarKey: BACKUP_ENCRYPTION_KEY
+      - key: SMTP_URL
+        fromService:
+          type: cron
+          name: adam-financial-book-day-report
+          envVarKey: SMTP_URL
+      - key: REPORT_TO
+        fromService:
+          type: cron
+          name: adam-financial-book-day-report
+          envVarKey: REPORT_TO
+      - key: REPORT_FROM
+        fromService:
+          type: cron
+          name: adam-financial-book-day-report
+          envVarKey: REPORT_FROM
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: PGSSL
+        value: verify
+      - key: BACKUP_MAX_EMAIL_BYTES
+        value: "18874368"
+
+  # Independent uptime/readiness check. Because it runs outside the web process,
+  # it can still alert when the application itself or its database is unreachable.
+  - type: cron
+    name: adam-financial-book-health-monitor
+    runtime: node
+    plan: starter
+    branch: main
+    schedule: "*/10 * * * *"
+    buildCommand: npm ci
+    startCommand: npm run monitor
+    envVars:
+      - key: APP_HEALTH_URL
+        fromService:
+          type: web
+          name: adam-financial-book
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: SMTP_URL
+        fromService:
+          type: cron
+          name: adam-financial-book-day-report
+          envVarKey: SMTP_URL
+      - key: ALERT_TO
+        fromService:
+          type: cron
+          name: adam-financial-book-day-report
+          envVarKey: REPORT_TO
+      - key: ALERT_FROM
+        fromService:
+          type: cron
+          name: adam-financial-book-day-report
+          envVarKey: REPORT_FROM
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: HEALTH_MONITOR_TIMEOUT_MS
+        value: "12000"

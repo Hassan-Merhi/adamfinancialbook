@@ -17,13 +17,16 @@
     "db:integrity": "tsx server/integrity-check.ts",
     "db:setup": "tsx server/setup-db.ts",
     "test": "vitest run",
-    "test:integration": "vitest run --no-file-parallelism server/api.integration.test.ts server/security.integration.test.ts server/performance-scale.integration.test.ts server/translation.integration.test.ts",
+    "test:integration": "vitest run --no-file-parallelism server/api.integration.test.ts server/security.integration.test.ts server/performance-scale.integration.test.ts server/translation.integration.test.ts server/recovery.integration.test.ts",
     "test:financial-e2e": "vitest run server/financial-e2e.integration.test.ts",
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm test -- --passWithNoTests && npm run build",
     "user:add": "npm run db:migrate && tsx server/add-user.ts",
     "report:send": "npm run db:migrate && tsx server/send-report.ts",
-    "backup": "npm run db:migrate && tsx server/backup.ts"
+    "backup": "npm run db:migrate && tsx server/backup.ts",
+    "backup:send": "npm run db:migrate && tsx server/backup-mail.ts",
+    "restore": "tsx server/restore.ts",
+    "monitor": "tsx server/monitor.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.123.0",

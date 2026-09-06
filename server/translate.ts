@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { heuristicLanguage } from '../shared/language.js';
 import { query } from './db.js';
+import { fireObservedFailure } from './observability.js';
 
 export type BookLanguage = 'en' | 'fr' | 'ar';
 
@@ -151,9 +152,6 @@ export async function translateTexts(
 ): Promise<{ translations: string[]; available: boolean; provider?: Provider | 'cache' }> {
   if (!texts.length) return { translations: [], available: true };
   if (sourceLanguage === language) return { translations: [...texts], available: true };
-  // Generic UI calls historically used target=en as an identity operation. Keep
-  // that contract for English text, while still allowing a French/Arabic prompt
-  // to be auto-detected and normalized to English when sourceLanguage is omitted.
   if (!sourceLanguage && language === 'en' && texts.every((text) => heuristicLanguage(text) === 'en')) {
     return { translations: [...texts], available: true };
   }
@@ -165,7 +163,10 @@ export async function translateTexts(
   let durable = new Map<string, string>();
   if (unresolved.length) {
     try { durable = await durableHits(language, sourceLanguage, [...new Set(unresolved)]); }
-    catch (error) { console.warn('Translation cache read unavailable:', (error as Error).message); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      fireObservedFailure('translation.cache.read_failed', { error: message }, 'warn');
+    }
   }
 
   texts.forEach((text, index) => {
@@ -189,16 +190,38 @@ export async function translateTexts(
   if (!missing.length) return { translations: result, available: true, provider: 'cache' };
 
   let translated: string[] | null = null;
-  try { translated = await translateWithGoogle(language, missing, sourceLanguage); }
-  catch (error) { console.warn('Google translation unavailable:', (error as Error).message); }
-  if (!translated) return { translations: result, available: false };
+  try {
+    translated = await translateWithGoogle(language, missing, sourceLanguage);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    fireObservedFailure('translation.provider.failed', {
+      provider: 'google',
+      targetLanguage: language,
+      sourceLanguage: sourceLanguage ?? 'auto',
+      strings: missing.length,
+      error: message,
+    }, 'warn');
+  }
+  if (!translated) {
+    if (process.env.GOOGLE_TRANSLATE_API_KEY) {
+      fireObservedFailure('translation.unavailable', {
+        targetLanguage: language,
+        sourceLanguage: sourceLanguage ?? 'auto',
+        strings: missing.length,
+      }, 'warn');
+    }
+    return { translations: result, available: false };
+  }
 
   await Promise.all(missing.map(async (source, index) => {
     const value = translated![index] ?? source;
     rememberMemory(memoryKey(language, sourceLanguage, source), value);
     for (const itemIndex of missingIndexes.get(source) ?? []) result[itemIndex] = value;
     try { await rememberDurable(language, sourceLanguage, source, value, 'google'); }
-    catch (error) { console.warn('Translation cache write unavailable:', (error as Error).message); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      fireObservedFailure('translation.cache.write_failed', { error: message }, 'warn');
+    }
   }));
   return { translations: result, available: true, provider: 'google' };
 }
