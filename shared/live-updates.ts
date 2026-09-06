@@ -21,12 +21,14 @@ export function classifyLiveMutation(path: string, method: string): LiveMutation
     || path === '/api/security'
   ) return null;
 
+  const accountAssignment = /^\/api\/delegation\/users\/[^/]+\/accounts$/.test(path);
   const coreBookWrite =
     path === '/api/reset-book'
     || /^\/api\/(?:entries|businesses|accounts|projects|people|loans|reminders)(?:\/|$)/.test(path);
 
   const delegatedBookWrite =
-    /^\/api\/delegation\/transfers\/[^/]+\/confirm$/.test(path)
+    accountAssignment
+    || /^\/api\/delegation\/transfers\/[^/]+\/confirm$/.test(path)
     || path === '/api/delegation/expense-reviews/assign';
 
   const book = coreBookWrite || delegatedBookWrite;
