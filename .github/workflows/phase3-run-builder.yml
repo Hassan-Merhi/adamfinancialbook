@@ -1,0 +1,39 @@
+name: Run Phase 3 dependency builder
+
+on:
+  push:
+    branches:
+      - feature/offline-dependent-setup-phase3
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/offline-dependent-setup-phase3
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply implementation
+        shell: bash
+        run: |
+          sed -n "/python3 <<'PY'/,/^          PY$/p" .github/workflows/phase3-offline-dependency-builder.yml | sed '1d;$d;s/^          //' > /tmp/phase3-builder.py
+          python3 /tmp/phase3-builder.py
+      - name: Verify implementation
+        run: npm run typecheck && npm test -- --passWithNoTests && npm run build
+      - name: Commit implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add shared/offline-setup.ts client/src/offline-dependencies.ts client/src/offline.ts client/src/offline-projection.ts client/src/views/Setup.tsx client/src/offline-safe-setup-phase3.test.ts
+          git commit -m "Phase 3: sync dependent offline setup safely"
+          git push origin HEAD:feature/offline-dependent-setup-phase3
