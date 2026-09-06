@@ -239,7 +239,7 @@ async function loadLockedBook(client: PoolClient): Promise<Book> {
     byEntry.set(row.entry_id, list);
   }
   return {
-    businesses,
+    businesses: businesses.map((item) => ({ id: String(item.id), name: String(item.name) })),
     accounts: accounts.map((item) => ({ id: item.id, name: item.name, businessId: item.business_id, opening: Number(item.opening) })),
     projects: projects.map((item) => ({ id: item.id, name: item.name, scope: item.scope, businessId: item.business_id })),
     receipts: receipts.map((item) => ({
