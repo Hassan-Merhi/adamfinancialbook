@@ -4,6 +4,7 @@ import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { ownerOnly, verifyPassword } from './auth.js';
 import { pool } from './db.js';
+import { hasRecentAuthentication } from './security.js';
 import { RESET_CONFIRMATIONS, RESET_LABELS, type ResetScope } from '../shared/reset.js';
 
 const router = Router();
@@ -22,6 +23,16 @@ const resetAttemptLimiter = rateLimit({
   skipSuccessfulRequests: true,
   keyGenerator: (req) => req.user!.id,
   message: { error: 'Too many failed reset attempts. Try again in 15 minutes.' },
+});
+
+const recentRequired: RequestHandler = wrap(async (req, res, next) => {
+  if (!(await hasRecentAuthentication(req.securitySession?.id))) {
+    return res.status(403).json({
+      error: 'Unlock security changes with your current password first.',
+      code: 'reauth_required',
+    });
+  }
+  next();
 });
 
 export interface ResetPreview {
@@ -183,6 +194,55 @@ router.post('/reset', ownerOnly, resetAttemptLimiter, wrap(async (req, res) => {
 
   const deleted = await performReset(body.scope, req.user!.id, req.user!.email);
   res.json({ ok: true, scope: body.scope, deleted });
+}));
+
+// A user must be disabled before their login can be permanently deleted. This
+// keeps accidental taps from immediately erasing credentials while still giving
+// the owner the lifecycle requested by the UI: disable first, then delete.
+// Accounting/evidence rows survive because migration 007 converts user FKs that
+// carry history to ON DELETE SET NULL; access-only/session rows are cascaded.
+router.delete('/users/:id/permanent', ownerOnly, recentRequired, wrap(async (req, res) => {
+  const targetId = String(req.params.id);
+  if (targetId === req.user!.id) {
+    return res.status(400).json({ error: 'You cannot permanently delete your own login.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query<{ id: string; email: string; role: string; active: boolean }>(
+      'SELECT id, email, role, active FROM users WHERE id = $1 FOR UPDATE',
+      [targetId],
+    );
+    const target = result.rows[0];
+    if (!target) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'No user with that id.' });
+    }
+    if (target.active) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Disable this user first, then you can permanently delete them.' });
+    }
+
+    await client.query('DELETE FROM users WHERE id = $1', [target.id]);
+    await client.query(
+      `INSERT INTO audit (actor, actor_email, action, subject, detail)
+       VALUES ($1,$2,'user permanently deleted',$3,$4::jsonb)`,
+      [
+        req.user!.id,
+        req.user!.email,
+        target.id,
+        JSON.stringify({ username: target.email, role: target.role }),
+      ],
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true, deleted: { id: target.id, username: target.email } });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }));
 
 export const resetRouter = router;
