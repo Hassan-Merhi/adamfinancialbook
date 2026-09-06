@@ -1,4 +1,5 @@
 import { Router, type RequestHandler } from 'express';
+import { rateLimit } from 'express-rate-limit';
 import type { Effect } from '../shared/types.js';
 import { recordRequired } from './audit.js';
 import { writeEffects } from './book.js';
@@ -8,6 +9,15 @@ const router = Router();
 
 const wrap = (fn: RequestHandler): RequestHandler =>
   (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+// Confirmation is a protected financial mutation. Bound repeated attempts so a
+// compromised delegated session cannot hammer the PostgreSQL write-lock path.
+const handoffConfirmationLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 60,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+});
 
 type TransferRow = {
   id: string;
@@ -60,7 +70,7 @@ async function ensureLoanPair(
  * Phase 4 serializes confirmation against every entry INSERT and makes the
  * current committed server balance the final authority.
  */
-router.post('/delegation/transfers/:id/confirm', wrap(async (req, res) => {
+router.post('/delegation/transfers/:id/confirm', handoffConfirmationLimit, wrap(async (req, res) => {
   if (req.user?.role !== 'entry') {
     return res.status(403).json({ error: 'This confirmation belongs to the recipient.' });
   }
@@ -206,6 +216,18 @@ router.post('/delegation/transfers/:id/confirm', wrap(async (req, res) => {
       ],
     );
 
+    // Migration 004's entries_confirm_handoff trigger is the canonical atomic
+    // handoff-state transition. Verify that it linked this exact pending row
+    // instead of attempting a second status update that would fight the trigger.
+    const confirmedResult = await client.query<{ status: string; entry_id: string | null }>(
+      'SELECT status, entry_id FROM pending_transfers WHERE id = $1 FOR UPDATE',
+      [id],
+    );
+    const confirmed = confirmedResult.rows[0];
+    if (!confirmed || confirmed.status !== 'confirmed' || confirmed.entry_id !== entryId) {
+      throw new Error('The handoff confirmation trigger did not link the new financial entry.');
+    }
+
     const effects: Effect[] = [
       { type: 'account', targetId: source.id, delta: -amount },
       { type: 'account', targetId: destination.id, delta: amount },
@@ -234,14 +256,6 @@ router.post('/delegation/transfers/:id/confirm', wrap(async (req, res) => {
       },
       transactionId,
     );
-
-    const updated = await client.query(
-      `UPDATE pending_transfers
-          SET status = 'confirmed', confirmed_at = now(), entry_id = $2
-        WHERE id = $1 AND status = 'pending'`,
-      [id, entryId],
-    );
-    if (updated.rowCount !== 1) throw new Error('The handoff changed while it was being confirmed.');
 
     const owners = await client.query<{ id: string }>(`SELECT id FROM users WHERE role = 'owner'`);
     for (const owner of owners.rows) {
