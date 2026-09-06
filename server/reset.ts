@@ -25,6 +25,18 @@ const resetAttemptLimiter = rateLimit({
   message: { error: 'Too many failed reset attempts. Try again in 15 minutes.' },
 });
 
+// Permanent deletion is a sensitive database operation. Keep a separate
+// per-owner allowance so a compromised/unattended session cannot churn through
+// user records even after passing the normal API-wide request limit.
+const permanentDeleteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user!.id,
+  message: { error: 'Too many user deletion attempts. Try again in 15 minutes.' },
+});
+
 const recentRequired: RequestHandler = wrap(async (req, res, next) => {
   if (!(await hasRecentAuthentication(req.securitySession?.id))) {
     return res.status(403).json({
@@ -203,7 +215,7 @@ router.post('/reset', ownerOnly, resetAttemptLimiter, wrap(async (req, res) => {
 // the owner the lifecycle requested by the UI: disable first, then delete.
 // Accounting/evidence rows survive because migration 007 converts user FKs that
 // carry history to ON DELETE SET NULL; access-only/session rows are cascaded.
-router.delete('/users/:id/permanent', ownerOnly, recentRequired, wrap(async (req, res) => {
+router.delete('/users/:id/permanent', ownerOnly, permanentDeleteLimiter, recentRequired, wrap(async (req, res) => {
   const targetId = String(req.params.id);
   if (targetId === req.user!.id) {
     return res.status(400).json({ error: 'You cannot permanently delete your own login.' });
