@@ -6,6 +6,9 @@ import {
 } from './github-actions-oidc.js';
 
 const repository = 'Hassan-Merhi/adamfinancialbook';
+const repositoryId = '1342187497';
+const ownerId = '241374101';
+const immutableSubject = `repo:Hassan-Merhi@${ownerId}/adamfinancialbook@${repositoryId}:ref:refs/heads/main`;
 const workflowRef = `${repository}/.github/workflows/encrypted-production-backup.yml@refs/heads/main`;
 
 function encode(value: unknown) {
@@ -33,9 +36,10 @@ function token(privateKey: ReturnType<typeof fixture>['privateKey'], overrides: 
     exp: now + 300,
     nbf: now - 5,
     iat: now - 5,
-    sub: `repo:${repository}:ref:refs/heads/main`,
+    sub: immutableSubject,
     repository,
-    repository_id: '1342187497',
+    repository_id: repositoryId,
+    repository_owner_id: ownerId,
     ref: 'refs/heads/main',
     sha: 'abc123',
     workflow_ref: workflowRef,
@@ -58,10 +62,13 @@ afterEach(() => {
 });
 
 describe('GitHub Actions OIDC backup identity', () => {
-  it('accepts only the exact signed main workflow release', async () => {
+  it('accepts only the exact signed immutable main workflow identity and release', async () => {
     const { privateKey } = fixture();
     const claims = await verifyGitHubActionsOidcToken(token(privateKey), 'abc123');
     expect(claims.repository).toBe(repository);
+    expect(claims.repository_id).toBe(repositoryId);
+    expect(claims.repository_owner_id).toBe(ownerId);
+    expect(claims.sub).toBe(immutableSubject);
     expect(claims.sha).toBe('abc123');
   });
 
@@ -69,6 +76,21 @@ describe('GitHub Actions OIDC backup identity', () => {
     const { privateKey } = fixture();
     await expect(verifyGitHubActionsOidcToken(token(privateKey, {
       repository: 'someone/else',
+    }), 'abc123')).rejects.toThrow(/repository identity/i);
+  });
+
+  it('rejects the pre-2026 mutable name-only subject', async () => {
+    const { privateKey } = fixture();
+    await expect(verifyGitHubActionsOidcToken(token(privateKey, {
+      sub: `repo:${repository}:ref:refs/heads/main`,
+    }), 'abc123')).rejects.toThrow(/ref identity/i);
+  });
+
+  it('rejects an immutable subject whose owner or repository ids do not match', async () => {
+    const { privateKey } = fixture();
+    await expect(verifyGitHubActionsOidcToken(token(privateKey, {
+      repository_owner_id: '999',
+      sub: `repo:Hassan-Merhi@999/adamfinancialbook@${repositoryId}:ref:refs/heads/main`,
     }), 'abc123')).rejects.toThrow(/repository identity/i);
   });
 
