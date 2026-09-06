@@ -45,7 +45,7 @@ describe('Offline safe setup Phase 2', () => {
   });
 
   it('keeps destructive setup operations online-only while Phase 3 permits queued parents', () => {
-    const setup = read('client/src/views/Setup.tsx');
+    const setup = read('client/src/views/SetupBase.tsx');
     expect(setup).toContain("outbox.setup({ setupType: 'business'");
     expect(setup).toContain("outbox.setup({ setupType: 'account'");
     expect(setup).toContain("outbox.setup({ setupType: 'project'");
