@@ -9,18 +9,17 @@ const wrap = (fn: RequestHandler): RequestHandler =>
   (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 export const operationsRouter = Router();
-operationsRouter.use(ownerOnly);
 
-operationsRouter.get('/operations/status', wrap(async (_req, res) => {
+operationsRouter.get('/operations/status', ownerOnly, wrap(async (_req, res) => {
   res.json(await operationsStatus());
 }));
 
-operationsRouter.get('/operations/events', wrap(async (req, res) => {
+operationsRouter.get('/operations/events', ownerOnly, wrap(async (req, res) => {
   const limit = z.coerce.number().int().min(1).max(500).default(100).parse(req.query.limit);
   res.json({ events: await recentOperationalEvents(limit) });
 }));
 
-operationsRouter.post('/operations/backup', wrap(async (req, res) => {
+operationsRouter.post('/operations/backup', ownerOnly, wrap(async (req, res) => {
   const artifact = await createEncryptedDatabaseBackup('owner-download');
   await record(req, 'encrypted backup taken', artifact.id, {
     bytes: artifact.bytes,
