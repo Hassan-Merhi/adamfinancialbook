@@ -29,6 +29,7 @@ jobs:
           sed -i "s/: 'Sync pending — balances include unsynced entries/? 'Sync pending — balances include unsynced entries/" /tmp/phase2-builder.py
           sed -i "s/: 'Sync pending — balances include unsynced changes/? 'Sync pending — balances include unsynced changes/" /tmp/phase2-builder.py
           python3 /tmp/phase2-builder.py
+          sed -i "s/balances include unsynced entries until the server confirms them/balances include unsynced changes until the server confirms them/" client/src/offline-phase2.test.ts
       - name: Verify implementation
         run: npm run typecheck && npm test -- --passWithNoTests && npm run build
       - name: Commit implementation
