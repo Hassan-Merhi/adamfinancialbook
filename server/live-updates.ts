@@ -1,7 +1,7 @@
 import { Router, type RequestHandler, type Response } from 'express';
 import type { PoolClient } from 'pg';
 import { pool } from './db.js';
-import { classifyLiveMutation } from '../shared/live-updates.js';
+import { classifyLiveMutation, classifyLiveTopics, type LiveTopic } from '../shared/live-updates.js';
 import {
   audienceAllows,
   resolveLiveAudience,
@@ -19,16 +19,28 @@ let reconnectTimer: NodeJS.Timeout | null = null;
 interface LivePayload {
   book: boolean;
   dashboard: boolean;
+  topics?: LiveTopic[];
   at: number;
   sourceClientId: string | null;
   audience: LiveAudience;
 }
 
+function legacyTopics(payload: Pick<LivePayload, 'book' | 'dashboard'>): LiveTopic[] {
+  if (!payload.book && !payload.dashboard) return [];
+  // During a rolling deploy, an older app instance can publish the Phase 3
+  // shape without topics. Widen only that transient compatibility path so a
+  // new client cannot miss a refresh; normal Phase 4 events remain precise.
+  return ['approvals', 'access', 'files', 'history'];
+}
+
 function send(response: Response, payload: LivePayload): void {
   // Audience metadata is server-internal. Browsers only learn that one of their
   // own authorized snapshots is stale, never who else received the signal.
-  const { audience: _audience, sourceClientId: _sourceClientId, ...publicPayload } = payload;
-  response.write(`event: mutation\ndata: ${JSON.stringify(publicPayload)}\n\n`);
+  const { audience: _audience, sourceClientId: _sourceClientId, topics, ...publicPayload } = payload;
+  response.write(`event: mutation\ndata: ${JSON.stringify({
+    ...publicPayload,
+    topics: Array.isArray(topics) ? topics : legacyTopics(payload),
+  })}\n\n`);
 }
 
 function broadcast(payload: LivePayload): void {
@@ -117,14 +129,15 @@ liveUpdatesRouter.get('/live-updates', async (req, res, next) => {
 /**
  * Observe successful authenticated writes after every downstream router has
  * finished. PostgreSQL NOTIFY fans the signal to every app instance. Phase 3
- * resolves the smallest authorized audience before publishing, so unrelated
- * delegated users do not re-fetch each other's snapshots.
+ * resolves the smallest authorized audience; Phase 4 adds value-free refresh
+ * topics so mounted pages can revalidate only the datasets they own.
  */
 export const liveMutationObserver: RequestHandler = (req, res, next) => {
   const path = new URL(req.originalUrl, 'http://local').pathname;
   const impact = classifyLiveMutation(path, req.method);
   if (!impact) return next();
 
+  const topics = classifyLiveTopics(path, req.method);
   const sourceClientId = req.get('x-live-client');
   res.on('finish', () => {
     if (res.statusCode < 200 || res.statusCode >= 400) return;
@@ -132,6 +145,7 @@ export const liveMutationObserver: RequestHandler = (req, res, next) => {
       .catch((): LiveAudience => ({ all: true, owners: true, userIds: [] }))
       .then((audience) => publish({
         ...impact,
+        topics,
         at: Date.now(),
         sourceClientId: sourceClientId && sourceClientId.length <= 120 ? sourceClientId : null,
         audience,
