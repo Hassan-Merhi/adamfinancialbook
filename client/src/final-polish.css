@@ -53,6 +53,40 @@
   }
 }
 
+/* Mobile sign-out belongs in More > Settings > Account, not as an orphaned
+   underlined link beneath the bottom navigation. Give the in-sheet action a
+   full-width touch target so it is obvious, deliberate, and easy to reach. */
+@media (max-width:760px) {
+  .railfoot { display:none !important; }
+
+  .moreaccount {
+    align-items:stretch;
+    flex-direction:column;
+    gap:10px;
+    padding:12px;
+  }
+
+  .more-signout {
+    width:100%;
+    min-height:48px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:11px 14px;
+    border:1px solid color-mix(in srgb,var(--neg) 28%,var(--line));
+    border-radius:12px;
+    background:color-mix(in srgb,var(--neg) 8%,var(--card));
+    color:var(--neg);
+    font-size:13.5px;
+    font-weight:700;
+    text-decoration:none;
+  }
+
+  .more-signout:active {
+    transform:scale(.99);
+  }
+}
+
 @media (prefers-reduced-motion:reduce) {
   html:focus-within { scroll-behavior:auto; }
 }
