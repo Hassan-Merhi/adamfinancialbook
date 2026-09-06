@@ -1,0 +1,291 @@
+name: Encrypted Production Backup
+
+on:
+  schedule:
+    - cron: '30 1 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/encrypted-production-backup.yml'
+      - 'server/backup-export.ts'
+      - 'server/backup-delivery.ts'
+      - 'server/github-actions-oidc.ts'
+      - 'server/backup-service.ts'
+      - 'server/operations-schema.ts'
+      - 'server/readiness.ts'
+      - 'server/health.ts'
+      - 'server/start.ts'
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+concurrency:
+  group: encrypted-production-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BACKUP_URL: https://adamfinancialbook.onrender.com/api/operations/backups/export
+      ACK_URL: https://adamfinancialbook.onrender.com/api/operations/backups/ack
+      OIDC_AUDIENCE: adam-financial-book-backup
+      EXPECTED_RELEASE: ${{ github.sha }}
+      INCIDENT_TITLE: '[Production Backup] Adam Financial Book encrypted backup failure'
+      REPOSITORY: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - id: fetch
+        name: Export exact-release encrypted backup
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import re
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          backup_url = os.environ['BACKUP_URL']
+          audience = os.environ['OIDC_AUDIENCE']
+          expected_release = os.environ['EXPECTED_RELEASE']
+          request_url = os.environ['ACTIONS_ID_TOKEN_REQUEST_URL']
+          request_token = os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']
+          output_path = pathlib.Path(os.environ['GITHUB_OUTPUT'])
+          out = pathlib.Path('production-backup')
+          out.mkdir(exist_ok=True)
+
+          def oidc_token():
+              separator = '&' if '?' in request_url else '?'
+              url = request_url + separator + 'audience=' + urllib.parse.quote(audience, safe='')
+              req = urllib.request.Request(
+                  url,
+                  headers={
+                      'Authorization': f'Bearer {request_token}',
+                      'Accept': 'application/json',
+                      'User-Agent': 'adam-financial-book-backup',
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  return json.loads(response.read().decode('utf-8'))['value']
+
+          last = None
+          for attempt in range(1, 41):
+              token = oidc_token()
+              req = urllib.request.Request(
+                  backup_url,
+                  data=b'',
+                  method='POST',
+                  headers={
+                      'Authorization': f'Bearer {token}',
+                      'Accept': 'application/octet-stream',
+                      'User-Agent': 'adam-financial-book-backup',
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=120) as response:
+                      status = response.status
+                      headers = {k.lower(): v for k, v in response.headers.items()}
+                      data = response.read()
+              except urllib.error.HTTPError as exc:
+                  status = exc.code
+                  body = exc.read().decode('utf-8', errors='replace')[:500]
+                  last = {'attempt': attempt, 'status': status, 'body': body}
+                  if attempt < 40:
+                      time.sleep(15)
+                      continue
+                  raise SystemExit(f'Production backup export failed after {attempt} attempts: {last}')
+              except Exception as exc:
+                  last = {'attempt': attempt, 'error': f'{type(exc).__name__}: {exc}'}
+                  if attempt < 40:
+                      time.sleep(15)
+                      continue
+                  raise
+
+              release = headers.get('x-afb-release')
+              if status != 200 or release != expected_release:
+                  last = {'attempt': attempt, 'status': status, 'observedRelease': release}
+                  if attempt < 40:
+                      time.sleep(15)
+                      continue
+                  raise SystemExit(f'Production did not serve the expected release: {last}')
+
+              filename = headers.get('x-afb-filename', '')
+              backup_id = headers.get('x-afb-backup-id', '')
+              expected_checksum = headers.get('x-afb-sha256', '').lower()
+              migration = headers.get('x-afb-migration', 'unknown')
+              if not re.fullmatch(r'[A-Za-z0-9._-]+\.afb', filename):
+                  raise SystemExit('Production returned an unsafe backup filename.')
+              if not backup_id or not re.fullmatch(r'[a-f0-9]{64}', expected_checksum):
+                  raise SystemExit('Production backup metadata is incomplete.')
+              if len(data) < 64 or data[:4] != b'AFB9':
+                  raise SystemExit('Production response is not an Adam Financial Book encrypted backup.')
+              checksum = hashlib.sha256(data).hexdigest()
+              if checksum != expected_checksum:
+                  raise SystemExit('Production backup SHA-256 does not match its signed response metadata.')
+
+              file_path = out / filename
+              file_path.write_bytes(data)
+              manifest = {
+                  'format': 'AFB9',
+                  'filename': filename,
+                  'backupId': backup_id,
+                  'sha256': checksum,
+                  'bytes': len(data),
+                  'release': release,
+                  'migrationVersion': migration,
+              }
+              (out / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+              with output_path.open('a', encoding='utf-8') as handle:
+                  handle.write(f'filename={filename}\n')
+                  handle.write(f'backup_id={backup_id}\n')
+                  handle.write(f'checksum={checksum}\n')
+                  handle.write(f'bytes={len(data)}\n')
+                  handle.write(f'migration={migration}\n')
+              print(json.dumps({'event': 'backup.export.verified', **manifest}))
+              break
+          PY
+
+      - id: upload
+        name: Store encrypted backup off-site for 90 days
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: adam-financial-book-backup-${{ github.run_id }}
+          path: production-backup/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+
+      - name: Acknowledge durable delivery in production
+        env:
+          BACKUP_ID: ${{ steps.fetch.outputs.backup_id }}
+          CHECKSUM: ${{ steps.fetch.outputs.checksum }}
+          BYTES: ${{ steps.fetch.outputs.bytes }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import datetime as dt
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          request_url = os.environ['ACTIONS_ID_TOKEN_REQUEST_URL']
+          separator = '&' if '?' in request_url else '?'
+          token_url = request_url + separator + 'audience=' + urllib.parse.quote(os.environ['OIDC_AUDIENCE'], safe='')
+          token_request = urllib.request.Request(
+              token_url,
+              headers={
+                  'Authorization': f"Bearer {os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']}",
+                  'Accept': 'application/json',
+                  'User-Agent': 'adam-financial-book-backup',
+              },
+          )
+          with urllib.request.urlopen(token_request, timeout=20) as response:
+              token = json.loads(response.read().decode('utf-8'))['value']
+
+          retention_until = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=90)).isoformat()
+          payload = {
+              'backupId': os.environ['BACKUP_ID'],
+              'checksum': os.environ['CHECKSUM'],
+              'bytes': int(os.environ['BYTES']),
+              'artifactId': os.environ['ARTIFACT_ID'],
+              'artifactDigest': os.environ['ARTIFACT_DIGEST'],
+              'artifactUrl': os.environ['ARTIFACT_URL'],
+              'retentionUntil': retention_until,
+          }
+          request = urllib.request.Request(
+              os.environ['ACK_URL'],
+              data=json.dumps(payload).encode('utf-8'),
+              method='POST',
+              headers={
+                  'Authorization': f'Bearer {token}',
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json',
+                  'User-Agent': 'adam-financial-book-backup',
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              result = json.loads(response.read().decode('utf-8'))
+              if response.status != 200 or result.get('ok') is not True:
+                  raise SystemExit(f'Backup delivery acknowledgement failed: {result}')
+          print(json.dumps({'event': 'backup.offsite.acknowledged', **payload}))
+          PY
+
+      - name: Close recovered backup incident
+        if: success()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          base = f"https://api.github.com/repos/{os.environ['REPOSITORY']}"
+          headers = {
+              'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+              'Content-Type': 'application/json',
+          }
+          def call(path, method='GET', body=None):
+              data = None if body is None else json.dumps(body).encode('utf-8')
+              req = urllib.request.Request(base + path, data=data, method=method, headers=headers)
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  raw = response.read().decode('utf-8')
+                  return json.loads(raw) if raw else None
+          issues = call('/issues?state=open&per_page=100') or []
+          incident = next((x for x in issues if 'pull_request' not in x and x.get('title') == os.environ['INCIDENT_TITLE']), None)
+          if incident:
+              number = incident['number']
+              call(f'/issues/{number}/comments', 'POST', {'body': f"✅ Nightly encrypted backup recovered. Run: {os.environ['RUN_URL']}"})
+              call(f'/issues/{number}', 'PATCH', {'state': 'closed', 'state_reason': 'completed'})
+          PY
+
+      - name: Open backup failure incident
+        if: failure()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          base = f"https://api.github.com/repos/{os.environ['REPOSITORY']}"
+          headers = {
+              'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+              'Content-Type': 'application/json',
+          }
+          def call(path, method='GET', body=None):
+              data = None if body is None else json.dumps(body).encode('utf-8')
+              req = urllib.request.Request(base + path, data=data, method=method, headers=headers)
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  raw = response.read().decode('utf-8')
+                  return json.loads(raw) if raw else None
+          issues = call('/issues?state=open&per_page=100') or []
+          if not any('pull_request' not in x and x.get('title') == os.environ['INCIDENT_TITLE'] for x in issues):
+              call('/issues', 'POST', {
+                  'title': os.environ['INCIDENT_TITLE'],
+                  'body': (
+                      'The scheduled production backup did not complete durable off-site delivery.\n\n'
+                      f"Release: `{os.environ['EXPECTED_RELEASE']}`\n"
+                      f"Run: {os.environ['RUN_URL']}\n\n"
+                      'Production readiness will also fail if no delivered encrypted backup remains current.'
+                  ),
+              })
+          PY

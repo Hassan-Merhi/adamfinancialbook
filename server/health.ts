@@ -22,5 +22,9 @@ healthRouter.get('/health/ready', wrap(async (_req, res) => {
     pendingMigrations: state.pendingMigrations,
     currentMigration: state.currentMigration,
     latestMigration: state.latestMigration,
+    backups: state.backups,
+    latestBackupAt: state.latestBackupAt,
+    backupAgeHours: state.backupAgeHours,
+    ...(state.detail ? { detail: state.detail } : {}),
   });
 }));

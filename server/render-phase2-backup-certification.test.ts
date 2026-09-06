@@ -6,17 +6,23 @@ const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), 'utf8');
 
 describe('Render Phase 2 encrypted production backup contract', () => {
-  it('keeps the scheduled encrypted backup cron wired to the production command', () => {
+  it('keeps the nightly encrypted off-site backup wired without SMTP secrets', () => {
     const render = read('render.yaml');
-    const pkg = read('package.json');
+    const workflow = read('.github/workflows/encrypted-production-backup.yml');
+    const exportRoute = read('server/backup-export.ts');
+    const delivery = read('server/backup-delivery.ts');
 
-    expect(render).toContain('name: adam-financial-book-encrypted-backup');
-    expect(render).toContain('schedule: "30 1 * * *"');
-    expect(render).toContain('startCommand: npm run backup:send');
-    expect(render).toContain('envVarKey: BACKUP_ENCRYPTION_KEY');
-    expect(render).toContain('envVarKey: DATABASE_URL');
-    expect(render).toContain('key: BACKUP_MAX_EMAIL_BYTES');
-    expect(pkg).toContain('"backup:send": "npm run db:migrate && tsx server/backup-mail.ts"');
+    expect(render).not.toContain('name: adam-financial-book-encrypted-backup');
+    expect(render).toContain('key: BACKUP_ENCRYPTION_KEY');
+    expect(workflow).toContain("cron: '30 1 * * *'");
+    expect(workflow).toContain('id-token: write');
+    expect(workflow).toContain('OIDC_AUDIENCE: adam-financial-book-backup');
+    expect(workflow).toContain('retention-days: 90');
+    expect(workflow).toContain('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02');
+    expect(workflow).not.toContain('DATABASE_URL:');
+    expect(workflow).not.toContain('BACKUP_ENCRYPTION_KEY:');
+    expect(exportRoute).toContain("createEncryptedDatabaseBackup('github-actions-export')");
+    expect(delivery).toContain("destination = 'github-actions-artifact'");
   });
 
   it('requires authenticated encryption, a consistent snapshot, and checksums', () => {
@@ -32,17 +38,20 @@ describe('Render Phase 2 encrypted production backup contract', () => {
     expect(service).toContain('Refusing to back up while');
   });
 
-  it('records backup success/failure and emits operational alerts', () => {
+  it('records backup creation, durable delivery, and failure alerts', () => {
     const service = read('server/backup-service.ts');
-    const mail = read('server/backup-mail.ts');
+    const workflow = read('.github/workflows/encrypted-production-backup.yml');
+    const delivery = read('server/backup-delivery.ts');
 
     expect(service).toContain("SET status = 'success'");
     expect(service).toContain("SET status = 'failed'");
     expect(service).toContain("logOperationalEvent('backup.completed'");
     expect(service).toContain("fireOperationalAlert('backup.failed'");
-    expect(mail).toContain("logOperationalEvent('backup.email.delivered'");
-    expect(mail).toContain("fireOperationalAlert('backup.delivery.failed'");
-    expect(mail).toContain("throw new Error('Scheduled backup delivery needs SMTP_URL");
+    expect(delivery).toContain('delivered_at = now()');
+    expect(delivery).toContain('artifact_digest');
+    expect(delivery).toContain('retention_until');
+    expect(workflow).toContain('[Production Backup] Adam Financial Book encrypted backup failure');
+    expect(workflow).toContain('Close recovered backup incident');
   });
 
   it('keeps restore and tamper detection under integration coverage', () => {

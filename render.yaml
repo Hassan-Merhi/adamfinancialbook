@@ -1,5 +1,7 @@
 # Production Blueprint for Adam Financial Book.
 # The application database lives on Neon; Render owns the web process and operational cron jobs.
+# Nightly encrypted database backups are stored off-site by GitHub Actions using
+# short-lived OIDC identity; no SMTP transport or database credential is copied there.
 services:
   - type: web
     name: adam-financial-book
@@ -29,6 +31,10 @@ services:
         value: "8"
       - key: SLOW_REQUEST_MS
         value: "2000"
+      - key: BACKUP_BOOTSTRAP_HOURS
+        value: "30"
+      - key: BACKUP_STALE_HOURS
+        value: "36"
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: GOOGLE_TRANSLATE_API_KEY
@@ -76,54 +82,9 @@ services:
       - key: SMTP_URL
         sync: false
 
-  # Daily off-site encrypted logical PostgreSQL backup. The encryption key is
-  # generated once on the web service and securely referenced here so both
-  # manual and scheduled backups remain mutually restorable.
-  - type: cron
-    name: adam-financial-book-encrypted-backup
-    runtime: node
-    plan: starter
-    branch: main
-    schedule: "30 1 * * *"
-    buildCommand: npm ci
-    startCommand: npm run backup:send
-    envVars:
-      - key: DATABASE_URL
-        fromService:
-          type: web
-          name: adam-financial-book
-          envVarKey: DATABASE_URL
-      - key: BACKUP_ENCRYPTION_KEY
-        fromService:
-          type: web
-          name: adam-financial-book
-          envVarKey: BACKUP_ENCRYPTION_KEY
-      - key: SMTP_URL
-        fromService:
-          type: cron
-          name: adam-financial-book-day-report
-          envVarKey: SMTP_URL
-      - key: REPORT_TO
-        fromService:
-          type: cron
-          name: adam-financial-book-day-report
-          envVarKey: REPORT_TO
-      - key: REPORT_FROM
-        fromService:
-          type: cron
-          name: adam-financial-book-day-report
-          envVarKey: REPORT_FROM
-      - key: NODE_ENV
-        value: production
-      - key: NODE_VERSION
-        value: "22"
-      - key: PGSSL
-        value: verify
-      - key: BACKUP_MAX_EMAIL_BYTES
-        value: "18874368"
-
   # Independent uptime/readiness check. Because it runs outside the web process,
-  # it can still alert when the application itself or its database is unreachable.
+  # it can still alert when the application itself, database, migrations, or
+  # off-site backup freshness becomes unhealthy.
   - type: cron
     name: adam-financial-book-health-monitor
     runtime: node
