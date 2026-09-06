@@ -502,7 +502,7 @@ function AddPerson({ suggestion, say, reload }: {
         </div>
       )}
       <div className="form access-add-form">
-        <div className="f access-wide"><label>Username</label><input value={username} autoCapitalize="none" spellCheck={false} onChange={(e) => setUsername(e.target.value)} placeholder="Hassan Dakik" /></div>
+        <div className="f access-wide"><label>Username</label><input value={username} autoCapitalize="none" spellCheck={false} onChange={(e) => setUsername(e.target.value)} /></div>
         <div className="f"><label>Role</label><select value={role} onChange={(e) => setRole(e.target.value)}><option value="entry">Entry only</option><option value="owner">Owner</option></select></div>
         <div className="f access-wide"><label>First password</label><div className="withbtn"><input type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="12+ characters" /><button className="btn ghost small" onClick={() => setPassword(suggestion)}>Suggest</button></div></div>
         <button className="btn" disabled={busy || !username.trim() || password.length < 12} onClick={() => void go()}>{busy ? 'Adding…' : 'Add user'}</button>
