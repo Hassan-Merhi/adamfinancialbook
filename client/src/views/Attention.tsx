@@ -10,6 +10,7 @@ import './Attention.css';
 
 const RECEIPT_BATCH = 30;
 const RECEIPT_KINDS = new Set(['expense', 'salary', 'supplier_payment', 'person_loan', 'credit_purchase']);
+type AttentionSection = 'review' | 'decisions' | 'receipts' | 'followup';
 
 export default function Attention({ book, dashboard, role, open, goto, refresh, say, onMissingCount }: {
   book: LoadedBook;
@@ -26,6 +27,7 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
   const [evidenceEpoch, setEvidenceEpoch] = useState(0);
   const [evidenceLimit, setEvidenceLimit] = useState(RECEIPT_BATCH);
   const [busy, setBusy] = useState('');
+  const [activeSection, setActiveSection] = useState<AttentionSection>('review');
 
   const pendingApprovals = dashboard?.approvals.filter((item) => item.status === 'pending') ?? [];
   const transfers = dashboard?.pendingTransfers ?? [];
@@ -90,10 +92,27 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
 
   useEffect(() => onMissingCount(missingEvidence.length), [missingEvidence.length, onMissingCount]);
 
+  const reviewCount = syncConflicts + (role === 'owner' ? expenseReviews.length : 0);
+  const decisionCount = pendingApprovals.length + transfers.length;
+  const receiptCount = missingEvidence.length;
+  const followupCount = reminders.length + receiptsWaiting.length + unread.length;
   const total = syncConflicts + expenseReviews.length + pendingApprovals.length + transfers.length
     + reminders.length + receiptsWaiting.length + missingEvidence.length;
   const checkedEvidence = Math.min(evidenceLimit, allEvidenceCandidates.length);
   const hasOlderEvidence = checkedEvidence < allEvidenceCandidates.length;
+
+  useEffect(() => {
+    const counts: Record<AttentionSection, number> = {
+      review: reviewCount,
+      decisions: decisionCount + (dashboard === null ? 1 : 0),
+      receipts: receiptCount,
+      followup: followupCount,
+    };
+    if (counts[activeSection] > 0 || checkingEvidence) return;
+    const next = (['review', 'decisions', 'receipts', 'followup'] as AttentionSection[])
+      .find((section) => counts[section] > 0);
+    if (next && next !== activeSection) setActiveSection(next);
+  }, [activeSection, reviewCount, decisionCount, receiptCount, followupCount, dashboard, checkingEvidence]);
 
   const after = async (key: string, work: () => Promise<unknown>, done: string, recheckEvidence = false) => {
     setBusy(key);
@@ -154,7 +173,7 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
         </button>
       </div>
 
-      <div className="attention-summary" aria-label="Attention summary">
+      <div className="attention-summary attention-summary-desktop" aria-label="Attention summary">
         <Summary label="Open" value={total} strong />
         <Summary label="Sync conflicts" value={syncConflicts} />
         <Summary label="To assign" value={expenseReviews.length} />
@@ -164,138 +183,190 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
         <Summary label="Reminders" value={reminders.length + receiptsWaiting.length} />
       </div>
 
-      {total === 0 && !checkingEvidence && (
+      <AttentionMobileNav
+        active={activeSection}
+        onChange={setActiveSection}
+        review={reviewCount}
+        decisions={decisionCount}
+        receipts={receiptCount}
+        followup={followupCount}
+        checkingReceipts={checkingEvidence}
+      />
+
+      {total === 0 && unread.length === 0 && !checkingEvidence && (
         <Card><div className="attention-clear"><b>All clear.</b><span>Nothing currently needs a decision or follow-up.</span></div></Card>
       )}
 
-      <SyncConflictQueue book={book} refresh={refresh} say={say} />
+      <div className={`attention-section${activeSection === 'review' ? ' is-active' : ''}`} data-attention-section="review">
+        <SyncConflictQueue book={book} refresh={refresh} say={say} />
 
-      {role === 'owner' && expenseReviews.length > 0 && (
-        <ExpenseReviewQueue items={expenseReviews} book={book} refresh={refresh} say={say} />
-      )}
+        {role === 'owner' && expenseReviews.length > 0 && (
+          <ExpenseReviewQueue items={expenseReviews} book={book} refresh={refresh} say={say} />
+        )}
+      </div>
 
-      {(pendingApprovals.length > 0 || dashboard === null) && (
-        <Card title="Approval requests" aside={pendingApprovals.length ? `${pendingApprovals.length} waiting` : undefined}>
-          {dashboard === null ? <Empty>Approval data is temporarily unavailable.</Empty> : pendingApprovals.map((approval) => (
-            <AttentionRow
-              key={approval.id}
-              title={approval.request_text}
-              sub={[approval.requester_email, approval.account_name, approval.created_at ? new Date(approval.created_at).toLocaleString() : ''].filter(Boolean).join(' · ')}
-              value={approval.amount == null ? undefined : money(approval.amount)}
-            >
-              {role === 'owner' ? (
-                <>
-                  <button className="btn small" disabled={busy === `approval:${approval.id}`} onClick={() => void decide(approval.id, 'approved')}>Approve</button>
-                  <button className="btn ghost small danger" disabled={busy === `approval:${approval.id}`} onClick={() => void decide(approval.id, 'rejected')}>Reject</button>
-                </>
-              ) : <span className="chip">Waiting for owner</span>}
-            </AttentionRow>
-          ))}
-        </Card>
-      )}
-
-      {transfers.length > 0 && (
-        <Card title={role === 'entry' ? 'Money waiting for confirmation' : 'Transfers waiting for receipt'} aside={`${transfers.length} pending`}>
-          {transfers.map((transfer) => (
-            <AttentionRow
-              key={transfer.id}
-              title={transfer.purpose || 'Cash handoff'}
-              sub={`${transfer.from_account_name} → ${transfer.to_account_name}${transfer.recipient_email ? ` · ${transfer.recipient_email}` : ''}`}
-              value={money(transfer.amount)}
-            >
-              {role === 'entry' ? (
-                <>
-                  <button className="btn small" disabled={busy === `transfer:${transfer.id}`} onClick={() => void transferAction(transfer.id, 'confirm')}>I received it</button>
-                  <button className="btn ghost small danger" disabled={busy === `transfer:${transfer.id}`} onClick={() => void transferAction(transfer.id, 'reject')}>Not received</button>
-                </>
-              ) : <button className="btn ghost small" onClick={() => goto('approvals')}>Open details</button>}
-            </AttentionRow>
-          ))}
-        </Card>
-      )}
-
-      {(allEvidenceCandidates.length > 0 || checkingEvidence || missingEvidence.length > 0) && (
-        <Card title="Missing receipts" aside={checkingEvidence ? `checking ${checkedEvidence}…` : `${missingEvidence.length} missing · ${checkedEvidence} checked`}>
-          {checkingEvidence && missingEvidence.length === 0 && <Empty>Checking cash-out activity for receipt evidence…</Empty>}
-          {!checkingEvidence && missingEvidence.length === 0 && <Empty>No missing receipt evidence in the checked activity.</Empty>}
-          {missingEvidence.map((entry) => (
-            <AttentionRow
-              key={entry.id}
-              title={entry.purpose || 'Cash expense'}
-              sub={[entry.actor_email, entry.account_name, entry.occurred_on ? shortDate(entry.occurred_on) : ''].filter(Boolean).join(' · ')}
-              value={entry.amount == null ? undefined : money(entry.amount)}
-            >
-              <label className={`btn ghost small attention-upload${busy === `evidence:${entry.id}` ? ' disabled' : ''}`}>
-                {busy === `evidence:${entry.id}` ? 'Adding…' : 'Add receipt'}
-                <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={busy === `evidence:${entry.id}`} onChange={(event) => void addEvidence(entry, event)} />
-              </label>
-              {role === 'owner' && <button className="btn ghost small" onClick={() => goto('files')}>Files</button>}
-            </AttentionRow>
-          ))}
-          {hasOlderEvidence && (
-            <div className="attention-toolbar">
-              <button className="btn ghost small" disabled={checkingEvidence} onClick={() => setEvidenceLimit((value) => value + RECEIPT_BATCH)}>
-                Check {Math.min(RECEIPT_BATCH, allEvidenceCandidates.length - checkedEvidence)} older entries
-              </button>
-            </div>
-          )}
-        </Card>
-      )}
-
-      {reminders.length > 0 && (
-        <Card title="Reminders" aside={`${reminders.length} open`}>
-          {reminders.map((reminder) => (
-            <AttentionRow
-              key={reminder.id}
-              title={reminder.what}
-              sub={[book.accounts.find((account) => account.id === reminder.accountId)?.name, reminder.note, 'Allocated, not paid'].filter(Boolean).join(' · ')}
-              value={money(reminder.amount)}
-            >
-              <button className="btn ghost small" disabled={busy === `reminder:${reminder.id}`} onClick={() => void after(
-                `reminder:${reminder.id}`,
-                () => api.clearReminder(reminder.id),
-                'Reminder cleared.',
-              )}>Mark done</button>
-            </AttentionRow>
-          ))}
-        </Card>
-      )}
-
-      {receiptsWaiting.length > 0 && (
-        <Card title="Recorded receipts not in cash" aside={`${receiptsWaiting.length} waiting`}>
-          {receiptsWaiting.map((receipt) => {
-            const project = book.projects.find((item) => item.id === receipt.projectId);
-            return (
+      <div className={`attention-section${activeSection === 'decisions' ? ' is-active' : ''}`} data-attention-section="decisions">
+        {(pendingApprovals.length > 0 || dashboard === null) && (
+          <Card title="Approval requests" aside={pendingApprovals.length ? `${pendingApprovals.length} waiting` : undefined}>
+            {dashboard === null ? <Empty>Approval data is temporarily unavailable.</Empty> : pendingApprovals.map((approval) => (
               <AttentionRow
-                key={receipt.id}
-                title={project?.name ?? 'Project receipt'}
-                sub={`Recorded, but no account has received it yet${receipt.occurredOn ? ` · ${shortDate(receipt.occurredOn)}` : ''}`}
-                value={money(receipt.amount)}
+                key={approval.id}
+                title={approval.request_text}
+                sub={[approval.requester_email, approval.account_name, approval.created_at ? new Date(approval.created_at).toLocaleString() : ''].filter(Boolean).join(' · ')}
+                value={approval.amount == null ? undefined : money(approval.amount)}
               >
-                {project && <button className="btn ghost small" onClick={() => open({ type: 'project', id: project.id })}>Open project</button>}
+                {role === 'owner' ? (
+                  <>
+                    <button className="btn small" disabled={busy === `approval:${approval.id}`} onClick={() => void decide(approval.id, 'approved')}>Approve</button>
+                    <button className="btn ghost small danger" disabled={busy === `approval:${approval.id}`} onClick={() => void decide(approval.id, 'rejected')}>Reject</button>
+                  </>
+                ) : <span className="chip">Waiting for owner</span>}
               </AttentionRow>
-            );
-          })}
-        </Card>
-      )}
+            ))}
+          </Card>
+        )}
 
-      {unread.length > 0 && (
-        <Card title="Updates" aside={`${unread.length} unread`}>
-          <div className="attention-toolbar">
-            <button className="btn ghost small" onClick={() => void after('notifications', api.markAllNotificationsRead, 'Updates marked read.')}>Mark all read</button>
-          </div>
-          {unread.slice(0, 20).map((notification) => (
-            <AttentionRow key={notification.id} title={notification.title} sub={notification.body}>
-              <button className="btn ghost small" disabled={busy === `notification:${notification.id}`} onClick={() => void after(
-                `notification:${notification.id}`,
-                () => api.markNotificationRead(notification.id),
-                'Update marked read.',
-              )}>Mark read</button>
-            </AttentionRow>
-          ))}
-        </Card>
-      )}
+        {transfers.length > 0 && (
+          <Card title={role === 'entry' ? 'Money waiting for confirmation' : 'Transfers waiting for receipt'} aside={`${transfers.length} pending`}>
+            {transfers.map((transfer) => (
+              <AttentionRow
+                key={transfer.id}
+                title={transfer.purpose || 'Cash handoff'}
+                sub={`${transfer.from_account_name} → ${transfer.to_account_name}${transfer.recipient_email ? ` · ${transfer.recipient_email}` : ''}`}
+                value={money(transfer.amount)}
+              >
+                {role === 'entry' ? (
+                  <>
+                    <button className="btn small" disabled={busy === `transfer:${transfer.id}`} onClick={() => void transferAction(transfer.id, 'confirm')}>I received it</button>
+                    <button className="btn ghost small danger" disabled={busy === `transfer:${transfer.id}`} onClick={() => void transferAction(transfer.id, 'reject')}>Not received</button>
+                  </>
+                ) : <button className="btn ghost small" onClick={() => goto('approvals')}>Open details</button>}
+              </AttentionRow>
+            ))}
+          </Card>
+        )}
+      </div>
+
+      <div className={`attention-section${activeSection === 'receipts' ? ' is-active' : ''}`} data-attention-section="receipts">
+        {(allEvidenceCandidates.length > 0 || checkingEvidence || missingEvidence.length > 0) && (
+          <Card title="Missing receipts" aside={checkingEvidence ? `checking ${checkedEvidence}…` : `${missingEvidence.length} missing · ${checkedEvidence} checked`}>
+            {checkingEvidence && missingEvidence.length === 0 && <Empty>Checking cash-out activity for receipt evidence…</Empty>}
+            {!checkingEvidence && missingEvidence.length === 0 && <Empty>No missing receipt evidence in the checked activity.</Empty>}
+            {missingEvidence.map((entry) => (
+              <AttentionRow
+                key={entry.id}
+                title={entry.purpose || 'Cash expense'}
+                sub={[entry.actor_email, entry.account_name, entry.occurred_on ? shortDate(entry.occurred_on) : ''].filter(Boolean).join(' · ')}
+                value={entry.amount == null ? undefined : money(entry.amount)}
+              >
+                <label className={`btn ghost small attention-upload${busy === `evidence:${entry.id}` ? ' disabled' : ''}`}>
+                  {busy === `evidence:${entry.id}` ? 'Adding…' : 'Add receipt'}
+                  <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={busy === `evidence:${entry.id}`} onChange={(event) => void addEvidence(entry, event)} />
+                </label>
+                {role === 'owner' && <button className="btn ghost small" onClick={() => goto('files')}>Files</button>}
+              </AttentionRow>
+            ))}
+            {hasOlderEvidence && (
+              <div className="attention-toolbar">
+                <button className="btn ghost small" disabled={checkingEvidence} onClick={() => setEvidenceLimit((value) => value + RECEIPT_BATCH)}>
+                  Check {Math.min(RECEIPT_BATCH, allEvidenceCandidates.length - checkedEvidence)} older entries
+                </button>
+              </div>
+            )}
+          </Card>
+        )}
+      </div>
+
+      <div className={`attention-section${activeSection === 'followup' ? ' is-active' : ''}`} data-attention-section="followup">
+        {reminders.length > 0 && (
+          <Card title="Reminders" aside={`${reminders.length} open`}>
+            {reminders.map((reminder) => (
+              <AttentionRow
+                key={reminder.id}
+                title={reminder.what}
+                sub={[book.accounts.find((account) => account.id === reminder.accountId)?.name, reminder.note, 'Allocated, not paid'].filter(Boolean).join(' · ')}
+                value={money(reminder.amount)}
+              >
+                <button className="btn ghost small" disabled={busy === `reminder:${reminder.id}`} onClick={() => void after(
+                  `reminder:${reminder.id}`,
+                  () => api.clearReminder(reminder.id),
+                  'Reminder cleared.',
+                )}>Mark done</button>
+              </AttentionRow>
+            ))}
+          </Card>
+        )}
+
+        {receiptsWaiting.length > 0 && (
+          <Card title="Recorded receipts not in cash" aside={`${receiptsWaiting.length} waiting`}>
+            {receiptsWaiting.map((receipt) => {
+              const project = book.projects.find((item) => item.id === receipt.projectId);
+              return (
+                <AttentionRow
+                  key={receipt.id}
+                  title={project?.name ?? 'Project receipt'}
+                  sub={`Recorded, but no account has received it yet${receipt.occurredOn ? ` · ${shortDate(receipt.occurredOn)}` : ''}`}
+                  value={money(receipt.amount)}
+                >
+                  {project && <button className="btn ghost small" onClick={() => open({ type: 'project', id: project.id })}>Open project</button>}
+                </AttentionRow>
+              );
+            })}
+          </Card>
+        )}
+
+        {unread.length > 0 && (
+          <Card title="Updates" aside={`${unread.length} unread`}>
+            <div className="attention-toolbar">
+              <button className="btn ghost small" onClick={() => void after('notifications', api.markAllNotificationsRead, 'Updates marked read.')}>Mark all read</button>
+            </div>
+            {unread.slice(0, 20).map((notification) => (
+              <AttentionRow key={notification.id} title={notification.title} sub={notification.body}>
+                <button className="btn ghost small" disabled={busy === `notification:${notification.id}`} onClick={() => void after(
+                  `notification:${notification.id}`,
+                  () => api.markNotificationRead(notification.id),
+                  'Update marked read.',
+                )}>Mark read</button>
+              </AttentionRow>
+            ))}
+          </Card>
+        )}
+      </div>
     </>
+  );
+}
+
+function AttentionMobileNav({ active, onChange, review, decisions, receipts, followup, checkingReceipts }: {
+  active: AttentionSection;
+  onChange: (section: AttentionSection) => void;
+  review: number;
+  decisions: number;
+  receipts: number;
+  followup: number;
+  checkingReceipts: boolean;
+}) {
+  const items: Array<{ id: AttentionSection; label: string; count: number; loading?: boolean }> = [
+    { id: 'review', label: 'Review', count: review },
+    { id: 'decisions', label: 'Decisions', count: decisions },
+    { id: 'receipts', label: 'Receipts', count: receipts, loading: checkingReceipts },
+    { id: 'followup', label: 'Follow-up', count: followup },
+  ];
+  return (
+    <div className="attention-mobile-nav" role="tablist" aria-label="Needs attention categories">
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          role="tab"
+          aria-selected={active === item.id}
+          className={active === item.id ? 'is-active' : ''}
+          onClick={() => onChange(item.id)}
+        >
+          <span>{item.label}</span>
+          <b className="num">{item.loading ? '…' : item.count}</b>
+        </button>
+      ))}
+    </div>
   );
 }
 
