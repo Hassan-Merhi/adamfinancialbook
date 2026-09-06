@@ -1,0 +1,121 @@
+/* Mobile page bundle.
+   This is the single global entry point for secondary/operations phone layouts.
+   admin-mobile.css currently imports operations-mobile.css, so loading it here
+   fixes both owner/admin pages and shared Projects/People/Attention/Approvals
+   rules without relying on a route-specific import. */
+@import './admin-mobile.css';
+
+@media (max-width:760px) {
+  /* Every routed surface uses the same phone canvas and may shrink safely. */
+  .daily-page,
+  .operations-page,
+  .attention-page,
+  .report-page,
+  .files-page,
+  .history-page,
+  .access-page,
+  .setup-page {
+    width:100%;
+    min-width:0;
+    max-width:100%;
+  }
+
+  .daily-page > *,
+  .operations-page > *,
+  .report-page > *,
+  .files-page > *,
+  .history-page > *,
+  .access-page > *,
+  .setup-page > * {
+    min-width:0;
+    max-width:100%;
+  }
+
+  /* Keep headings readable instead of shrinking labels to fit desktop density. */
+  .operations-eyebrow,
+  .daily-eyebrow,
+  .report-stat span,
+  .files-filters label,
+  .file-meta-item span {
+    font-size:11px;
+    line-height:1.25;
+  }
+
+  .operations-hero p,
+  .dhead p,
+  .attention-copy small,
+  .approval-main small,
+  .approval-main span,
+  .audit-copy small,
+  .audit-copy span,
+  .file-details > p,
+  .accountaccesshead small,
+  .accountaccessmain small {
+    line-height:1.4;
+  }
+
+  /* One control rhythm across every page. Inputs stay 16px to prevent iOS zoom. */
+  .files-filters input,
+  .files-filters select,
+  .access-page input,
+  .access-page select,
+  .setup-page input,
+  .setup-page select,
+  .report-page input,
+  .report-page select {
+    min-height:46px;
+    font-size:16px;
+  }
+
+  .files-page .btn,
+  .history-page .btn,
+  .access-page .btn,
+  .setup-page .btn,
+  .report-page .btn,
+  .operations-page .btn {
+    min-height:44px;
+  }
+
+  /* Dense desktop metadata must wrap rather than force sideways scrolling. */
+  .dhead,
+  .card > h3,
+  .row,
+  .attention-row,
+  .approval-row,
+  .audit-event,
+  .file-title,
+  .accountaccesshead,
+  .accountaccessrow {
+    min-width:0;
+  }
+
+  .dhead h2,
+  .card > h3,
+  .row .main,
+  .row .main b,
+  .row .main small,
+  .attention-copy,
+  .approval-main,
+  .audit-copy,
+  .file-title b,
+  .accountaccessmain {
+    overflow-wrap:anywhere;
+  }
+
+  /* Bottom nav and sheets own the safe areas; content should never hide behind them. */
+  main > .wrap {
+    padding-bottom:max(18px,env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width:390px) {
+  /* Keep summary cards readable on narrow phones. */
+  .report-summary {
+    grid-template-columns:1fr 1fr;
+  }
+
+  .setup-counts,
+  .money-hero-meta {
+    gap:6px;
+  }
+}

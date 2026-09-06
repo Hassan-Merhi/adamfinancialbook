@@ -1,7 +1,6 @@
 import type { LoadedBook } from '../api';
 import { Card, Empty, Row, money, shortDate } from '../ui';
 import type { Focus } from './Statement';
-import '../operations-mobile.css';
 
 export default function Projects({ book, open }: { book: LoadedBook; open: (f: Focus) => void }) {
   const waitingReceipts = book.receipts.filter((receipt) => !receipt.inCash);

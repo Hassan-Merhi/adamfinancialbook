@@ -1,3 +1,5 @@
+@import './mobile-pages.css';
+
 /* Phase 10 — final production UX/accessibility polish. */
 
 :where(a,button,input,select,textarea,[tabindex]):focus-visible {
