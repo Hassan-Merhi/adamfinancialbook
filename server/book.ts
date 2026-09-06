@@ -400,13 +400,9 @@ export async function voidEntry(entryId: string, reason: string): Promise<void> 
       );
     }
 
-    // Confirmed delegated handoffs keep their history but no longer claim to be
-    // live once their linked ledger transfer has been voided.
-    await client.query(
-      `UPDATE pending_transfers SET status = 'voided'
-        WHERE entry_id = $1 AND status = 'confirmed'`,
-      [entryId],
-    );
+    // A delegated handoff stays historically confirmed. The linked entry's
+    // void flag and superseded effects are the evidence that its accounting
+    // impact was later reversed.
 
     const after = await captureEntryState(client, entryId, false);
     if (!after) throw new Error('Voided entry disappeared inside its transaction.');
