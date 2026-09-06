@@ -63,6 +63,8 @@ jobs:
         run: npm run db:status
       - name: Existing API integration suite
         run: npm run test:integration
+      - name: Offline chaos and multi-device certification
+        run: npm run test:offline-chaos
       # The financial E2E test runs db:integrity against its populated realistic
       # ledger before intentionally dropping public during test cleanup.
       - name: Financial end-to-end reconciliation
