@@ -133,6 +133,9 @@ export interface Entry extends EntryInput {
   voidReason?: string | null;
   voidedAt?: string | null;
   voidedBy?: string | null;
+  /** Client-only projection marker while a correction/void is durably queued. */
+  offlinePendingRevision?: 'correction' | 'void';
+  offlineQueueId?: string;
   createdAt: string;
   createdBy?: string | null;
 }
