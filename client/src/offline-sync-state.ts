@@ -19,6 +19,8 @@ export interface SyncErrorInfo {
 }
 
 export interface SyncItemState {
+  /** Strict durable enqueue order; timestamps alone can tie within one millisecond. */
+  order: number;
   status: SyncItemStatus;
   attempts: number;
   lastAttemptAt: string | null;
@@ -42,6 +44,7 @@ export interface SyncSummary {
 interface StoredSyncState {
   version: 1;
   items: Record<string, SyncItemState>;
+  nextOrder: number;
   lastRunAt: string | null;
   lastSuccessAt: string | null;
   lastError: SyncErrorInfo | null;
@@ -57,14 +60,16 @@ function emptyState(): StoredSyncState {
   return {
     version: 1,
     items: {},
+    nextOrder: 1,
     lastRunAt: null,
     lastSuccessAt: null,
     lastError: null,
   };
 }
 
-function defaultItemState(): SyncItemState {
+function defaultItemState(order = 0): SyncItemState {
   return {
+    order,
     status: 'pending',
     attempts: 0,
     lastAttemptAt: null,
@@ -99,6 +104,7 @@ function normalizeItem(value: unknown): SyncItemState {
   if (!value || typeof value !== 'object') return defaultItemState();
   const item = value as Partial<SyncItemState>;
   return {
+    order: Number.isInteger(item.order) && Number(item.order) > 0 ? Number(item.order) : 0,
     status: validStatus(item.status) ? item.status : 'pending',
     attempts: Number.isInteger(item.attempts) && Number(item.attempts) >= 0 ? Number(item.attempts) : 0,
     lastAttemptAt: typeof item.lastAttemptAt === 'string' ? item.lastAttemptAt : null,
@@ -111,12 +117,20 @@ function normalizeState(value: unknown): StoredSyncState {
   if (!value || typeof value !== 'object') return emptyState();
   const candidate = value as Partial<StoredSyncState>;
   const items: Record<string, SyncItemState> = {};
+  let maxOrder = 0;
   if (candidate.items && typeof candidate.items === 'object') {
-    for (const [id, item] of Object.entries(candidate.items)) items[id] = normalizeItem(item);
+    for (const [id, item] of Object.entries(candidate.items)) {
+      items[id] = normalizeItem(item);
+      maxOrder = Math.max(maxOrder, items[id].order);
+    }
   }
+  const requestedNext = Number.isInteger(candidate.nextOrder) && Number(candidate.nextOrder) > 0
+    ? Number(candidate.nextOrder)
+    : 1;
   return {
     version: 1,
     items,
+    nextOrder: Math.max(requestedNext, maxOrder + 1),
     lastRunAt: typeof candidate.lastRunAt === 'string' ? candidate.lastRunAt : null,
     lastSuccessAt: typeof candidate.lastSuccessAt === 'string' ? candidate.lastSuccessAt : null,
     lastError: normalizeError(candidate.lastError),
@@ -214,12 +228,17 @@ class OfflineSyncState {
 
   async registerQueued(id: string): Promise<void> {
     if (!this.activeUserId) return;
-    if (!this.state.items[id]) this.state.items[id] = defaultItemState();
+    const current = this.state.items[id];
+    if (!current) {
+      this.state.items[id] = defaultItemState(this.state.nextOrder++);
+    } else if (current.order <= 0) {
+      current.order = this.state.nextOrder++;
+    }
     await this.persist();
   }
 
   async updateItem(id: string, patch: Partial<SyncItemState>): Promise<SyncItemState> {
-    const current = this.state.items[id] ?? defaultItemState();
+    const current = this.state.items[id] ?? defaultItemState(this.state.nextOrder++);
     const next: SyncItemState = {
       ...current,
       ...patch,
@@ -255,10 +274,20 @@ class OfflineSyncState {
     });
   }
 
+  ordered(queue: Queued[]): Queued[] {
+    return [...queue].sort((a, b) => {
+      const aOrder = this.state.items[a.id]?.order ?? 0;
+      const bOrder = this.state.items[b.id]?.order ?? 0;
+      if (aOrder > 0 && bOrder > 0 && aOrder !== bOrder) return aOrder - bOrder;
+      if (aOrder > 0 && bOrder <= 0) return -1;
+      if (aOrder <= 0 && bOrder > 0) return 1;
+      return a.queuedAt.localeCompare(b.queuedAt) || a.id.localeCompare(b.id);
+    });
+  }
+
   projectablePrefix(queue: Queued[]): Queued[] {
-    const ordered = [...queue].sort((a, b) => a.queuedAt.localeCompare(b.queuedAt) || a.id.localeCompare(b.id));
     const visible: Queued[] = [];
-    for (const item of ordered) {
+    for (const item of this.ordered(queue)) {
       const status = this.stateFor(item.id).status;
       if (status === 'rejected') break;
       visible.push(item);
@@ -269,13 +298,24 @@ class OfflineSyncState {
   async recoverInterrupted(queue: Queued[], now = new Date()): Promise<void> {
     const ids = new Set(queue.map((item) => item.id));
     let changed = false;
-    for (const item of queue) {
-      const current = this.state.items[item.id] ?? defaultItemState();
-      if (!this.state.items[item.id]) {
-        this.state.items[item.id] = current;
+
+    // Phase 1 rows created before Phase 3 have no sequence metadata. Adopt them
+    // deterministically once, then every new Phase 3 row gets a strict counter.
+    const legacyOrder = [...queue].sort((a, b) => a.queuedAt.localeCompare(b.queuedAt) || a.id.localeCompare(b.id));
+    for (const item of legacyOrder) {
+      const current = this.state.items[item.id];
+      if (!current) {
+        this.state.items[item.id] = defaultItemState(this.state.nextOrder++);
+        changed = true;
+      } else if (current.order <= 0) {
+        current.order = this.state.nextOrder++;
         changed = true;
       }
-      if (current.status === 'syncing') {
+    }
+
+    for (const item of this.ordered(queue)) {
+      const current = this.state.items[item.id];
+      if (current?.status === 'syncing') {
         const at = now.toISOString();
         this.state.items[item.id] = {
           ...current,
@@ -327,8 +367,7 @@ class OfflineSyncState {
     let nextRetryAt: string | null = null;
     let orderBlocked = false;
 
-    const ordered = [...queue].sort((a, b) => a.queuedAt.localeCompare(b.queuedAt) || a.id.localeCompare(b.id));
-    for (const item of ordered) {
+    for (const item of this.ordered(queue)) {
       const state = this.stateFor(item.id);
       if (orderBlocked) blockedByOrder += 1;
       if (state.status === 'pending') pending += 1;
