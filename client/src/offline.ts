@@ -12,6 +12,12 @@ import {
 export type { Queued } from './offline-db';
 export type { SyncErrorInfo, SyncItemState, SyncSummary } from './offline-sync-state';
 
+export const OFFLINE_AUTO_SYNC_EVENT = 'book:offline-auto-sync-result';
+export interface OfflineAutoSyncResult {
+  sent: number;
+  error: string | null;
+}
+
 /**
  * Durable storage + projected-book facade + Phase 3 sync state machine.
  *
@@ -70,6 +76,9 @@ function looksLikeLoadedBook(value: unknown): value is LoadedBook {
  * Who was holding the book last time. The repository stores only a global
  * pointer to that user id; the actual profile, snapshot and queued work live in
  * separate user-scoped records.
+ *
+ * save() is called only after the server has authenticated the user. That is
+ * also the safe point to release any durable 401/auth block for that same user.
  */
 export const lastUser = {
   save: async <T extends OfflineUser>(user: T | null): Promise<void> => {
@@ -80,7 +89,9 @@ export const lastUser = {
     // state, preventing sign-in from racing durable blocked/rejected metadata.
     syncActivation = (async () => {
       await Promise.all([profileWrite, offlineSyncState.activate(user.id)]);
-      await offlineSyncState.recoverInterrupted(offlineRepository.queueAll());
+      const queue = offlineRepository.queueAll();
+      await offlineSyncState.recoverInterrupted(queue);
+      await offlineSyncState.resumeAfterAuthentication(queue);
     })();
     await syncActivation;
   },
@@ -158,6 +169,11 @@ function cancelRetryTimer(): void {
   retryAtMs = null;
 }
 
+function emitAutoSyncResult(detail: OfflineAutoSyncResult): void {
+  if (typeof window === 'undefined' || typeof CustomEvent === 'undefined') return;
+  window.dispatchEvent(new CustomEvent<OfflineAutoSyncResult>(OFFLINE_AUTO_SYNC_EVENT, { detail }));
+}
+
 function scheduleRetry(
   send: (input: EntryInput) => Promise<unknown>,
   at: string,
@@ -174,10 +190,9 @@ function scheduleRetry(
   retryTimer = setTimeout(() => {
     retryTimer = null;
     retryAtMs = null;
-    void flushOutbox(send, options).catch(() => {
-      // Durable item state already contains the actionable error. The next
-      // reconnect/sign-in/manual retry will resume without losing the item.
-    });
+    void flushOutbox(send, options)
+      .then((sent) => emitAutoSyncResult({ sent, error: null }))
+      .catch((error) => emitAutoSyncResult({ sent: 0, error: error instanceof Error ? error.message : String(error) }));
   }, Math.max(0, target - now));
 }
 
