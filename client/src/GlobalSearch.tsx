@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, type EvidenceDashboard, type LoadedBook } from './api';
+import { useModalFocus } from './dialog-a11y';
 import { searchEverything, type SearchAction, type SearchHit } from './search';
 import './global-search.css';
 
@@ -16,6 +17,9 @@ export default function GlobalSearch({ open, onOpen, onClose, book, dashboard, o
   const [active, setActive] = useState(0);
   const [remote, setRemote] = useState<SearchHit[]>([]);
   const input = useRef<HTMLInputElement>(null);
+  const dialog = useRef<HTMLElement>(null);
+  useModalFocus(open, dialog, onClose, input);
+
   const local = useMemo(
     () => searchEverything(query, book, dashboard, owner, 20),
     [query, book, dashboard, owner],
@@ -36,9 +40,6 @@ export default function GlobalSearch({ open, onOpen, onClose, book, dashboard, o
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         open ? onClose() : onOpen();
-      } else if (event.key === 'Escape' && open) {
-        event.preventDefault();
-        onClose();
       }
     };
     window.addEventListener('keydown', key);
@@ -46,9 +47,7 @@ export default function GlobalSearch({ open, onOpen, onClose, book, dashboard, o
   }, [open, onOpen, onClose]);
 
   useEffect(() => {
-    if (!open) return;
-    setActive(0);
-    window.setTimeout(() => input.current?.focus(), 0);
+    if (open) setActive(0);
   }, [open]);
 
   useEffect(() => setActive(0), [query]);
@@ -98,7 +97,7 @@ export default function GlobalSearch({ open, onOpen, onClose, book, dashboard, o
     <div className="searchbackdrop" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
-      <section className="searchdialog" role="dialog" aria-modal="true" aria-label="Search the financial book">
+      <section ref={dialog} tabIndex={-1} className="searchdialog" role="dialog" aria-modal="true" aria-label="Search the financial book">
         <div className="searchbox">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.2-4.2M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4z" /></svg>
           <input
