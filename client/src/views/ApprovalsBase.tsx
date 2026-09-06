@@ -27,6 +27,9 @@ interface EntryDashboard {
   recentActivity: Activity[]; notifications: Notification[];
 }
 type Dashboard = OwnerDashboard | EntryDashboard;
+type OwnerSection = 'access' | 'requests' | 'transfers' | 'updates';
+type EntrySection = 'cash' | 'incoming' | 'ask' | 'activity' | 'requests' | 'updates';
+interface ApprovalNavItem { id: string; label: string; count?: number }
 
 async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -92,53 +95,86 @@ export default function Approvals({ me, say }: { me: MeUser; say: (text: string,
 
 function OwnerView({ data, reload, say }: { data: OwnerDashboard; reload: () => Promise<void>; say: (t: string, bad?: boolean) => void }) {
   const pending = data.approvals.filter((a) => a.status === 'pending');
+  const decided = data.approvals.filter((a) => a.status !== 'pending');
   const assigned = useMemo(() => new Set(data.delegates.flatMap((d) => d.accountIds)), [data.delegates]);
+  const unread = data.notifications.filter((n) => !n.read_at).length;
+  const [active, setActive] = useState<OwnerSection>(() => pending.length ? 'requests' : data.pendingTransfers.length ? 'transfers' : 'access');
+  const [showHistory, setShowHistory] = useState(false);
+  const nav: ApprovalNavItem[] = [
+    { id: 'requests', label: 'Requests', count: pending.length },
+    { id: 'access', label: 'Access', count: data.delegates.length },
+    ...(data.pendingTransfers.length ? [{ id: 'transfers', label: 'Transfers', count: data.pendingTransfers.length }] : []),
+    ...(data.notifications.length ? [{ id: 'updates', label: 'Updates', count: unread }] : []),
+  ];
 
   return (
     <>
-      <Card title="Account access" aside={`${assigned.size} assigned`}>
-        <div className="approval-card-note">Choose which cash accounts each person can use.</div>
-        {data.delegates.length === 0 ? <Empty>No entry-only users yet. Add them from Access first.</Empty>
-          : <div className="approval-user-list">{data.delegates.map((d) => (
-              <Assignment key={d.id} delegate={d} accounts={data.accounts} reload={reload} say={say} />
-            ))}</div>}
-      </Card>
+      <ApprovalMobileNav items={nav} active={active} onChange={(id) => setActive(id as OwnerSection)} />
 
-      <Card title="Approval requests" aside={pending.length ? `${pending.length} waiting` : undefined}>
-        {data.approvals.length === 0 ? <Empty>No approval requests.</Empty> : data.approvals.map((a) => (
-          <div className="approval-row" key={a.id}>
-            <div className="approval-main">
-              <b>{a.requester_email || 'Entry user'}</b>
-              <span>{a.request_text}</span>
-              <small>{a.account_name || 'No account'}{a.amount ? ` · ${dollars(a.amount)}` : ''} · {when(a.created_at)}</small>
-              {a.review_note && <small>Note: {a.review_note}</small>}
-              <EvidenceLinks requestId={a.id} />
-            </div>
-            {a.status === 'pending'
-              ? <div className="approval-actions">
-                  <Decision id={a.id} status="approved" label="Approve" reload={reload} say={say} />
-                  <Decision id={a.id} status="rejected" label="Reject" reload={reload} say={say} />
+      <div className={`approval-section${active === 'access' ? ' is-active' : ''}`} data-approval-section="access">
+        <Card title="Account access" aside={`${assigned.size} assigned`}>
+          <div className="approval-card-note">Choose which cash accounts each person can use.</div>
+          {data.delegates.length === 0 ? <Empty>No entry-only users yet. Add them from Access first.</Empty>
+            : <div className="approval-user-list">{data.delegates.map((d) => (
+                <Assignment key={d.id} delegate={d} accounts={data.accounts} reload={reload} say={say} />
+              ))}</div>}
+        </Card>
+      </div>
+
+      <div className={`approval-section${active === 'requests' ? ' is-active' : ''}`} data-approval-section="requests">
+        <Card title="Approval requests" aside={pending.length ? `${pending.length} waiting` : undefined}>
+          {data.approvals.length === 0 ? <Empty>No approval requests.</Empty> : (
+            <>
+              {decided.length > 0 && (
+                <div className="approval-history-toggle">
+                  <button className="btn ghost small" type="button" onClick={() => setShowHistory((value) => !value)}>
+                    {showHistory ? 'Hide decided requests' : `Show decided requests (${decided.length})`}
+                  </button>
                 </div>
-              : <Status value={a.status} />}
-          </div>
-        ))}
-      </Card>
+              )}
+              {data.approvals.map((a) => (
+                <div className={`approval-row${a.status === 'pending' ? '' : ` approval-history-row${showHistory ? ' is-shown' : ''}`}`} key={a.id}>
+                  <div className="approval-main">
+                    <b>{a.requester_email || 'Entry user'}</b>
+                    <span>{a.request_text}</span>
+                    <small>{a.account_name || 'No account'}{a.amount ? ` · ${dollars(a.amount)}` : ''} · {when(a.created_at)}</small>
+                    {a.review_note && <small>Note: {a.review_note}</small>}
+                    <EvidenceLinks requestId={a.id} />
+                  </div>
+                  {a.status === 'pending'
+                    ? <div className="approval-actions">
+                        <Decision id={a.id} status="approved" label="Approve" reload={reload} say={say} />
+                        <Decision id={a.id} status="rejected" label="Reject" reload={reload} say={say} />
+                      </div>
+                    : <Status value={a.status} />}
+                </div>
+              ))}
+            </>
+          )}
+        </Card>
+      </div>
 
       {data.pendingTransfers.length > 0 && (
-        <Card title="Waiting for receipt confirmation">
-          {data.pendingTransfers.map((t) => (
-            <div className="approval-row" key={t.id}>
-              <div className="approval-main">
-                <b>{dollars(t.amount)} → {t.recipient_email || t.to_account_name}</b>
-                <span>{t.from_account_name} → {t.to_account_name}</span>
-                <small>{t.purpose}</small>
+        <div className={`approval-section${active === 'transfers' ? ' is-active' : ''}`} data-approval-section="transfers">
+          <Card title="Waiting for receipt confirmation">
+            {data.pendingTransfers.map((t) => (
+              <div className="approval-row" key={t.id}>
+                <div className="approval-main">
+                  <b>{dollars(t.amount)} → {t.recipient_email || t.to_account_name}</b>
+                  <span>{t.from_account_name} → {t.to_account_name}</span>
+                  <small>{t.purpose}</small>
+                </div>
               </div>
-            </div>
-          ))}
-        </Card>
+            ))}
+          </Card>
+        </div>
       )}
 
-      {data.notifications.length > 0 && <Notifications items={data.notifications} reload={reload} say={say} />}
+      {data.notifications.length > 0 && (
+        <div className={`approval-section${active === 'updates' ? ' is-active' : ''}`} data-approval-section="updates">
+          <Notifications items={data.notifications} reload={reload} say={say} />
+        </div>
+      )}
     </>
   );
 }
@@ -210,68 +246,114 @@ function Decision({ id, status, label, reload, say }: {
 }
 
 function EntryView({ data, reload, say }: { data: EntryDashboard; reload: () => Promise<void>; say: (t: string, bad?: boolean) => void }) {
+  const unread = data.notifications.filter((n) => !n.read_at).length;
+  const pendingRequests = data.approvals.filter((a) => a.status === 'pending').length;
+  const [active, setActive] = useState<EntrySection>(() => data.pendingTransfers.length ? 'incoming' : 'cash');
+  const nav: ApprovalNavItem[] = [
+    { id: 'cash', label: 'Cash', count: data.accounts.length },
+    { id: 'incoming', label: 'Incoming', count: data.pendingTransfers.length },
+    { id: 'ask', label: 'Ask owner' },
+    { id: 'activity', label: 'Activity', count: data.recentActivity.length },
+    { id: 'requests', label: 'Requests', count: pendingRequests },
+    { id: 'updates', label: 'Updates', count: unread },
+  ];
+
   return (
     <>
-      <Card title="Available cash">
-        {data.accounts.length === 0 ? <Empty>The owner has not assigned an account to you yet.</Empty> : data.accounts.map((a) => (
-          <div className="approval-row" key={a.id}>
-            <div className="approval-main">
-              <b>{a.name}</b>
-              <small>Today: +{dollars(a.todayIn || 0)} · −{dollars(a.todayOut || 0)}</small>
-            </div>
-            <strong className="num approval-balance">{dollars(a.balance)}</strong>
-          </div>
-        ))}
-        <div className="approval-note">Expenses are blocked automatically when there is not enough money.</div>
-      </Card>
+      <ApprovalMobileNav items={nav} active={active} onChange={(id) => setActive(id as EntrySection)} />
 
-      <Card title="Money waiting for you to confirm">
-        {data.pendingTransfers.length === 0 ? <Empty>No transfer is waiting.</Empty> : data.pendingTransfers.map((t) => (
-          <div className="approval-row" key={t.id}>
-            <div className="approval-main">
-              <b>{dollars(t.amount)} into {t.to_account_name}</b>
-              <span>{t.purpose}</span>
-              <small>Confirm only after you actually receive it.</small>
+      <div className={`approval-section${active === 'cash' ? ' is-active' : ''}`} data-approval-section="cash">
+        <Card title="Available cash">
+          {data.accounts.length === 0 ? <Empty>The owner has not assigned an account to you yet.</Empty> : data.accounts.map((a) => (
+            <div className="approval-row" key={a.id}>
+              <div className="approval-main">
+                <b>{a.name}</b>
+                <small>Today: +{dollars(a.todayIn || 0)} · −{dollars(a.todayOut || 0)}</small>
+              </div>
+              <strong className="num approval-balance">{dollars(a.balance)}</strong>
             </div>
-            <div className="approval-actions">
-              <button className="btn small" onClick={() => void actTransfer(t.id, 'confirm', reload, say)}>I received it</button>
-              <button className="btn ghost small danger" onClick={() => void actTransfer(t.id, 'reject', reload, say)}>Not received</button>
+          ))}
+          <div className="approval-note">Expenses are blocked automatically when there is not enough money.</div>
+        </Card>
+      </div>
+
+      <div className={`approval-section${active === 'incoming' ? ' is-active' : ''}`} data-approval-section="incoming">
+        <Card title="Money waiting for you to confirm">
+          {data.pendingTransfers.length === 0 ? <Empty>No transfer is waiting.</Empty> : data.pendingTransfers.map((t) => (
+            <div className="approval-row" key={t.id}>
+              <div className="approval-main">
+                <b>{dollars(t.amount)} into {t.to_account_name}</b>
+                <span>{t.purpose}</span>
+                <small>Confirm only after you actually receive it.</small>
+              </div>
+              <div className="approval-actions">
+                <button className="btn small" onClick={() => void actTransfer(t.id, 'confirm', reload, say)}>I received it</button>
+                <button className="btn ghost small danger" onClick={() => void actTransfer(t.id, 'reject', reload, say)}>Not received</button>
+              </div>
             </div>
-          </div>
-        ))}
-      </Card>
+          ))}
+        </Card>
+      </div>
 
-      <ApprovalForm accounts={data.accounts} reload={reload} say={say} />
+      <div className={`approval-section${active === 'ask' ? ' is-active' : ''}`} data-approval-section="ask">
+        <ApprovalForm accounts={data.accounts} reload={reload} say={say} />
+      </div>
 
-      <Card title="My recent cash activity">
-        {data.recentActivity.length === 0 ? <Empty>No activity yet.</Empty> : data.recentActivity.slice(0, 40).map((a) => (
-          <div className="approval-row" key={a.id}>
-            <div className="approval-main">
-              <b>{a.kind === 'transfer' ? '+' : '−'}{dollars(a.amount)} · {a.account_name}</b>
-              <span>{a.purpose || a.kind || 'Entry'}</span>
-              <small>{a.occurred_on}</small>
-              <EvidenceLinks entryId={a.id} />
+      <div className={`approval-section${active === 'activity' ? ' is-active' : ''}`} data-approval-section="activity">
+        <Card title="My recent cash activity">
+          {data.recentActivity.length === 0 ? <Empty>No activity yet.</Empty> : data.recentActivity.slice(0, 40).map((a) => (
+            <div className="approval-row" key={a.id}>
+              <div className="approval-main">
+                <b>{a.kind === 'transfer' ? '+' : '−'}{dollars(a.amount)} · {a.account_name}</b>
+                <span>{a.purpose || a.kind || 'Entry'}</span>
+                <small>{a.occurred_on}</small>
+                <EvidenceLinks entryId={a.id} />
+              </div>
+              {a.kind !== 'transfer' && <FileButton label="Add receipt" onFile={(f) => void uploadAndReload(f, `entryId=${encodeURIComponent(a.id)}`, reload, say)} />}
             </div>
-            {a.kind !== 'transfer' && <FileButton label="Add receipt" onFile={(f) => void uploadAndReload(f, `entryId=${encodeURIComponent(a.id)}`, reload, say)} />}
-          </div>
-        ))}
-      </Card>
+          ))}
+        </Card>
+      </div>
 
-      <Card title="My approval requests">
-        {data.approvals.length === 0 ? <Empty>No requests yet.</Empty> : data.approvals.map((a) => (
-          <div className="approval-row" key={a.id}>
-            <div className="approval-main">
-              <b>{a.request_text}</b>
-              <small>{a.account_name || ''}{a.amount ? ` · ${dollars(a.amount)}` : ''}</small>
-              <EvidenceLinks requestId={a.id} />
+      <div className={`approval-section${active === 'requests' ? ' is-active' : ''}`} data-approval-section="requests">
+        <Card title="My approval requests">
+          {data.approvals.length === 0 ? <Empty>No requests yet.</Empty> : data.approvals.map((a) => (
+            <div className="approval-row" key={a.id}>
+              <div className="approval-main">
+                <b>{a.request_text}</b>
+                <small>{a.account_name || ''}{a.amount ? ` · ${dollars(a.amount)}` : ''}</small>
+                <EvidenceLinks requestId={a.id} />
+              </div>
+              <Status value={a.status} />
             </div>
-            <Status value={a.status} />
-          </div>
-        ))}
-      </Card>
+          ))}
+        </Card>
+      </div>
 
-      <Notifications items={data.notifications} reload={reload} say={say} />
+      <div className={`approval-section${active === 'updates' ? ' is-active' : ''}`} data-approval-section="updates">
+        <Notifications items={data.notifications} reload={reload} say={say} />
+      </div>
     </>
+  );
+}
+
+function ApprovalMobileNav({ items, active, onChange }: { items: ApprovalNavItem[]; active: string; onChange: (id: string) => void }) {
+  return (
+    <div className="approval-mobile-nav" role="tablist" aria-label="Approval workflows">
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          role="tab"
+          aria-selected={active === item.id}
+          className={active === item.id ? 'is-active' : ''}
+          onClick={() => onChange(item.id)}
+        >
+          <span>{item.label}</span>
+          {item.count != null && <b className="num">{item.count}</b>}
+        </button>
+      ))}
+    </div>
   );
 }
 
