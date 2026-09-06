@@ -98,6 +98,7 @@ describe('Advanced offline Phase 3 sync state machine', () => {
   it('keeps a permanent refusal as rejected and prevents later entries from overtaking it', async () => {
     const first = await outbox.add(input('First'));
     const second = await outbox.add(input('Second'));
+    expect(outbox.status(first.id).order).toBeLessThan(outbox.status(second.id).order);
     const send = vi.fn(async () => {
       throw new ApiError('Account no longer allowed', 403, 'ACCOUNT_REVOKED');
     });
@@ -147,19 +148,18 @@ describe('Advanced offline Phase 3 sync state machine', () => {
 
   it('coalesces concurrent flush triggers so one queued entry is sent once', async () => {
     await outbox.add(input());
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const send = vi.fn(async () => { await gate; return { ok: true }; });
+    const send = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { ok: true };
+    });
 
-    const a = flushOutbox(send, { now: () => NOW, schedule: false });
-    const b = flushOutbox(send, { now: () => NOW, schedule: false });
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(send).toHaveBeenCalledTimes(1);
-    release();
+    const [a, b] = await Promise.all([
+      flushOutbox(send, { now: () => NOW, schedule: false }),
+      flushOutbox(send, { now: () => NOW, schedule: false }),
+    ]);
 
-    expect(await a).toBe(1);
-    expect(await b).toBe(1);
+    expect(a).toBe(1);
+    expect(b).toBe(1);
     expect(send).toHaveBeenCalledTimes(1);
   });
 
