@@ -148,7 +148,9 @@ export async function performReset(
       await clearBook(client);
       if (scope === 'everything') {
         // Never delete the owner who is performing the reset. Keeping one valid
-        // owner prevents a factory reset from turning into a lockout.
+        // owner prevents a factory reset from turning into a lockout. The local
+        // transaction flag is required by the database delete guard.
+        await client.query("SELECT set_config('app.allow_user_delete','true',true)");
         await client.query('DELETE FROM users WHERE id <> $1', [actorId]);
       }
     }
@@ -224,6 +226,7 @@ router.delete('/users/:id/permanent', ownerOnly, recentRequired, wrap(async (req
       return res.status(409).json({ error: 'Disable this user first, then you can permanently delete them.' });
     }
 
+    await client.query("SELECT set_config('app.allow_user_delete','true',true)");
     await client.query('DELETE FROM users WHERE id = $1', [target.id]);
     await client.query(
       `INSERT INTO audit (actor, actor_email, action, subject, detail)
