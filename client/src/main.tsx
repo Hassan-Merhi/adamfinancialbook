@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import { LanguageProvider } from './i18n';
 import { initializeOfflineStorage } from './offline';
+import { installOfflineExitGuards } from './offline-exit-guard';
 import './multilingual-offline';
 
 // Apply an explicit appearance before React renders so returning users do not
@@ -26,6 +27,7 @@ async function boot() {
   // outbox.  This also performs the one-time migration from the old global
   // localStorage keys into the correct user scope.
   await initializeOfflineStorage();
+  await installOfflineExitGuards();
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
