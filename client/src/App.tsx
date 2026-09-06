@@ -16,6 +16,7 @@ import {
   outbox,
   snapshot,
   type OfflineAutoSyncResult,
+  sendOfflineQueued,
 } from './offline';
 import { LIVE_MUTATION_EVENT, type LiveMutationDetail } from './live-refresh';
 import Entry from './Entry';
@@ -281,11 +282,11 @@ export default function App() {
   const flush = async () => {
     if (!outbox.all().length) return;
     try {
-      const sent = await flushOutbox((input) => api.addEntry(input));
+      const sent = await flushOutbox(sendOfflineQueued);
       refreshProjection();
       if (sent) {
         await Promise.all([reload(), refreshDashboard(true)]);
-        say(`${sent} ${sent === 1 ? 'entry' : 'entries'} logged from the outbox.`);
+        say(`${sent} ${sent === 1 ? 'change' : 'changes'} synced from the outbox.`);
       }
     } catch (e) {
       refreshProjection();
@@ -305,7 +306,7 @@ export default function App() {
       refreshProjection();
       if (detail?.sent) {
         void Promise.all([reload(), refreshDashboard(true)]).then(() => {
-          say(`${detail.sent} ${detail.sent === 1 ? 'entry' : 'entries'} synced after retry.`);
+          say(`${detail.sent} ${detail.sent === 1 ? 'change' : 'changes'} synced after retry.`);
         });
       } else if (detail?.error) {
         say(`Sync stopped: ${detail.error}`, true);
@@ -562,10 +563,10 @@ export default function App() {
                       : syncSummary.retrying > 0
                         ? 'Sync retrying — balances still include unsynced entries until the server confirms them. '
                         : waiting > 0
-                          ? 'Sync pending — balances include unsynced entries until the server confirms them. '
+                          ? 'Sync pending — balances include unsynced changes until the server confirms them. '
                           : ''}
                 {waiting > 0
-                  ? `${waiting} ${waiting === 1 ? 'entry remains' : 'entries remain'} stored on this device.`
+                  ? `${waiting} ${waiting === 1 ? 'change remains' : 'changes remain'} stored on this device.`
                   : 'Anything you log now will be sent when you are back.'}
               </div>
             )}
@@ -614,7 +615,7 @@ export default function App() {
                       : view === 'history' ? <History book={book} />
                       : view === 'access' ? <Access me={me.user} say={say} />
                       : view === 'approvals' ? <Approvals me={me.user} say={say} />
-                      : <Setup book={book} run={run} />}
+                      : <Setup book={book} run={run} reload={reload} say={say} onQueued={refreshProjection} />}
                   </Suspense>
                 </>
               )}

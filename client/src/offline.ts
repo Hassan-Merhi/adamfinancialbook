@@ -9,6 +9,7 @@ import type {
   OfflineVoidInput,
 } from '../../shared/offline-conflict';
 import { isOfflineRevisionInput } from '../../shared/offline-conflict';
+import { isOfflineSetupInput, offlineSetupEntityId, type OfflineSetupDraft, type OfflineSetupInput } from '../../shared/offline-setup';
 import { offlineRepository, type OfflineUser, type Queued } from './offline-db';
 import { captureOfflineContext, captureOfflineRevisionContext } from './offline-conflict';
 import { projectOfflineBook } from './offline-projection';
@@ -22,6 +23,8 @@ import {
 
 export type { Queued } from './offline-db';
 export type { SyncErrorInfo, SyncItemState, SyncSummary } from './offline-sync-state';
+export type { OfflineSetupDraft, OfflineSetupInput } from '../../shared/offline-setup';
+export { sendOfflineQueued };
 
 export const OFFLINE_AUTO_SYNC_EVENT = 'book:offline-auto-sync-result';
 export interface OfflineAutoSyncResult {
@@ -131,6 +134,26 @@ function ensureRevisionCanQueue(entry: Entry, operation: 'correct' | 'void'): vo
   }
 }
 
+function setupParentConfirmed(draft: OfflineSetupDraft, confirmed: LoadedBook): boolean {
+  if (draft.setupType === 'business') return true;
+  if (draft.setupType === 'account') return !draft.businessId || confirmed.businesses.some((item) => item.id === draft.businessId);
+  if (draft.setupType === 'project' || draft.setupType === 'person') return confirmed.businesses.some((item) => item.id === draft.businessId);
+  return !draft.accountId || confirmed.accounts.some((item) => item.id === draft.accountId);
+}
+
+async function queueSetup(draft: OfflineSetupDraft): Promise<Queued> {
+  await syncActivation;
+  const confirmed = snapshot.loadConfirmed<LoadedBook>();
+  if (!confirmed) throw new Error('Load the book once online before changing setup offline.');
+  if (!setupParentConfirmed(draft, confirmed)) {
+    throw new Error('That setup item depends on another unsynced setup change. Let the parent sync first; chained offline setup is added in the next phase.');
+  }
+  const prepared = { ...draft, offlineOperation: 'setup_create' } as OfflineSetupInput;
+  const item = await offlineRepository.queueAdd(prepared as unknown as EntryInput);
+  await offlineSyncState.registerQueued(item.id);
+  return offlineSyncState.effective([item])[0] ?? item;
+}
+
 async function queueRevision(input: OfflineRevisionInput): Promise<Queued> {
   // Phase 1's durable outbox predates revision payloads and its persistence row
   // intentionally remains shape-agnostic. The discriminated payload is stored
@@ -154,6 +177,14 @@ export const outbox = {
     await offlineSyncState.registerQueued(item.id);
     return offlineSyncState.effective([item])[0] ?? item;
   },
+  setup: (draft: OfflineSetupDraft): Promise<Queued> => queueSetup(draft),
+  setupPending: () => offlineSyncState.effective(offlineRepository.queueAll())
+    .filter((item) => isOfflineSetupInput(item.input as unknown))
+    .map((item) => ({
+      item,
+      input: item.input as unknown as OfflineSetupInput,
+      entityId: offlineSetupEntityId(item.input as unknown as OfflineSetupInput),
+    })),
   correct: async (entry: Entry, amount: number): Promise<Queued> => {
     await syncActivation;
     if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter an amount greater than zero.');
@@ -208,6 +239,9 @@ export const outbox = {
     if (!item) throw new Error('That queued entry is no longer waiting.');
     if (isOfflineRevisionInput(item.input)) {
       throw new Error('A correction or void cannot be automatically rebased. Review the latest server entry and decide again.');
+    }
+    if (isOfflineSetupInput(item.input as unknown)) {
+      throw new Error('A setup creation cannot be automatically rewritten. Retry it unchanged or discard it after review.');
     }
     const state = offlineSyncState.stateFor(id);
     const current = item.input as OfflineEntryInput;
@@ -417,7 +451,7 @@ async function runFlush(
     });
 
     try {
-      await (isOfflineRevisionInput(item.input)
+      await (isOfflineRevisionInput(item.input) || isOfflineSetupInput(item.input as unknown)
         ? sendOfflineQueued(item.input as unknown as EntryInput)
         : send(item.input));
       await offlineRepository.queueDrop(item.id);
@@ -443,8 +477,9 @@ async function runFlush(
         const kind = conflictKind(err);
         if (kind) {
           const revision = revisionFromQueued(item);
+          const setup = isOfflineSetupInput(item.input as unknown) ? item.input as unknown as OfflineSetupInput : null;
           const input = item.input as OfflineEntryInput;
-          const targetId = revision?.entryId
+          const targetId = setup ? offlineSetupEntityId(setup) : revision?.entryId
             ?? input.accountId ?? input.toAccountId ?? input.projectId ?? input.personId ?? input.linkReceiptId ?? null;
           const detail: OfflineConflictInfo = {
             kind,
@@ -486,7 +521,9 @@ async function runFlush(
         item.id,
         revision
           ? `The server refused this queued change: ${info.message}. It remains stored and later changes will not overtake it.`
-          : `The server refused this queued entry: ${info.message}. It remains stored and later entries will not overtake it.`,
+          : isOfflineSetupInput(item.input as unknown)
+            ? `The server refused this queued setup change: ${info.message}. It remains stored and later changes will not overtake it.`
+            : `The server refused this queued entry: ${info.message}. It remains stored and later entries will not overtake it.`,
       );
     }
   }
