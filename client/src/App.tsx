@@ -475,7 +475,13 @@ export default function App() {
           <div className="dockable">
             {(offline || waiting > 0) && (
               <div className="note docknote" role="status" aria-live="polite">
-                {offline ? 'No signal — these are the figures from the last time the book loaded. ' : ''}
+                {offline
+                  ? waiting > 0
+                    ? 'No signal — balances below are projected from the last confirmed book plus your unsynced entries. '
+                    : 'No signal — showing the last server-confirmed book. '
+                  : waiting > 0
+                    ? 'Sync pending — balances include unsynced entries until the server confirms them. '
+                    : ''}
                 {waiting > 0
                   ? `${waiting} ${waiting === 1 ? 'entry is' : 'entries are'} waiting to be sent, and will go the moment there is a network.`
                   : 'Anything you log now will be sent when you are back.'}
