@@ -1,0 +1,27 @@
+name: Phase 1 final sync
+
+on:
+  push:
+    branches:
+      - feature/offline-correct-void-phase1
+
+permissions:
+  contents: write
+
+jobs:
+  sync-main:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/offline-correct-void-phase1
+          fetch-depth: 0
+      - name: Merge latest main
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+          git push origin HEAD:feature/offline-correct-void-phase1
