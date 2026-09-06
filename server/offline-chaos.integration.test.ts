@@ -11,7 +11,7 @@ let child: ReturnType<typeof spawn> | null = null;
 let serverLog = '';
 
 type Session = { cookie: string };
-type Delegate = { id: string; username: string; password: string; session: Session };
+type Actor = { id: string; username: string; password: string; session: Session };
 
 function sessionCookie(response: Response): string {
   const value = response.headers.get('set-cookie');
@@ -106,8 +106,9 @@ function transferContext(
 describe.skipIf(!DATABASE_URL)('Phase 7 reconnect / chaos / multi-device PostgreSQL certification', () => {
   const owner: Session = { cookie: '' };
   let business = '';
-  let userA: Delegate;
-  let userB: Delegate;
+  let secondOwner: Actor;
+  let userA: Actor;
+  let userB: Actor;
 
   const createAccount = async (name: string, opening: number): Promise<string> => {
     const created = await request('/api/accounts', {
@@ -124,9 +125,9 @@ describe.skipIf(!DATABASE_URL)('Phase 7 reconnect / chaos / multi-device Postgre
     expect(result.response.status).toBe(200);
   };
 
-  const createDelegate = async (username: string, password: string): Promise<Delegate> => {
+  const createActor = async (username: string, password: string, role: 'owner' | 'entry'): Promise<Actor> => {
     const created = await request('/api/users', {
-      method: 'POST', session: owner, body: { email: username, password, role: 'entry' },
+      method: 'POST', session: owner, body: { email: username, password, role },
     });
     expect(created.response.status).toBe(201);
     const login = await request('/api/login', { method: 'POST', body: { email: username, password } });
@@ -170,8 +171,9 @@ describe.skipIf(!DATABASE_URL)('Phase 7 reconnect / chaos / multi-device Postgre
     expect(createdBusiness.response.status).toBe(201);
     business = createdBusiness.data.id as string;
 
-    userA = await createDelegate('phase7-device-a', 'DelegateA!2026');
-    userB = await createDelegate('phase7-device-b', 'DelegateB!2026');
+    secondOwner = await createActor('phase7-owner-b', 'OwnerBPass!2026', 'owner');
+    userA = await createActor('phase7-device-a', 'DelegateA!2026', 'entry');
+    userB = await createActor('phase7-device-b', 'DelegateB!2026', 'entry');
   }, 30_000);
 
   afterAll(async () => {
@@ -218,11 +220,8 @@ describe.skipIf(!DATABASE_URL)('Phase 7 reconnect / chaos / multi-device Postgre
 
   it('serializes two different users spending the same stale account so only one can post', async () => {
     const shared = await createAccount('Shared Multi User Cash', 100);
-    // Delegated accounts intentionally belong to one entry user. Owner + one
-    // delegate still provides two distinct authenticated users racing the same
-    // financial balance without violating the access model.
-    await setAccess(userB.id, [shared]);
-
+    // Two independent owners have identical authority to the same account, so
+    // the result is decided only by the atomic offline balance validation/post.
     const body = (clientRef: string) => ({
       occurredOn: DAY,
       kind: 'expense',
@@ -235,15 +234,15 @@ describe.skipIf(!DATABASE_URL)('Phase 7 reconnect / chaos / multi-device Postgre
     });
 
     const [a, b] = await Promise.all([
-      request('/api/entries', { method: 'POST', session: owner, body: body('q_phase7_owner_user') }),
-      request('/api/entries', { method: 'POST', session: userB.session, body: body('q_phase7_delegate_user') }),
+      request('/api/entries', { method: 'POST', session: owner, body: body('q_phase7_owner_a') }),
+      request('/api/entries', { method: 'POST', session: secondOwner.session, body: body('q_phase7_owner_b') }),
     ]);
 
     expect([a.response.status, b.response.status].sort()).toEqual([201, 409]);
     const failed = a.response.status === 409 ? a : b;
     expect(['OFFLINE_CONFLICT_STALE_BALANCE', 'OFFLINE_CONFLICT_INSUFFICIENT_FUNDS']).toContain(failed.data.code);
     expect(Number((await db<{ n: string }>(
-      `SELECT count(*) AS n FROM entries WHERE client_ref IN ('q_phase7_owner_user','q_phase7_delegate_user')`,
+      `SELECT count(*) AS n FROM entries WHERE client_ref IN ('q_phase7_owner_a','q_phase7_owner_b')`,
     ))[0].n)).toBe(1);
 
     const book = await request('/api/book', { session: owner });
@@ -254,7 +253,6 @@ describe.skipIf(!DATABASE_URL)('Phase 7 reconnect / chaos / multi-device Postgre
     const source = await createAccount('Transfer Source', 200);
     const destinationA = await createAccount('Transfer Destination A', 0);
     const destinationB = await createAccount('Transfer Destination B', 0);
-    await setAccess(userB.id, [source, destinationA, destinationB]);
 
     const body = (clientRef: string, destination: string) => ({
       occurredOn: DAY,
@@ -270,10 +268,10 @@ describe.skipIf(!DATABASE_URL)('Phase 7 reconnect / chaos / multi-device Postgre
 
     const [a, b] = await Promise.all([
       request('/api/entries', {
-        method: 'POST', session: owner, body: body('q_phase7_transfer_owner', destinationA),
+        method: 'POST', session: owner, body: body('q_phase7_transfer_owner_a', destinationA),
       }),
       request('/api/entries', {
-        method: 'POST', session: userB.session, body: body('q_phase7_transfer_delegate', destinationB),
+        method: 'POST', session: secondOwner.session, body: body('q_phase7_transfer_owner_b', destinationB),
       }),
     ]);
 
@@ -281,7 +279,7 @@ describe.skipIf(!DATABASE_URL)('Phase 7 reconnect / chaos / multi-device Postgre
     const failed = a.response.status === 409 ? a : b;
     expect(['OFFLINE_CONFLICT_STALE_BALANCE', 'OFFLINE_CONFLICT_INSUFFICIENT_FUNDS']).toContain(failed.data.code);
     expect(Number((await db<{ n: string }>(
-      `SELECT count(*) AS n FROM entries WHERE client_ref IN ('q_phase7_transfer_owner','q_phase7_transfer_delegate')`,
+      `SELECT count(*) AS n FROM entries WHERE client_ref IN ('q_phase7_transfer_owner_a','q_phase7_transfer_owner_b')`,
     ))[0].n)).toBe(1);
 
     const book = await request('/api/book', { session: owner });
