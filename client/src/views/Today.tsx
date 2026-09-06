@@ -13,7 +13,7 @@ export default function Today({ book, open, goto, attentionCount }: {
   const date = today();
   const activity = ordered(book.entries);
   const enteredToday = activity.filter((entry) => entry.occurredOn === date);
-  const recent = [...activity].reverse().slice(0, 6);
+  const recent = [...activity].reverse().slice(0, 4);
   const pendingToday = enteredToday.filter(isProjectedEntry).length;
 
   const accountMoves = enteredToday.flatMap((entry) =>
