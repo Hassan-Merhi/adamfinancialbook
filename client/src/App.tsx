@@ -7,7 +7,16 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { api, NotSignedIn, type EvidenceDashboard, type LoadedBook, type Me } from './api';
 import SignIn from './views/SignIn';
-import { flushOutbox, lastUser, looksOffline, outbox, snapshot } from './offline';
+import {
+  OFFLINE_AUTO_SYNC_EVENT,
+  SyncBlockedError,
+  flushOutbox,
+  lastUser,
+  looksOffline,
+  outbox,
+  snapshot,
+  type OfflineAutoSyncResult,
+} from './offline';
 import Entry from './Entry';
 import Today from './views/Today';
 import type { Focus } from './views/Statement';
@@ -237,19 +246,36 @@ export default function App() {
       }
     } catch (e) {
       refreshProjection();
-      say(`One queued entry was refused: ${(e as Error).message}`, true);
+      if (e instanceof SyncBlockedError && e.reason === 'auth') {
+        say('Sync paused because your session expired. Sign in again; your queued entries are still stored safely.', true);
+      } else {
+        say(`Sync stopped: ${(e as Error).message}`, true);
+      }
     }
   };
 
   useEffect(() => {
     const online = () => { setOffline(false); void flush(); void refreshDashboard(true); };
     const gone = () => setOffline(true);
+    const autoSyncResult = (event: Event) => {
+      const detail = (event as CustomEvent<OfflineAutoSyncResult>).detail;
+      refreshProjection();
+      if (detail?.sent) {
+        void Promise.all([reload(), refreshDashboard(true)]).then(() => {
+          say(`${detail.sent} ${detail.sent === 1 ? 'entry' : 'entries'} synced after retry.`);
+        });
+      } else if (detail?.error) {
+        say(`Sync stopped: ${detail.error}`, true);
+      }
+    };
     window.addEventListener('online', online);
     window.addEventListener('offline', gone);
+    window.addEventListener(OFFLINE_AUTO_SYNC_EVENT, autoSyncResult);
     if (navigator.onLine) void flush();
     return () => {
       window.removeEventListener('online', online);
       window.removeEventListener('offline', gone);
+      window.removeEventListener(OFFLINE_AUTO_SYNC_EVENT, autoSyncResult);
     };
   }, [me?.user?.id]);
 
@@ -339,6 +365,7 @@ export default function App() {
   const visibleMore = MORE_NAV.filter((item) => !item.ownerOnly || me.user!.role === 'owner');
   const moreIsCurrent = !focus && visibleMore.some((item) => item.id === view);
   const attention = attentionCounts(book, dashboard, missingReceiptCount);
+  const syncSummary = outbox.summary();
 
   const handlePromptAction = (action: PromptAction) => {
     if (action.mode === 'focus') {
@@ -485,11 +512,17 @@ export default function App() {
                   ? waiting > 0
                     ? 'No signal — balances below are projected from the last confirmed book plus your unsynced entries. '
                     : 'No signal — showing the last server-confirmed book. '
-                  : waiting > 0
-                    ? 'Sync pending — balances include unsynced entries until the server confirms them. '
-                    : ''}
+                  : syncSummary.rejected > 0
+                    ? 'Sync stopped — a server-refused entry is still stored and later entries are blocked behind it. '
+                    : syncSummary.blockedAuth > 0
+                      ? 'Sync paused — sign in again to safely retry the stored entries. '
+                      : syncSummary.retrying > 0
+                        ? 'Sync retrying — balances still include unsynced entries until the server confirms them. '
+                        : waiting > 0
+                          ? 'Sync pending — balances include unsynced entries until the server confirms them. '
+                          : ''}
                 {waiting > 0
-                  ? `${waiting} ${waiting === 1 ? 'entry is' : 'entries are'} waiting to be sent, and will go the moment there is a network.`
+                  ? `${waiting} ${waiting === 1 ? 'entry remains' : 'entries remain'} stored on this device.`
                   : 'Anything you log now will be sent when you are back.'}
               </div>
             )}

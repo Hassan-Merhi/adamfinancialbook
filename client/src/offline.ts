@@ -1,24 +1,54 @@
-import type { LoadedBook } from './api';
+import { ApiError, NotSignedIn, type LoadedBook } from './api';
 import type { EntryInput } from '../../shared/types';
 import { offlineRepository, type OfflineUser, type Queued } from './offline-db';
 import { projectOfflineBook } from './offline-projection';
+import {
+  offlineSyncState,
+  type SyncErrorInfo,
+  type SyncItemState,
+  type SyncSummary,
+} from './offline-sync-state';
 
 export type { Queued } from './offline-db';
+export type { SyncErrorInfo, SyncItemState, SyncSummary } from './offline-sync-state';
+
+export const OFFLINE_AUTO_SYNC_EVENT = 'book:offline-auto-sync-result';
+export interface OfflineAutoSyncResult {
+  sent: number;
+  error: string | null;
+}
 
 /**
- * Phase 1 durable storage + Phase 2 projected-book facade.
+ * Durable storage + projected-book facade + Phase 3 sync state machine.
  *
- * IndexedDB keeps the last server-confirmed snapshot untouched. Reads used by
- * the app derive a projected view by layering the active user's queued entries
- * on top, so offline balances move immediately without ever becoming confirmed
- * data until the server accepts those entries.
+ * The last server-confirmed snapshot is immutable. Unsynced entries stay in the
+ * per-user outbox and get durable state from Phase 1's reserved syncMeta store.
+ * A server acknowledgement removes an outbox row; no failure path silently
+ * drops financial work.
  */
+let syncActivation: Promise<void> = Promise.resolve();
+
 export async function initializeOfflineStorage(): Promise<void> {
   await offlineRepository.initialize();
+  const user = offlineRepository.getActiveUser<OfflineUser>();
+  syncActivation = (async () => {
+    if (user?.id) {
+      await offlineSyncState.activate(user.id);
+      await offlineSyncState.recoverInterrupted(offlineRepository.queueAll());
+    } else {
+      offlineSyncState.deactivate();
+    }
+  })();
+  await syncActivation;
 }
 
 export async function resetOfflineStorageForTests(): Promise<void> {
+  cancelRetryTimer();
+  await syncActivation.catch(() => undefined);
+  await offlineSyncState.resetForTests();
   await offlineRepository.resetForTests();
+  syncActivation = Promise.resolve();
+  flushing = null;
 }
 
 export const snapshot = {
@@ -46,53 +76,278 @@ function looksLikeLoadedBook(value: unknown): value is LoadedBook {
  * Who was holding the book last time. The repository stores only a global
  * pointer to that user id; the actual profile, snapshot and queued work live in
  * separate user-scoped records.
+ *
+ * save() is called only after the server has authenticated the user. That is
+ * also the safe point to release any durable 401/auth block for that same user.
  */
 export const lastUser = {
-  save: <T extends OfflineUser>(user: T | null) => user ? offlineRepository.setActiveUser(user) : Promise.resolve(),
+  save: async <T extends OfflineUser>(user: T | null): Promise<void> => {
+    if (!user) return;
+    const profileWrite = offlineRepository.setActiveUser(user);
+    // Both in-memory scopes switch synchronously before either IndexedDB await.
+    // flushOutbox then awaits this activation barrier before reading any queue
+    // state, preventing sign-in from racing durable blocked/rejected metadata.
+    syncActivation = (async () => {
+      await Promise.all([profileWrite, offlineSyncState.activate(user.id)]);
+      const queue = offlineRepository.queueAll();
+      await offlineSyncState.recoverInterrupted(queue);
+      await offlineSyncState.resumeAfterAuthentication(queue);
+    })();
+    await syncActivation;
+  },
   load: <T>(): T | null => offlineRepository.getActiveUser<T>(),
-  clear: () => offlineRepository.clearSession(),
+  clear: (): Promise<void> => {
+    offlineSyncState.deactivate();
+    syncActivation = Promise.resolve();
+    cancelRetryTimer();
+    return offlineRepository.clearSession();
+  },
 };
 
 export const outbox = {
+  /** Every durable financial write still waiting for a server acknowledgement. */
   all: (): Queued[] => offlineRepository.queueAll(),
-  add: (input: EntryInput): Promise<Queued> => offlineRepository.queueAdd(input),
-  drop: (id: string): Promise<void> => offlineRepository.queueDrop(id),
-  clear: (): Promise<void> => offlineRepository.queueClear(),
-  whenIdle: (): Promise<void> => offlineRepository.whenIdle(),
+  records: (): Queued[] => offlineRepository.queueAll(),
+  add: async (input: EntryInput): Promise<Queued> => {
+    await syncActivation;
+    const item = await offlineRepository.queueAdd(input);
+    await offlineSyncState.registerQueued(item.id);
+    return item;
+  },
+  drop: async (id: string): Promise<void> => {
+    await offlineRepository.queueDrop(id);
+    await offlineSyncState.remove(id);
+  },
+  clear: async (): Promise<void> => {
+    const ids = offlineRepository.queueAll().map((item) => item.id);
+    await offlineRepository.queueClear();
+    await offlineSyncState.clearQueueState(ids);
+  },
+  retry: (id: string): Promise<void> => offlineSyncState.retry(id),
+  status: (id: string): SyncItemState => offlineSyncState.stateFor(id),
+  summary: (): SyncSummary => offlineSyncState.summary(offlineRepository.queueAll()),
+  whenIdle: async (): Promise<void> => {
+    await Promise.all([offlineRepository.whenIdle(), offlineSyncState.whenIdle()]);
+  },
 };
 
-/** True when the browser says there is no network — treat anything else as a real error. */
+/** True when the browser says there is no network — treat fetch TypeError as unreachable too. */
 export function looksOffline(err: unknown): boolean {
-  return !navigator.onLine || (err instanceof TypeError); // fetch throws TypeError when it cannot reach the host
+  const browserOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+  return browserOffline || err instanceof TypeError;
+}
+
+export type SyncBlockReason = 'rejected' | 'auth';
+
+export class SyncBlockedError extends Error {
+  reason: SyncBlockReason;
+  itemId: string;
+  constructor(reason: SyncBlockReason, itemId: string, message: string) {
+    super(message);
+    this.reason = reason;
+    this.itemId = itemId;
+  }
+}
+
+export interface FlushOptions {
+  now?: () => number;
+  schedule?: boolean;
+}
+
+const RETRY_BASE_MS = 2_000;
+const RETRY_MAX_MS = 5 * 60_000;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let retryAtMs: number | null = null;
+
+function retryDelayMs(attempts: number): number {
+  return Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** Math.max(0, Math.min(attempts - 1, 8)));
+}
+
+function cancelRetryTimer(): void {
+  if (retryTimer !== null) clearTimeout(retryTimer);
+  retryTimer = null;
+  retryAtMs = null;
+}
+
+function emitAutoSyncResult(detail: OfflineAutoSyncResult): void {
+  if (typeof window === 'undefined' || typeof CustomEvent === 'undefined') return;
+  window.dispatchEvent(new CustomEvent<OfflineAutoSyncResult>(OFFLINE_AUTO_SYNC_EVENT, { detail }));
+}
+
+function scheduleRetry(
+  send: (input: EntryInput) => Promise<unknown>,
+  at: string,
+  options: FlushOptions,
+): void {
+  if (options.schedule === false || typeof setTimeout === 'undefined') return;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  const target = Date.parse(at);
+  if (!Number.isFinite(target)) return;
+  if (retryTimer !== null && retryAtMs !== null && retryAtMs <= target) return;
+  cancelRetryTimer();
+  retryAtMs = target;
+  const now = options.now?.() ?? Date.now();
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    retryAtMs = null;
+    void flushOutbox(send, options)
+      .then((sent) => emitAutoSyncResult({ sent, error: null }))
+      .catch((error) => emitAutoSyncResult({ sent: 0, error: error instanceof Error ? error.message : String(error) }));
+  }, Math.max(0, target - now));
+}
+
+function errorInfo(err: unknown, at: string): SyncErrorInfo {
+  if (err instanceof NotSignedIn) {
+    return { kind: 'auth', message: err.message, status: 401, code: null, at };
+  }
+  if (looksOffline(err)) {
+    return {
+      kind: 'network',
+      message: err instanceof Error ? err.message : 'The server could not be reached.',
+      status: null,
+      code: null,
+      at,
+    };
+  }
+  if (err instanceof ApiError) {
+    return {
+      kind: 'server',
+      message: err.message,
+      status: err.status,
+      code: err.code ?? null,
+      at,
+    };
+  }
+  return {
+    kind: 'server',
+    message: err instanceof Error ? err.message : 'The sync attempt failed.',
+    status: null,
+    code: null,
+    at,
+  };
+}
+
+function retryable(err: unknown): boolean {
+  if (looksOffline(err)) return true;
+  if (!(err instanceof ApiError)) return false;
+  return err.status === 408 || err.status === 425 || err.status === 429 || err.status >= 500;
 }
 
 /**
- * Sends what is waiting, oldest first, and stops at the first failure so the
- * order in which things happened is never scrambled.
+ * Sends durable outbox entries oldest first. Only a confirmed acknowledgement
+ * removes an entry. Transient failures wait and retry with the same clientRef;
+ * auth failures and permanent server refusals remain stored and stop later
+ * financial writes from overtaking them.
  */
 let flushing: Promise<number> | null = null;
 
-export async function flushOutbox(send: (input: EntryInput) => Promise<unknown>): Promise<number> {
+export async function flushOutbox(
+  send: (input: EntryInput) => Promise<unknown>,
+  options: FlushOptions = {},
+): Promise<number> {
   if (flushing) return flushing;
-  flushing = runFlush(send).finally(() => { flushing = null; });
+  flushing = runFlush(send, options).finally(() => { flushing = null; });
   return flushing;
 }
 
-async function runFlush(send: (input: EntryInput) => Promise<unknown>): Promise<number> {
+async function runFlush(
+  send: (input: EntryInput) => Promise<unknown>,
+  options: FlushOptions,
+): Promise<number> {
+  await syncActivation;
+  const rawQueue = offlineSyncState.ordered(offlineRepository.queueAll());
+  if (!rawQueue.length) {
+    cancelRetryTimer();
+    return 0;
+  }
+
+  const nowMs = options.now ?? Date.now;
+  const runAt = new Date(nowMs()).toISOString();
+  await offlineSyncState.noteRun(runAt);
   let sent = 0;
-  for (const item of outbox.all()) {
+
+  for (const item of rawQueue) {
+    let state = offlineSyncState.stateFor(item.id);
+
+    if (state.status === 'rejected') {
+      throw new SyncBlockedError(
+        'rejected',
+        item.id,
+        state.lastError?.message || 'A queued entry was rejected by the server and needs review before later entries can sync.',
+      );
+    }
+    if (state.status === 'blocked_auth') {
+      throw new SyncBlockedError(
+        'auth',
+        item.id,
+        state.lastError?.message || 'Sign in again before this queued entry can sync.',
+      );
+    }
+
+    if (state.status === 'retry_wait' && state.nextAttemptAt) {
+      const due = Date.parse(state.nextAttemptAt);
+      if (Number.isFinite(due) && due > nowMs()) {
+        scheduleRetry(send, state.nextAttemptAt, options);
+        break;
+      }
+    }
+
+    const attemptAt = new Date(nowMs()).toISOString();
+    state = await offlineSyncState.updateItem(item.id, {
+      status: 'syncing',
+      attempts: state.attempts + 1,
+      lastAttemptAt: attemptAt,
+      nextAttemptAt: null,
+      lastError: null,
+    });
+
     try {
       await send(item.input);
-      // Do not report completion until the durable queue record is gone.
-      await outbox.drop(item.id);
+      // Acknowledgement first, durable queue removal second. If the browser dies
+      // between them, startup recovery retries the same clientRef safely.
+      await offlineRepository.queueDrop(item.id);
+      await offlineSyncState.remove(item.id);
+      const successAt = new Date(nowMs()).toISOString();
+      await offlineSyncState.noteSuccess(successAt);
       sent += 1;
     } catch (err) {
-      if (looksOffline(err)) break;
-      // Phase 3 will replace this terminal refusal behavior with richer durable
-      // rejected/conflict states. Phase 2 preserves the existing semantics.
-      await outbox.drop(item.id);
-      throw err;
+      const failedAt = new Date(nowMs()).toISOString();
+      const info = errorInfo(err, failedAt);
+      await offlineSyncState.noteError(info);
+
+      if (err instanceof NotSignedIn) {
+        await offlineSyncState.updateItem(item.id, {
+          status: 'blocked_auth',
+          nextAttemptAt: null,
+          lastError: info,
+        });
+        throw new SyncBlockedError('auth', item.id, 'Your session expired. Sign in again; the queued entry is still safely stored.');
+      }
+
+      if (retryable(err)) {
+        const nextAttemptAt = new Date(nowMs() + retryDelayMs(state.attempts)).toISOString();
+        await offlineSyncState.updateItem(item.id, {
+          status: 'retry_wait',
+          nextAttemptAt,
+          lastError: info,
+        });
+        scheduleRetry(send, nextAttemptAt, options);
+        break;
+      }
+
+      await offlineSyncState.updateItem(item.id, {
+        status: 'rejected',
+        nextAttemptAt: null,
+        lastError: info,
+      });
+      throw new SyncBlockedError(
+        'rejected',
+        item.id,
+        `The server refused this queued entry: ${info.message}. It remains stored and later entries will not overtake it.`,
+      );
     }
   }
+
+  if (!offlineRepository.queueAll().length) cancelRetryTimer();
   return sent;
 }

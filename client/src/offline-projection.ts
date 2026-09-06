@@ -1,5 +1,6 @@
 import type { LoadedBook } from './api';
 import type { Queued } from './offline-db';
+import { offlineSyncState } from './offline-sync-state';
 import { round, withLoanEffects } from '../../shared/engine';
 import type { Effect, Entry, Person } from '../../shared/types';
 
@@ -12,13 +13,15 @@ export function isProjectedEntry(entry: Pick<Entry, 'id'>): boolean {
 /**
  * Build the view the user should see while writes are waiting to sync.
  *
- * The confirmed server snapshot is never mutated or rewritten.  Queued entries
+ * The confirmed server snapshot is never mutated or rewritten. Queued entries
  * are materialized as synthetic ledger rows and their effects are applied only
- * to a cloned balance snapshot.  Once the queue is gone, this function returns
- * the confirmed book unchanged.
+ * to a cloned balance snapshot. A permanently rejected row stops the projected
+ * prefix: later financial writes cannot pretend they sit on a server state that
+ * was never accepted.
  */
 export function projectOfflineBook(confirmed: LoadedBook, queue: Queued[]): LoadedBook {
-  if (!queue.length) return confirmed;
+  const projectable = offlineSyncState.projectablePrefix(queue);
+  if (!projectable.length) return confirmed;
 
   const alreadyConfirmed = new Set(
     confirmed.entries
@@ -26,7 +29,7 @@ export function projectOfflineBook(confirmed: LoadedBook, queue: Queued[]): Load
       .filter((ref): ref is string => typeof ref === 'string' && !!ref),
   );
 
-  const pending = [...queue]
+  const pending = [...projectable]
     .sort((a, b) => a.queuedAt.localeCompare(b.queuedAt) || a.id.localeCompare(b.id))
     .filter((item) => {
       const ref = item.input.clientRef ?? item.id;

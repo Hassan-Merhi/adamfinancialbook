@@ -17,7 +17,7 @@
     "db:integrity": "tsx server/integrity-check.ts",
     "db:setup": "tsx server/setup-db.ts",
     "test": "vitest run",
-    "test:integration": "vitest run --no-file-parallelism server/api.integration.test.ts server/security.integration.test.ts server/performance-scale.integration.test.ts server/translation.integration.test.ts server/recovery.integration.test.ts",
+    "test:integration": "vitest run --no-file-parallelism server/api.integration.test.ts server/security.integration.test.ts server/performance-scale.integration.test.ts server/translation.integration.test.ts server/recovery.integration.test.ts server/offline-sync.integration.test.ts",
     "test:financial-e2e": "vitest run server/financial-e2e.integration.test.ts",
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm test -- --passWithNoTests && npm run build",

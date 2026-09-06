@@ -39,7 +39,8 @@ const [
   { operationsRouter },
   { requestTelemetry },
   { healthRouter },
-  { publicSecurityRouter },
+  { publicSecurityRouter, protectedSecurityRouter },
+  { offlineSyncRouter },
 ] = await Promise.all([
   import('./delegation.js'),
   import('./expense-review.js'),
@@ -48,6 +49,7 @@ const [
   import('./observability.js'),
   import('./health.js'),
   import('./security-gate.js'),
+  import('./offline-sync.js'),
 ]);
 
 publicSecurityRouter.use(healthRouter);
@@ -55,6 +57,10 @@ publicSecurityRouter.use(healthRouter);
 // public routes finish first; this fallthrough therefore observes every other
 // /api request before protected/delegated/core routing can finish it.
 publicSecurityRouter.use(requestTelemetry);
+// Offline retries carrying a clientRef must reach the idempotent handoff route
+// before the legacy delegation route. Requests without a clientRef call next()
+// and preserve the existing production behavior unchanged.
+protectedSecurityRouter.use(offlineSyncRouter);
 delegationGate.use(expenseReviewRouter);
 delegationGate.use(resetRouter);
 delegationGate.use(operationsRouter);
