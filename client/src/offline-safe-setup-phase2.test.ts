@@ -44,7 +44,7 @@ describe('Offline safe setup Phase 2', () => {
     expect(projected.reminders.find((item) => item.id === reminderId)?.what).toBe('Offline reminder');
   });
 
-  it('keeps destructive and dependency-sensitive setup operations online-only', () => {
+  it('keeps destructive setup operations online-only while Phase 3 permits queued parents', () => {
     const setup = read('client/src/views/Setup.tsx');
     expect(setup).toContain("outbox.setup({ setupType: 'business'");
     expect(setup).toContain("outbox.setup({ setupType: 'account'");
@@ -54,7 +54,7 @@ describe('Offline safe setup Phase 2', () => {
     expect(setup).toContain('api.setLoan(');
     expect(setup).toContain('api.clearReminder(');
     expect(setup).toContain('confirmedBusinesses');
-    expect(setup).toContain('confirmedAccounts');
+    expect(setup).toContain('availableAccounts');
   });
 
   it('routes offline setup through the protected idempotent server boundary before legacy setup routes', () => {

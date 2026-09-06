@@ -9,7 +9,8 @@ import type {
   OfflineVoidInput,
 } from '../../shared/offline-conflict';
 import { isOfflineRevisionInput } from '../../shared/offline-conflict';
-import { isOfflineSetupInput, offlineSetupEntityId, type OfflineSetupDraft, type OfflineSetupInput } from '../../shared/offline-setup';
+import { isOfflineSetupInput, offlineSetupEntityId, offlineSetupParentEntityId, type OfflineSetupDraft, type OfflineSetupInput } from '../../shared/offline-setup';
+import { orderQueuedByDependencies, queuedDependents } from './offline-dependencies';
 import { offlineRepository, type OfflineUser, type Queued } from './offline-db';
 import { captureOfflineContext, captureOfflineRevisionContext } from './offline-conflict';
 import { projectOfflineBook } from './offline-projection';
@@ -134,21 +135,41 @@ function ensureRevisionCanQueue(entry: Entry, operation: 'correct' | 'void'): vo
   }
 }
 
-function setupParentConfirmed(draft: OfflineSetupDraft, confirmed: LoadedBook): boolean {
-  if (draft.setupType === 'business') return true;
-  if (draft.setupType === 'account') return !draft.businessId || confirmed.businesses.some((item) => item.id === draft.businessId);
-  if (draft.setupType === 'project' || draft.setupType === 'person') return confirmed.businesses.some((item) => item.id === draft.businessId);
-  return !draft.accountId || confirmed.accounts.some((item) => item.id === draft.accountId);
+function confirmedSetupParent(draft: OfflineSetupDraft, confirmed: LoadedBook, parentId: string): boolean {
+  if (draft.setupType === 'account' || draft.setupType === 'project' || draft.setupType === 'person') {
+    return confirmed.businesses.some((item) => item.id === parentId);
+  }
+  if (draft.setupType === 'reminder') return confirmed.accounts.some((item) => item.id === parentId);
+  return true;
+}
+
+function setupDependencies(draft: OfflineSetupDraft, confirmed: LoadedBook): string[] {
+  const parentId = offlineSetupParentEntityId(draft);
+  if (!parentId || confirmedSetupParent(draft, confirmed, parentId)) return [];
+
+  const pending = offlineSyncState.effective(offlineRepository.queueAll());
+  const parent = pending.find((item) => {
+    if (!isOfflineSetupInput(item.input as unknown)) return false;
+    const setup = item.input as unknown as OfflineSetupInput;
+    if (offlineSetupEntityId(setup) !== parentId) return false;
+    if (draft.setupType === 'reminder') return setup.setupType === 'account';
+    return setup.setupType === 'business';
+  });
+  if (!parent) throw new Error('That setup item points to a parent that is not available offline. Reload once online or choose an existing queued parent.');
+
+  const state = offlineSyncState.stateFor(parent.id);
+  if (state.status === 'conflict' || state.status === 'rejected') {
+    throw new Error('That parent setup change needs review before you can add more offline changes under it.');
+  }
+  return [parent.id];
 }
 
 async function queueSetup(draft: OfflineSetupDraft): Promise<Queued> {
   await syncActivation;
   const confirmed = snapshot.loadConfirmed<LoadedBook>();
   if (!confirmed) throw new Error('Load the book once online before changing setup offline.');
-  if (!setupParentConfirmed(draft, confirmed)) {
-    throw new Error('That setup item depends on another unsynced setup change. Let the parent sync first; chained offline setup is added in the next phase.');
-  }
-  const prepared = { ...draft, offlineOperation: 'setup_create' } as OfflineSetupInput;
+  const offlineDependsOn = setupDependencies(draft, confirmed);
+  const prepared = { ...draft, offlineOperation: 'setup_create', offlineDependsOn } as OfflineSetupInput;
   const item = await offlineRepository.queueAdd(prepared as unknown as EntryInput);
   await offlineSyncState.registerQueued(item.id);
   return offlineSyncState.effective([item])[0] ?? item;
@@ -212,6 +233,10 @@ export const outbox = {
     return queueRevision(prepared);
   },
   drop: async (id: string): Promise<void> => {
+    const dependents = queuedDependents(offlineRepository.queueAll(), id);
+    if (dependents.length) {
+      throw new Error(`This queued setup change still has ${dependents.length} dependent ${dependents.length === 1 ? 'change' : 'changes'}. Discard the dependent change first.`);
+    }
     await offlineRepository.queueDrop(id);
     await offlineSyncState.remove(id);
   },
@@ -396,7 +421,7 @@ async function runFlush(
   options: FlushOptions,
 ): Promise<number> {
   await syncActivation;
-  const rawQueue = offlineSyncState.effective(offlineRepository.queueAll());
+  const rawQueue = orderQueuedByDependencies(offlineSyncState.effective(offlineRepository.queueAll()));
   if (!rawQueue.length) {
     cancelRetryTimer();
     return 0;

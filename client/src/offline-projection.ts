@@ -1,5 +1,6 @@
 import type { LoadedBook } from './api';
 import type { Queued } from './offline-db';
+import { orderQueuedByDependencies } from './offline-dependencies';
 import { offlineSyncState } from './offline-sync-state';
 import { round, withLoanEffects } from '../../shared/engine';
 import { isOfflineCorrectionInput, isOfflineRevisionInput } from '../../shared/offline-conflict';
@@ -52,7 +53,7 @@ export function projectOfflineBook(confirmed: LoadedBook, queue: Queued[]): Load
   let receipts = confirmed.receipts.map((receipt) => ({ ...receipt }));
   const projectedEntries: Entry[] = [];
 
-  for (const item of [...projectable].sort((a, b) => a.queuedAt.localeCompare(b.queuedAt) || a.id.localeCompare(b.id))) {
+  for (const item of orderQueuedByDependencies(projectable)) {
     if (isOfflineSetupInput(item.input as unknown)) {
       const setup = item.input as unknown as OfflineSetupInput;
       const id = offlineSetupEntityId(setup);
