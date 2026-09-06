@@ -20,6 +20,7 @@ export default function Files({ book }: { book: LoadedBook }) {
   const [person, setPerson] = useState('all');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const request = useRef(0);
 
   useEffect(() => {
@@ -60,6 +61,15 @@ export default function Files({ book }: { book: LoadedBook }) {
     return () => window.clearTimeout(timer);
   }, [search, kind, source, account, person, from, to]);
 
+  useEffect(() => {
+    if (!filtersOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setFiltersOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [filtersOpen]);
+
   const loadMore = async () => {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
@@ -85,15 +95,19 @@ export default function Files({ book }: { book: LoadedBook }) {
     }
   };
 
-  const filtered = !!(search || kind !== 'all' || source !== 'all' || account !== 'all' || person !== 'all' || from || to);
-  const clearFilters = () => {
-    setSearch('');
+  const advancedFilterCount = [kind !== 'all', source !== 'all', account !== 'all', person !== 'all', !!from, !!to].filter(Boolean).length;
+  const filtered = !!(search || advancedFilterCount);
+  const clearAdvancedFilters = () => {
     setKind('all');
     setSource('all');
     setAccount('all');
     setPerson('all');
     setFrom('');
     setTo('');
+  };
+  const clearFilters = () => {
+    setSearch('');
+    clearAdvancedFilters();
   };
 
   return (
@@ -103,18 +117,34 @@ export default function Files({ book }: { book: LoadedBook }) {
         <div className="files-count"><b className="num">{files.length}</b><span>{nextCursor ? 'loaded · more available' : 'loaded'}</span></div>
       </div>
 
+      <div className="files-mobile-tools">
+        <label className="files-mobile-search">
+          <span className="sr-only">Search files</span>
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search receipts & files" />
+        </label>
+        <button
+          className={`btn ghost files-filter-toggle${advancedFilterCount ? ' active' : ''}`}
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={filtersOpen}
+          onClick={() => setFiltersOpen(true)}
+        >
+          Filters{advancedFilterCount ? ` · ${advancedFilterCount}` : ''}
+        </button>
+      </div>
+
       {loading && <div className="note">Finding stored files…</div>}
       {error && <div className="note err">Could not load some evidence: {error}</div>}
 
-      <div className="card files-filter-card">
+      <div className="card files-filter-card files-filter-desktop">
         <div className="files-filters">
-          <label className="files-search">Search<input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Filename, reason, account or user" /></label>
-          <label>File type<select value={kind} onChange={(e) => setKind(e.target.value)}><option value="all">All files</option><option value="images">Photos / images</option><option value="pdf">PDFs</option></select></label>
-          <label>Attached to<select value={source} onChange={(e) => setSource(e.target.value)}><option value="all">Transactions + requests</option><option value="entry">Transactions</option><option value="approval">Approval requests</option></select></label>
-          <label>Account<select value={account} onChange={(e) => setAccount(e.target.value)}><option value="all">All accounts</option>{book.accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-          <label>User<select value={person} onChange={(e) => setPerson(e.target.value)}><option value="all">Everyone</option>{users.map((item) => <option key={item.id} value={item.id}>{item.email}</option>)}</select></label>
-          <label>From<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
-          <label>To<input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
+          <label className="files-search">Search<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Filename, reason, account or user" /></label>
+          <label>File type<select value={kind} onChange={(event) => setKind(event.target.value)}><option value="all">All files</option><option value="images">Photos / images</option><option value="pdf">PDFs</option></select></label>
+          <label>Attached to<select value={source} onChange={(event) => setSource(event.target.value)}><option value="all">Transactions + requests</option><option value="entry">Transactions</option><option value="approval">Approval requests</option></select></label>
+          <label>Account<select value={account} onChange={(event) => setAccount(event.target.value)}><option value="all">All accounts</option>{book.accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <label>User<select value={person} onChange={(event) => setPerson(event.target.value)}><option value="all">Everyone</option>{users.map((item) => <option key={item.id} value={item.id}>{item.email}</option>)}</select></label>
+          <label>From<input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
+          <label>To<input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
           {filtered && <button className="btn ghost small files-clear" onClick={clearFilters}>Clear filters</button>}
         </div>
       </div>
@@ -130,6 +160,33 @@ export default function Files({ book }: { book: LoadedBook }) {
           </button>
         </div>
       )}
+
+      {filtersOpen && (
+        <>
+          <button className="files-filter-backdrop" type="button" aria-label="Close filters" onClick={() => setFiltersOpen(false)} />
+          <div className="files-filter-sheet" role="dialog" aria-modal="true" aria-labelledby="files-filter-title">
+            <div className="files-sheet-handle" aria-hidden="true" />
+            <div className="files-sheet-head">
+              <div><b id="files-filter-title">Filter files</b><span>{advancedFilterCount ? `${advancedFilterCount} active` : 'All files'}</span></div>
+              <button className="btn ghost small" type="button" onClick={() => setFiltersOpen(false)}>Done</button>
+            </div>
+            <div className="files-sheet-fields">
+              <label>File type<select value={kind} onChange={(event) => setKind(event.target.value)}><option value="all">All files</option><option value="images">Photos / images</option><option value="pdf">PDFs</option></select></label>
+              <label>Attached to<select value={source} onChange={(event) => setSource(event.target.value)}><option value="all">Transactions + requests</option><option value="entry">Transactions</option><option value="approval">Approval requests</option></select></label>
+              <label>Account<select value={account} onChange={(event) => setAccount(event.target.value)}><option value="all">All accounts</option>{book.accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+              <label>User<select value={person} onChange={(event) => setPerson(event.target.value)}><option value="all">Everyone</option>{users.map((item) => <option key={item.id} value={item.id}>{item.email}</option>)}</select></label>
+              <div className="files-sheet-dates">
+                <label>From<input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
+                <label>To<input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
+              </div>
+            </div>
+            <div className="files-sheet-actions">
+              <button className="btn ghost" type="button" disabled={!advancedFilterCount} onClick={clearAdvancedFilters}>Clear filters</button>
+              <button className="btn" type="button" onClick={() => setFiltersOpen(false)}>Show files</button>
+            </div>
+          </div>
+        </>
+      )}
     </section>
   );
 }
@@ -144,7 +201,7 @@ function FileCard({ file }: { file: LibraryFile }) {
       <div className="file-details">
         <div className="file-title"><b>{file.filename}</b><span>{size(file.byte_size)}</span></div>
         <p>{file.description}</p>
-        <div className="file-meta">
+        <div className="file-meta file-meta-desktop">
           <Meta label="Type" value={file.source === 'entry' ? 'Transaction' : 'Approval'} />
           <Meta label="Amount" value={file.amount == null ? '—' : money(file.amount)} mono />
           <Meta label="Account" value={file.accountName || '—'} />
@@ -152,6 +209,19 @@ function FileCard({ file }: { file: LibraryFile }) {
           <Meta label="Date" value={file.relatedDate || '—'} />
           <Meta label="Uploaded" value={day(file.created_at) || '—'} />
         </div>
+        <div className="file-mobile-meta">
+          <span>{file.accountName || (file.source === 'entry' ? 'Transaction' : 'Approval')}</span>
+          <span>{file.relatedDate || day(file.created_at) || '—'}</span>
+        </div>
+        <details className="file-mobile-details">
+          <summary>File details</summary>
+          <div className="file-meta">
+            <Meta label="Type" value={file.source === 'entry' ? 'Transaction' : 'Approval'} />
+            <Meta label="Amount" value={file.amount == null ? '—' : money(file.amount)} mono />
+            <Meta label="User" value={file.person || '—'} />
+            <Meta label="Uploaded" value={day(file.created_at) || '—'} />
+          </div>
+        </details>
         <div className="file-actions"><span className="chip">{file.status.replaceAll('_', ' ')}</span><a href={url} target="_blank" rel="noreferrer" className="btn ghost small">Open file</a></div>
       </div>
     </article>
