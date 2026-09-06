@@ -1,8 +1,16 @@
 import { ApiError, NotSignedIn, type LoadedBook } from './api';
-import type { EntryInput } from '../../shared/types';
-import type { OfflineConflictInfo, OfflineConflictKind, OfflineEntryInput } from '../../shared/offline-conflict';
+import type { Entry, EntryInput } from '../../shared/types';
+import type {
+  OfflineConflictInfo,
+  OfflineConflictKind,
+  OfflineCorrectionInput,
+  OfflineEntryInput,
+  OfflineRevisionInput,
+  OfflineVoidInput,
+} from '../../shared/offline-conflict';
+import { isOfflineRevisionInput } from '../../shared/offline-conflict';
 import { offlineRepository, type OfflineUser, type Queued } from './offline-db';
-import { captureOfflineContext } from './offline-conflict';
+import { captureOfflineContext, captureOfflineRevisionContext } from './offline-conflict';
 import { projectOfflineBook } from './offline-projection';
 import {
   offlineSyncState,
@@ -23,11 +31,11 @@ export interface OfflineAutoSyncResult {
 /**
  * Durable storage + projected-book facade + Phase 3/4 sync state machine.
  *
- * The last server-confirmed snapshot is immutable. Unsynced entries stay in the
- * per-user outbox and get durable state from Phase 1's reserved syncMeta store.
- * A server acknowledgement removes an outbox row; no failure path silently
- * drops financial work. Phase 4 additionally captures the exact financial facts
- * each queued instruction relied on and keeps server conflicts reviewable.
+ * The last server-confirmed snapshot is immutable. Unsynced financial writes
+ * stay in the per-user outbox and get durable state from Phase 1's reserved
+ * syncMeta store. A server acknowledgement removes an outbox row; no failure
+ * path silently drops financial work. Corrections and voids use the same strict
+ * queue order as new entries so later offline work sees their projected effect.
  */
 let syncActivation: Promise<void> = Promise.resolve();
 
@@ -103,6 +111,34 @@ function revisedClientRef(): string {
   return `q_review_${random}`;
 }
 
+function revisionFromQueued(item: Queued): OfflineRevisionInput | null {
+  return isOfflineRevisionInput(item.input) ? item.input : null;
+}
+
+function ensureRevisionCanQueue(entry: Entry, operation: 'correct' | 'void'): void {
+  if (entry.id.startsWith('offline:')) {
+    throw new Error('This entry has not reached the server yet. Let it sync before correcting or voiding it.');
+  }
+  if (entry.voided) throw new Error('This entry is already void.');
+  if (entry.offlinePendingRevision) {
+    throw new Error(`This entry already has a ${entry.offlinePendingRevision} waiting to sync.`);
+  }
+  const alreadyWaiting = offlineRepository.queueAll().some((item) => revisionFromQueued(item)?.entryId === entry.id);
+  if (alreadyWaiting) throw new Error('This entry already has an offline correction or void waiting to sync.');
+  if (operation === 'correct' && (entry.correctedAt != null || entry.correctedFrom != null)) {
+    throw new Error('This entry was already corrected and is locked. Void it if it is still wrong.');
+  }
+}
+
+async function queueRevision(input: OfflineRevisionInput): Promise<Queued> {
+  // Phase 1's durable outbox predates revision payloads and its persistence row
+  // intentionally remains shape-agnostic. The discriminated payload is stored
+  // in the same `input` slot so ordering/retry/auth/conflict guarantees are shared.
+  const item = await offlineRepository.queueAdd(input as unknown as EntryInput);
+  await offlineSyncState.registerQueued(item.id);
+  return item;
+}
+
 export const outbox = {
   /** Every durable financial write still waiting for a server acknowledgement. */
   all: (): Queued[] => offlineRepository.queueAll(),
@@ -116,6 +152,32 @@ export const outbox = {
     const item = await offlineRepository.queueAdd(prepared as EntryInput);
     await offlineSyncState.registerQueued(item.id);
     return offlineSyncState.effective([item])[0] ?? item;
+  },
+  correct: async (entry: Entry, amount: number): Promise<Queued> => {
+    await syncActivation;
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter an amount greater than zero.');
+    ensureRevisionCanQueue(entry, 'correct');
+    const prepared: OfflineCorrectionInput = {
+      offlineOperation: 'correct',
+      entryId: entry.id,
+      amount,
+      offlineContext: captureOfflineRevisionContext(entry),
+    };
+    return queueRevision(prepared);
+  },
+  void: async (entry: Entry, reason: string): Promise<Queued> => {
+    await syncActivation;
+    const why = reason.trim();
+    if (!why) throw new Error('Say why this entry is being voided.');
+    if (why.length > 200) throw new Error('Keep the void reason under 200 characters.');
+    ensureRevisionCanQueue(entry, 'void');
+    const prepared: OfflineVoidInput = {
+      offlineOperation: 'void',
+      entryId: entry.id,
+      reason: why,
+      offlineContext: captureOfflineRevisionContext(entry),
+    };
+    return queueRevision(prepared);
   },
   drop: async (id: string): Promise<void> => {
     await offlineRepository.queueDrop(id);
@@ -131,9 +193,10 @@ export const outbox = {
   summary: (): SyncSummary => offlineSyncState.summary(offlineRepository.queueAll()),
   conflicts: () => offlineSyncState.conflictRows(offlineRepository.queueAll()),
   /**
-   * Re-review one conflicted instruction against a freshly loaded server book.
-   * An optional patch supports a small amount/purpose correction without
-   * destroying the original durable queue row or its audit history.
+   * Re-review one conflicted ordinary entry against a freshly loaded server
+   * book. Revisions deliberately cannot be rebased blindly: if the original
+   * server row changed, the owner must inspect that new row before deciding on
+   * another correction/void.
    */
   rebase: async (
     id: string,
@@ -142,6 +205,9 @@ export const outbox = {
   ): Promise<void> => {
     const item = offlineSyncState.effective(offlineRepository.queueAll()).find((candidate) => candidate.id === id);
     if (!item) throw new Error('That queued entry is no longer waiting.');
+    if (isOfflineRevisionInput(item.input)) {
+      throw new Error('A correction or void cannot be automatically rebased. Review the latest server entry and decide again.');
+    }
     const state = offlineSyncState.stateFor(id);
     const current = item.input as OfflineEntryInput;
     const clientRef = state.conflict?.kind === 'idempotency_key_reused'
@@ -234,6 +300,7 @@ function conflictKind(err: ApiError): OfflineConflictKind | null {
     'insufficient_funds',
     'target_missing',
     'target_changed',
+    'entry_changed',
     'permission_changed',
     'receipt_changed',
     'idempotency_key_reused',
@@ -312,21 +379,21 @@ async function runFlush(
       throw new SyncBlockedError(
         'conflict',
         item.id,
-        state.conflict?.message || 'This queued entry conflicts with newer server data and needs review.',
+        state.conflict?.message || 'This queued change conflicts with newer server data and needs review.',
       );
     }
     if (state.status === 'rejected') {
       throw new SyncBlockedError(
         'rejected',
         item.id,
-        state.lastError?.message || 'A queued entry was rejected by the server and needs review before later entries can sync.',
+        state.lastError?.message || 'A queued change was rejected by the server and needs review before later changes can sync.',
       );
     }
     if (state.status === 'blocked_auth') {
       throw new SyncBlockedError(
         'auth',
         item.id,
-        state.lastError?.message || 'Sign in again before this queued entry can sync.',
+        state.lastError?.message || 'Sign in again before this queued change can sync.',
       );
     }
 
@@ -366,19 +433,21 @@ async function runFlush(
           nextAttemptAt: null,
           lastError: info,
         });
-        throw new SyncBlockedError('auth', item.id, 'Your session expired. Sign in again; the queued entry is still safely stored.');
+        throw new SyncBlockedError('auth', item.id, 'Your session expired. Sign in again; the queued change is still safely stored.');
       }
 
       if (err instanceof ApiError) {
         const kind = conflictKind(err);
         if (kind) {
+          const revision = revisionFromQueued(item);
           const input = item.input as OfflineEntryInput;
-          const targetId = input.accountId ?? input.toAccountId ?? input.projectId ?? input.personId ?? input.linkReceiptId ?? null;
+          const targetId = revision?.entryId
+            ?? input.accountId ?? input.toAccountId ?? input.projectId ?? input.personId ?? input.linkReceiptId ?? null;
           const detail: OfflineConflictInfo = {
             kind,
             message: err.message,
             targetId,
-            expected: input.offlineContext ?? null,
+            expected: revision?.offlineContext ?? input.offlineContext ?? null,
             current: null,
             detectedAt: failedAt,
           };
@@ -388,7 +457,7 @@ async function runFlush(
             lastError: info,
             conflict: detail,
           });
-          throw new SyncBlockedError('conflict', item.id, `${err.message} The entry is still stored and later entries are blocked until you review it.`);
+          throw new SyncBlockedError('conflict', item.id, `${err.message} The change is still stored and later changes are blocked until you review it.`);
         }
       }
 
@@ -411,7 +480,7 @@ async function runFlush(
       throw new SyncBlockedError(
         'rejected',
         item.id,
-        `The server refused this queued entry: ${info.message}. It remains stored and later entries will not overtake it.`,
+        `The server refused this queued change: ${info.message}. It remains stored and later changes will not overtake it.`,
       );
     }
   }
