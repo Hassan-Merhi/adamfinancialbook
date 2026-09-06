@@ -138,6 +138,7 @@ async function measure(path: string, session: Session, samples = 10) {
 
 describe.skipIf(!DATABASE_URL)('P1 production-scale PostgreSQL certification', () => {
   const owner: Session = { cookie: '' };
+  const delegates: Session[] = [];
   let ownerId = '';
 
   beforeAll(async () => {
@@ -182,6 +183,23 @@ describe.skipIf(!DATABASE_URL)('P1 production-scale PostgreSQL certification', (
         WHERE source.id = $1`,
       [ownerId, USERS - 1],
     );
+
+    await db(
+      `INSERT INTO user_accounts (account_id, user_id, created_at)
+       SELECT 'p1_acc_' || g, 'p1_user_' || g,
+              TIMESTAMPTZ '2021-01-04 00:00:00+00' + (g * interval '1 second')
+         FROM generate_series(1, $1::int) AS g`,
+      [USERS - 1],
+    );
+
+    for (let index = 1; index < USERS; index += 1) {
+      const loggedIn = await post('/api/login', {
+        email: `p1-scale-user-${index}`,
+        password: 'P1ScaleOwner!2026',
+      });
+      expect(loggedIn.response.status).toBe(200);
+      delegates.push({ cookie: sessionCookie(loggedIn.response) });
+    }
 
     await db(
       `INSERT INTO entries (
@@ -303,18 +321,21 @@ describe.skipIf(!DATABASE_URL)('P1 production-scale PostgreSQL certification', (
     const statement = await measure('/api/statement-page?type=account&id=p1_acc_1&limit=50', owner, 12);
     const search = await measure('/api/search/entries?q=scale%20expense&limit=20', owner, 12);
     const history = await measure('/api/history-page?limit=50', owner, 12);
+    const files = await measure('/api/files-page?limit=40', owner, 12);
     const overview = await measure('/api/overview?today=2026-09-06', owner, 8);
     const historical = await measure('/api/overview?on=2025-12-30&today=2026-09-06', owner, 5);
 
     expect(statement.p95).toBeLessThan(500);
     expect(search.p95).toBeLessThan(500);
     expect(history.p95).toBeLessThan(500);
+    expect(files.p95).toBeLessThan(500);
     expect(overview.p95).toBeLessThan(500);
     expect(historical.p95).toBeLessThan(1_500);
 
     expect(statement.bytes).toBeLessThan(150_000);
     expect(search.bytes).toBeLessThan(100_000);
     expect(history.bytes).toBeLessThan(100_000);
+    expect(files.bytes).toBeLessThan(150_000);
     expect(overview.bytes).toBeLessThan(400_000);
     expect(historical.bytes).toBeLessThan(400_000);
 
@@ -333,11 +354,34 @@ describe.skipIf(!DATABASE_URL)('P1 production-scale PostgreSQL certification', (
         statement: Number(statement.p95.toFixed(1)),
         search: Number(search.p95.toFixed(1)),
         history: Number(history.p95.toFixed(1)),
+        files: Number(files.p95.toFixed(1)),
         overview: Number(overview.p95.toFixed(1)),
         historicalOverview: Number(historical.p95.toFixed(1)),
       },
     }));
   }, 60_000);
+
+  it('serves 30 simultaneous authenticated users without errors or queue collapse', async () => {
+    const sessions = [owner, ...delegates];
+    expect(sessions).toHaveLength(USERS);
+    const started = performance.now();
+    const responses = await Promise.all(sessions.map((session, index) => request(
+      `/api/statement-page?type=account&id=p1_acc_${Math.max(1, index)}&limit=25`,
+      session,
+    )));
+    const wallMs = performance.now() - started;
+    const individual = responses.map((result) => result.elapsedMs);
+
+    expect(responses.every((result) => result.response.status === 200)).toBe(true);
+    expect(percentile95(individual)).toBeLessThan(1_000);
+    expect(wallMs).toBeLessThan(2_500);
+    console.info(JSON.stringify({
+      event: 'p1.concurrent-users.certified',
+      users: USERS,
+      p95Ms: Number(percentile95(individual).toFixed(1)),
+      wallMs: Number(wallMs.toFixed(1)),
+    }));
+  }, 15_000);
 
   it('keeps required scale indexes present and the final ledger internally consistent', async () => {
     const indexes = await db<{ indexname: string }>(
