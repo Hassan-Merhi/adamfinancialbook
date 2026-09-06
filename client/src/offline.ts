@@ -1,67 +1,50 @@
-/**
- * Working with no signal.
- *
- * Two small things, both deliberately dumb:
- *   - the last book the server sent is kept, so the app opens with figures
- *     rather than a spinner when there is no network;
- *   - anything you log while offline waits in an outbox and is sent, in order,
- *     the moment the network is back.
- *
- * The outbox only ever holds entries. Setting the book up, correcting an entry
- * and anything else that reshapes it needs the server there and then — those
- * fail honestly rather than queueing.
- */
 import type { EntryInput } from '../../shared/types';
+import { offlineRepository, type OfflineUser, type Queued } from './offline-db';
 
-const BOOK_KEY = 'book.snapshot';
-const OUTBOX_KEY = 'book.outbox';
-const USER_KEY = 'book.user';
+export type { Queued } from './offline-db';
 
-export interface Queued { id: string; input: EntryInput; queuedAt: string; }
-
-function read<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch { return fallback; }
+/**
+ * Phase 1 offline foundation.
+ *
+ * The browser boots the IndexedDB repository before React renders. These small
+ * facades keep the rest of the app simple while all sensitive cached state is
+ * stored per user instead of in global localStorage keys.
+ */
+export async function initializeOfflineStorage(): Promise<void> {
+  await offlineRepository.initialize();
 }
 
-function write(key: string, value: unknown): void {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* full or private: carry on */ }
+export async function resetOfflineStorageForTests(): Promise<void> {
+  await offlineRepository.resetForTests();
 }
 
 export const snapshot = {
-  save: (book: unknown) => write(BOOK_KEY, book),
-  load: <T>(): T | null => read<T | null>(BOOK_KEY, null),
+  save: (book: unknown) => offlineRepository.saveSnapshot(book),
+  load: <T>(): T | null => offlineRepository.loadSnapshot<T>(),
 };
 
 /**
- * Who was holding the book last time. With no signal the server cannot confirm
- * the session, but the cookie is still there — so the book opens as it was
- * rather than showing the door to someone already signed in.
+ * Who was holding the book last time. The repository stores only a global
+ * pointer to that user id; the actual profile, snapshot and queued work live in
+ * separate user-scoped records.
  */
 export const lastUser = {
-  save: (user: unknown) => write(USER_KEY, user),
-  load: <T>(): T | null => read<T | null>(USER_KEY, null),
-  clear: () => { try { localStorage.removeItem(USER_KEY); } catch { /* nothing to do */ } },
+  save: <T extends OfflineUser>(user: T | null) => user ? offlineRepository.setActiveUser(user) : Promise.resolve(),
+  load: <T>(): T | null => offlineRepository.getActiveUser<T>(),
+  clear: () => offlineRepository.clearSession(),
 };
 
 export const outbox = {
-  all: (): Queued[] => read<Queued[]>(OUTBOX_KEY, []),
-  add(input: EntryInput): Queued {
-    const id = `q_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    // the reference travels with the entry, so a double send lands once
-    const item: Queued = { id, input: { ...input, clientRef: id }, queuedAt: new Date().toISOString() };
-    write(OUTBOX_KEY, [...outbox.all(), item]);
-    return item;
-  },
-  drop(id: string) { write(OUTBOX_KEY, outbox.all().filter((q) => q.id !== id)); },
-  clear() { write(OUTBOX_KEY, []); },
+  all: (): Queued[] => offlineRepository.queueAll(),
+  add: (input: EntryInput): Promise<Queued> => offlineRepository.queueAdd(input),
+  drop: (id: string): Promise<void> => offlineRepository.queueDrop(id),
+  clear: (): Promise<void> => offlineRepository.queueClear(),
+  whenIdle: (): Promise<void> => offlineRepository.whenIdle(),
 };
 
 /** True when the browser says there is no network — treat anything else as a real error. */
 export function looksOffline(err: unknown): boolean {
-  return !navigator.onLine || (err instanceof TypeError);   // fetch throws TypeError when it cannot reach the host
+  return !navigator.onLine || (err instanceof TypeError); // fetch throws TypeError when it cannot reach the host
 }
 
 /**
@@ -71,7 +54,6 @@ export function looksOffline(err: unknown): boolean {
 let flushing: Promise<number> | null = null;
 
 export async function flushOutbox(send: (input: EntryInput) => Promise<unknown>): Promise<number> {
-  // Two events can arrive at once when the network returns; only one flush runs.
   if (flushing) return flushing;
   flushing = runFlush(send).finally(() => { flushing = null; });
   return flushing;
@@ -82,11 +64,14 @@ async function runFlush(send: (input: EntryInput) => Promise<unknown>): Promise<
   for (const item of outbox.all()) {
     try {
       await send(item.input);
-      outbox.drop(item.id);
+      // Do not report completion until the durable queue record is gone.
+      await outbox.drop(item.id);
       sent += 1;
     } catch (err) {
-      if (looksOffline(err)) break;      // still no network: leave the rest for later
-      outbox.drop(item.id);              // the server refused it; it will never be accepted
+      if (looksOffline(err)) break;
+      // Phase 3 will replace this terminal refusal behavior with richer durable
+      // rejected/conflict states. Phase 1 preserves the existing semantics.
+      await outbox.drop(item.id);
       throw err;
     }
   }
