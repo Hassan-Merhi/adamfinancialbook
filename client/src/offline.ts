@@ -240,8 +240,7 @@ async function runFlush(
   options: FlushOptions,
 ): Promise<number> {
   await syncActivation;
-  const rawQueue = offlineRepository.queueAll()
-    .sort((a, b) => a.queuedAt.localeCompare(b.queuedAt) || a.id.localeCompare(b.id));
+  const rawQueue = offlineSyncState.ordered(offlineRepository.queueAll());
   if (!rawQueue.length) {
     cancelRetryTimer();
     return 0;
