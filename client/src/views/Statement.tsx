@@ -98,7 +98,7 @@ export default function Statement({ book, focus, back, run }: {
     run(async () => {
       await outbox.correct(entry, amount);
       await flushOutbox((input) => api.addEntry(input));
-    }, `Correction kept — ${money(amount)} is projected now and will sync automatically.`);
+    }, `Corrected — this entry is now locked. ${money(amount)} is projected now and will sync automatically.`);
   };
 
   const queueVoid = (entry: Entry, reason: string) => {
