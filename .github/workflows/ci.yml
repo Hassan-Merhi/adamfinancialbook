@@ -63,5 +63,11 @@ jobs:
         run: npm run db:status
       - name: Existing API integration suite
         run: npm run test:integration
+      # The financial E2E test runs db:integrity against its populated realistic
+      # ledger before intentionally dropping public during test cleanup.
       - name: Financial end-to-end reconciliation
         run: npm run test:financial-e2e
+      - name: Re-establish clean certification schema
+        run: npm run db:migrate
+      - name: Final database integrity certification
+        run: npm run db:integrity

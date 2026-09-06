@@ -44,28 +44,6 @@
   -webkit-backdrop-filter:blur(20px);
   animation:navDrawerIn .22s cubic-bezier(.2,.8,.2,1) both;
 }
-.moremenu::before {
-  content:'More';
-  display:block;
-  padding:2px 8px 12px;
-  font-family:var(--font-display);
-  font-size:20px;
-  line-height:1.2;
-  font-weight:750;
-  letter-spacing:-.03em;
-  color:var(--ink);
-}
-.moregroup:has(.moremenu)::before {
-  content:'';
-  position:fixed;
-  inset:0;
-  z-index:240;
-  background:rgba(12,16,22,.30);
-  backdrop-filter:blur(3px);
-  -webkit-backdrop-filter:blur(3px);
-  pointer-events:none;
-  animation:navFadeIn .16s ease-out both;
-}
 .moreitem {
   width:100%;
   min-height:50px;
@@ -82,7 +60,7 @@
   transition:background-color .14s ease,color .14s ease,border-color .14s ease,transform .12s ease;
 }
 .moreitem:hover { background:var(--sunk); color:var(--ink); border-color:var(--line-soft); transform:translateX(-1px); }
-.moreitem[aria-current="true"] { background:var(--accent-soft); color:var(--accent); border-color:color-mix(in srgb,var(--accent) 14%,var(--line)); font-weight:700; }
+.moreitem[aria-current="page"] { background:var(--accent-soft); color:var(--accent); border-color:color-mix(in srgb,var(--accent) 14%,var(--line)); font-weight:700; }
 .navbadge.inline { margin-left:0; flex:none; }
 
 :root[data-vibe="ledger"] .moremenu { background:var(--card); }
@@ -101,7 +79,7 @@
     transition:background-color .14s ease,color .14s ease,border-color .14s ease,transform .12s ease;
   }
   .navbtn:hover { transform:translateX(1px); border-color:var(--line-soft); }
-  .navbtn[aria-current="true"] { color:var(--accent); border-color:color-mix(in srgb,var(--accent) 12%,var(--line)); }
+  .navbtn[aria-current="page"] { color:var(--accent); border-color:color-mix(in srgb,var(--accent) 12%,var(--line)); }
 }
 
 /* Mobile: five large, stable destinations in a dock-like bottom bar. */
@@ -134,7 +112,7 @@
   }
   .rail .navbtn svg { width:21px; height:21px; }
   .rail .navbtn .short { font-size:10px; line-height:1; }
-  .rail .navbtn[aria-current="true"] {
+  .rail .navbtn[aria-current="page"] {
     background:var(--accent-soft) !important;
     color:var(--accent) !important;
   }
@@ -162,11 +140,6 @@
     box-shadow:0 -10px 50px rgba(0,0,0,.24);
     animation:navSheetUp .22s cubic-bezier(.2,.8,.2,1) both;
   }
-  .moremenu::before {
-    content:'More';
-    padding:8px 10px 12px;
-    font-size:19px;
-  }
   .moremenu::after {
     content:'';
     position:absolute;
@@ -183,8 +156,7 @@
 
 @keyframes navDrawerIn { from { transform:translateX(28px); opacity:.75; } to { transform:none; opacity:1; } }
 @keyframes navSheetUp { from { transform:translateY(24px); opacity:.82; } to { transform:none; opacity:1; } }
-@keyframes navFadeIn { from { opacity:0; } to { opacity:1; } }
 
 @media (prefers-reduced-motion:reduce) {
-  .moremenu,.moregroup:has(.moremenu)::before { animation:none !important; }
+  .moremenu { animation:none !important; }
 }

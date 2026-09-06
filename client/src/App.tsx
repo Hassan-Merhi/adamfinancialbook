@@ -14,6 +14,7 @@ import type { Focus } from './views/Statement';
 import LanguageControl from './LanguageControl';
 import LoadingSkeleton from './LoadingSkeleton';
 import { attentionCounts } from './attention';
+import { useModalFocus } from './dialog-a11y';
 import type { SearchAction } from './search';
 import type { PromptAction } from '../../shared/prompt-actions';
 import { money } from './ui';
@@ -23,6 +24,7 @@ import './ux6.css';
 import './mobile-core.css';
 import './daily-mobile.css';
 import './performance-mobile.css';
+import './final-polish.css';
 
 type View = 'today' | 'money' | 'projects' | 'people' | 'attention' | 'report' | 'files' | 'history' | 'access' | 'setup' | 'approvals';
 type NavItem = { id: View; label: string; short: string; icon: string; ownerOnly?: boolean };
@@ -120,6 +122,10 @@ export default function App() {
   const [missingReceiptCount, setMissingReceiptCount] = useState(0);
   const dashboardRefreshing = useRef(false);
   const lastDashboardRefresh = useRef(0);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const moreDialogRef = useRef<HTMLElement>(null);
+  const moreCloseRef = useRef<HTMLButtonElement>(null);
+  useModalFocus(moreOpen, moreDialogRef, () => setMoreOpen(false), moreCloseRef, moreButtonRef);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-vibe', 'assistant');
@@ -127,21 +133,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!moreOpen) return;
-    const close = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setMoreOpen(false);
-      }
-    };
-    window.addEventListener('keydown', close);
-    return () => window.removeEventListener('keydown', close);
-  }, [moreOpen]);
+    const current = focus ? 'Statement' : [...PRIMARY_NAV, ...MORE_NAV].find((item) => item.id === view)?.label ?? 'Financial Book';
+    document.title = current === 'Today' ? 'Financial Book' : `${current} · Financial Book`;
+  }, [view, focus]);
 
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
+        setMoreOpen(false);
         void loadGlobalSearch();
         setSearchOpen(true);
       }
@@ -153,7 +153,9 @@ export default function App() {
   const flipTheme = () => {
     const now = document.documentElement.getAttribute('data-theme');
     const dark = now ? now === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
-    document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
+    const next = dark ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('book.theme', next); } catch { /* private mode */ }
   };
 
   const say = (text: string, bad?: boolean) => setNote({ text, bad });
@@ -299,9 +301,13 @@ export default function App() {
     setFocus(nextFocus);
     setNote(null);
     setMoreOpen(false);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({
+      top: 0,
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    });
   };
   const openSearch = () => {
+    setMoreOpen(false);
     void loadGlobalSearch();
     setSearchOpen(true);
   };
@@ -360,7 +366,7 @@ export default function App() {
       <header className="topbar">
         <b>Financial Book</b>
         <div className="topbar-search-wrap">
-          <button className="search-trigger mobile" onClick={openSearch} aria-label="Search">
+          <button type="button" className="search-trigger mobile" onClick={openSearch} aria-label="Search">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SEARCH_ICON} /></svg>
             <span>Search</span>
           </button>
@@ -371,7 +377,7 @@ export default function App() {
         <div className="brand">
           <b>Financial Book</b>
           <span>{money(book.balances.totalCash)} on hand</span>
-          <button className="search-trigger desktop" onClick={openSearch} aria-label="Search everything">
+          <button type="button" className="search-trigger desktop" onClick={openSearch} aria-label="Search everything">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SEARCH_ICON} /></svg>
             <span>Search everything</span>
             <kbd>⌘K</kbd>
@@ -379,7 +385,7 @@ export default function App() {
         </div>
 
         {PRIMARY_NAV.map((item) => (
-          <button key={item.id} className="navbtn" aria-current={!focus && view === item.id ? 'page' : undefined}
+          <button type="button" key={item.id} className="navbtn" aria-current={!focus && view === item.id ? 'page' : undefined}
             onPointerDown={() => { const pending = loadViewModule(item.id); if (pending) void pending; }}
             onClick={() => go(item.id)} aria-label={item.label}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.icon} /></svg>
@@ -389,8 +395,8 @@ export default function App() {
         ))}
 
         <div className="moregroup">
-          <button className="navbtn morebtn" aria-current={moreIsCurrent ? 'page' : undefined}
-            aria-expanded={moreOpen} aria-haspopup="dialog" aria-label="More pages"
+          <button ref={moreButtonRef} type="button" className="navbtn morebtn" aria-current={moreIsCurrent ? 'page' : undefined}
+            aria-expanded={moreOpen} aria-haspopup="dialog" aria-controls="more-pages-dialog" aria-label="More pages"
             onClick={() => setMoreOpen((openNow) => !openNow)}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={MORE_ICON} /></svg>
             <span className="long">More</span>
@@ -404,21 +410,21 @@ export default function App() {
 
           {moreOpen && (
             <>
-              <button type="button" className="morebackdrop" onClick={() => setMoreOpen(false)} aria-label="Close More" />
-              <section className="moremenu" role="dialog" aria-modal="true" aria-label="More pages and settings">
+              <button type="button" tabIndex={-1} aria-hidden="true" className="morebackdrop" onClick={() => setMoreOpen(false)} />
+              <section ref={moreDialogRef} id="more-pages-dialog" tabIndex={-1} className="moremenu" role="dialog" aria-modal="true" aria-labelledby="more-menu-title">
                 <header className="moremenu-head">
                   <span className="moremenu-head-copy">
-                    <b>More</b>
+                    <b id="more-menu-title">More</b>
                     <span>Pages and settings</span>
                   </span>
-                  <button type="button" className="moremenu-close" onClick={() => setMoreOpen(false)} aria-label="Close More">×</button>
+                  <button ref={moreCloseRef} type="button" className="moremenu-close" onClick={() => setMoreOpen(false)} aria-label="Close More">×</button>
                 </header>
 
                 <div className="moremenu-pages">
                   {visibleMore.map((item) => {
                     const label = item.id === 'approvals' && entryOnly ? 'My wallet' : item.label;
                     return (
-                      <button key={item.id} className="moreitem"
+                      <button type="button" key={item.id} className="moreitem"
                         aria-current={!focus && view === item.id ? 'page' : undefined}
                         onPointerDown={() => { const pending = loadViewModule(item.id); if (pending) void pending; }}
                         onClick={() => go(item.id)}>
@@ -460,7 +466,7 @@ export default function App() {
         <div className="railfoot">
           <span className="muted">{me.user.email}{entryOnly ? ' · can enter only' : ''}</span>
           <div className="language-desktop"><LanguageControl /></div>
-          <button className="linkbtn" onClick={() => { void signOut(); }}>Sign out</button>
+          <button type="button" className="linkbtn" onClick={() => { void signOut(); }}>Sign out</button>
         </div>
       </nav>
 
@@ -537,7 +543,7 @@ export default function App() {
             onClose={() => setSearchOpen(false)}
             book={book}
             dashboard={dashboard}
-            owner={!entryOnly}
+            owner={me.user.role === 'owner'}
             onChoose={handleSearchAction}
           />
         </Suspense>

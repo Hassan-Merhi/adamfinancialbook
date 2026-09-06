@@ -1,0 +1,58 @@
+/* Phase 10 — final production UX/accessibility polish. */
+
+:where(a,button,input,select,textarea,[tabindex]):focus-visible {
+  outline:3px solid color-mix(in srgb,var(--accent) 72%,white 28%);
+  outline-offset:2px;
+}
+
+/* Programmatically-focused modal containers should not draw a second ring; the
+   first real control receives visible focus immediately. */
+.moremenu:focus,
+.searchdialog:focus,
+#main-content:focus { outline:none; }
+
+.phase4-door .door-heading h1 {
+  margin:0;
+  padding:0;
+  border:0;
+  font-size:21px;
+  line-height:1.2;
+}
+
+/* This is the actual clickable backdrop rendered by App.tsx. Keeping it real
+   rather than a pseudo-element makes pointer dismissal deterministic. */
+.morebackdrop {
+  position:fixed;
+  inset:0;
+  z-index:240;
+  width:100%;
+  height:100%;
+  margin:0;
+  padding:0;
+  border:0;
+  border-radius:0;
+  background:rgba(12,16,22,.30);
+  backdrop-filter:blur(3px);
+  -webkit-backdrop-filter:blur(3px);
+  cursor:default;
+}
+
+/* WCAG-friendly minimum pointer targets on coarse/touch input without forcing
+   dense desktop tables and ledger rows to grow. */
+@media (pointer:coarse) {
+  .btn,
+  .search-trigger,
+  .moreitem,
+  .moremenu-close,
+  .more-signout,
+  .moreutility,
+  .password-toggle,
+  .search-close {
+    min-height:44px;
+    min-width:44px;
+  }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  html:focus-within { scroll-behavior:auto; }
+}
