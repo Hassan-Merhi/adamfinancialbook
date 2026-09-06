@@ -213,7 +213,8 @@ export async function saveEntry(input: EntryInput, book: Book, createdBy?: strin
 
 /**
  * A correction keeps the original entry/effect state in entry_revisions and
- * supersedes the old effect rows instead of deleting them.
+ * supersedes the old effect rows instead of deleting them. A posted correction
+ * is final: if it is still wrong, the safe next action is to void the entry.
  */
 export async function correctAmount(entryId: string, amount: number, book: Book): Promise<void> {
   const transactionId = newId('txn');
@@ -224,6 +225,12 @@ export async function correctAmount(entryId: string, amount: number, book: Book)
     const before = await captureEntryState(client, entryId, true);
     if (!before || before.entry.voided) {
       throw Object.assign(new Error('No such active entry'), { status: 404 });
+    }
+    if (before.entry.corrected_at || before.entry.corrected_from != null) {
+      throw Object.assign(
+        new Error('This entry was already corrected and is now locked. Void it if it is still wrong.'),
+        { status: 409 },
+      );
     }
 
     const oldAmount = Number(before.entry.amount);
@@ -344,8 +351,9 @@ export async function writeEntryRevision(
 }
 
 /**
- * A wrong entry is voided, not deleted. The entry, effects, and receipt evidence
- * all stay reconstructible; the active book simply stops counting the entry.
+ * A wrong entry is voided, not deleted. The row and revision evidence stay
+ * reconstructible, but every active accounting effect is superseded so no
+ * balance path can accidentally keep counting it.
  */
 export async function voidEntry(entryId: string, reason: string): Promise<void> {
   const transactionId = newId('txn');
@@ -371,12 +379,33 @@ export async function voidEntry(entryId: string, reason: string): Promise<void> 
       throw Object.assign(new Error('No such entry, or it is already void'), { status: 404 });
     }
 
+    // A void is an accounting reversal, not just a UI flag. Deactivate every
+    // effect that currently contributes to cash, projects, people and loans.
+    await supersedeEffects(client, entryId, actor?.id ?? null);
+
     await client.query(
       `UPDATE project_receipts
           SET voided_at = COALESCE(voided_at, now()),
               voided_by = COALESCE(voided_by, $2)
         WHERE entry_id = $1 AND voided_at IS NULL`,
       [entryId, actor?.id ?? null],
+    );
+
+    // If this entry merely moved an older recorded receipt into cash, undo that
+    // banking state rather than voiding the original historical receipt itself.
+    if (before.entry.kind === 'receipt' && before.entry.link_receipt_id) {
+      await client.query(
+        'UPDATE project_receipts SET in_cash = false WHERE id = $1 AND voided_at IS NULL',
+        [before.entry.link_receipt_id],
+      );
+    }
+
+    // Confirmed delegated handoffs keep their history but no longer claim to be
+    // live once their linked ledger transfer has been voided.
+    await client.query(
+      `UPDATE pending_transfers SET status = 'voided'
+        WHERE entry_id = $1 AND status = 'confirmed'`,
+      [entryId],
     );
 
     const after = await captureEntryState(client, entryId, false);
