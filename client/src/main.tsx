@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import { LanguageProvider } from './i18n';
+import { initializeOfflineStorage } from './offline';
 import './multilingual-offline';
 
 // Apply an explicit appearance before React renders so returning users do not
@@ -20,10 +21,19 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); });
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <LanguageProvider>
-      <App />
-    </LanguageProvider>
-  </StrictMode>,
-);
+async function boot() {
+  // IndexedDB must be hydrated before App reads the last user, snapshot or
+  // outbox.  This also performs the one-time migration from the old global
+  // localStorage keys into the correct user scope.
+  await initializeOfflineStorage();
+
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <LanguageProvider>
+        <App />
+      </LanguageProvider>
+    </StrictMode>,
+  );
+}
+
+void boot();
