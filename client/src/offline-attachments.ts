@@ -143,6 +143,26 @@ async function put(record: OfflineAttachmentRecord): Promise<void> {
   emitChange();
 }
 
+async function removeRecords(records: readonly OfflineAttachmentRecord[]): Promise<void> {
+  if (!records.length) return;
+  const db = await openDb();
+  if (!db) {
+    for (const record of records) memory.delete(storageKey(record.userId, record.id));
+    emitChange();
+    return;
+  }
+  const transaction = db.transaction(ATTACHMENTS, 'readwrite');
+  const store = transaction.objectStore(ATTACHMENTS);
+  for (const record of records) store.delete(storageKey(record.userId, record.id));
+  await transactionDone(transaction);
+  emitChange();
+}
+
+function matchesTarget(record: OfflineAttachmentRecord, target: AttachmentTarget): boolean {
+  if (typeof target.entryId === 'string') return record.entryId === target.entryId;
+  return record.entryClientRef === target.clientRef;
+}
+
 async function recordsForUser(userId: string): Promise<OfflineAttachmentRecord[]> {
   const rows = await readAll();
   return rows
@@ -210,7 +230,8 @@ function isRetryableStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-async function attempt(record: OfflineAttachmentRecord, force: boolean): Promise<boolean> {
+async function attempt(record: OfflineAttachmentRecord, force: boolean, expectedUserId = record.userId): Promise<boolean> {
+  if (record.userId !== expectedUserId || activeUserId() !== expectedUserId) return false;
   if (record.status === 'uploaded') return false;
   if (record.status === 'failed' && !force) return false;
   if (!force && record.nextAttemptAt && Date.parse(record.nextAttemptAt) > Date.now()) {
@@ -240,6 +261,16 @@ async function attempt(record: OfflineAttachmentRecord, force: boolean): Promise
         lastError: 'Waiting for the transaction itself to finish syncing.',
       });
       scheduleRetry(nextAttemptAt);
+      return false;
+    }
+
+    if (activeUserId() !== expectedUserId) {
+      await put({
+        ...working,
+        status: 'waiting',
+        nextAttemptAt: null,
+        lastError: 'Receipt sync paused because the signed-in user changed.',
+      });
       return false;
     }
 
@@ -311,6 +342,10 @@ export async function queueEntryAttachments(
   const userId = activeUserId();
   if (!userId) throw new Error('Sign in before storing a receipt.');
   const checked = validateAttachmentFiles(files);
+  const existingForTarget = (await recordsForUser(userId)).filter((record) => matchesTarget(record, target));
+  if (existingForTarget.length + checked.length > MAX_OFFLINE_ATTACHMENTS_PER_ENTRY) {
+    throw new Error(`Attach at most ${MAX_OFFLINE_ATTACHMENTS_PER_ENTRY} receipts to one transaction.`);
+  }
   const queuedAt = new Date().toISOString();
   const records: OfflineAttachmentRecord[] = [];
   for (const file of checked) {
@@ -348,11 +383,12 @@ export async function flushOfflineAttachments(options: { force?: boolean } = {})
     const records = await recordsForUser(userId);
     let uploaded = 0;
     for (const record of records) {
+      if (activeUserId() !== userId) break;
       const recovered = record.status === 'uploading'
         ? { ...record, status: 'waiting' as const, nextAttemptAt: null, lastError: 'Upload was interrupted and will resume.' }
         : record;
       if (recovered !== record) await put(recovered);
-      if (await attempt(recovered, options.force === true)) uploaded += 1;
+      if (await attempt(recovered, options.force === true, userId)) uploaded += 1;
     }
     return uploaded;
   })().finally(() => { flushing = null; });
@@ -368,6 +404,17 @@ export async function retryFailedAttachments(): Promise<number> {
     await put({ ...record, status: 'waiting', nextAttemptAt: null, lastError: null });
   }
   return flushOfflineAttachments({ force: true });
+}
+
+export async function discardEntryAttachmentsByClientRef(clientRef: string): Promise<number> {
+  const userId = activeUserId();
+  const normalized = clientRef.trim();
+  if (!userId || !normalized) return 0;
+  const records = (await recordsForUser(userId)).filter((record) => (
+    record.entryClientRef === normalized && record.status !== 'uploaded'
+  ));
+  await removeRecords(records);
+  return records.length;
 }
 
 export async function attachmentSummary(): Promise<OfflineAttachmentSummary> {
@@ -394,6 +441,7 @@ export const attachmentQueue = {
   queue: queueEntryAttachments,
   flush: flushOfflineAttachments,
   retryFailed: retryFailedAttachments,
+  discardForClientRef: discardEntryAttachmentsByClientRef,
   summary: attachmentSummary,
   records: attachmentRecords,
   validate: validateAttachmentFiles,

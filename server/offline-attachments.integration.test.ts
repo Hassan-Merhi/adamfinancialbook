@@ -101,6 +101,7 @@ function png(lastByte = 1): Uint8Array {
 describe.skipIf(!DATABASE_URL)('Offline Phase 5 receipt upload safety', () => {
   const owner: Session = { cookie: '' };
   let entryId = '';
+  let accountId = '';
 
   beforeAll(async () => {
     await resetToLegacyShape();
@@ -133,6 +134,7 @@ describe.skipIf(!DATABASE_URL)('Offline Phase 5 receipt upload safety', () => {
     const account = (await request('/api/accounts', {
       method: 'POST', session: owner, body: { name: 'Receipt Cash', businessId: business, opening: 1000 },
     })).data.id;
+    accountId = account;
     const entry = await request('/api/entries', {
       method: 'POST', session: owner,
       body: {
@@ -194,6 +196,34 @@ describe.skipIf(!DATABASE_URL)('Offline Phase 5 receipt upload safety', () => {
     expect(Number((await db<{ n: string }>(
       'SELECT count(*) AS n FROM attachments WHERE id = $1', [attachmentId],
     ))[0].n)).toBe(1);
+  });
+
+  it('enforces the 20-receipt cap on the server, not only in the browser', async () => {
+    const entry = await request('/api/entries', {
+      method: 'POST', session: owner,
+      body: {
+        occurredOn: '2026-09-06',
+        kind: 'expense',
+        amount: 5,
+        purpose: 'Receipt cap test',
+        raw: 'Receipt cap test',
+        accountId,
+        clientRef: 'q_phase5_receipt_cap',
+      },
+    });
+    expect(entry.response.status).toBe(201);
+
+    for (let index = 0; index < 20; index += 1) {
+      const accepted = await upload(entry.data.id, `att_sync_cap_${index}`, owner, png((index % 200) + 1));
+      expect(accepted.response.status).toBe(201);
+    }
+
+    const blocked = await upload(entry.data.id, 'att_sync_cap_21', owner, png(222));
+    expect(blocked.response.status).toBe(409);
+    expect(blocked.data.code).toBe('OFFLINE_ATTACHMENT_LIMIT_REACHED');
+    expect(Number((await db<{ n: string }>(
+      'SELECT count(*) AS n FROM attachments WHERE entry_id = $1', [entry.data.id],
+    ))[0].n)).toBe(20);
   });
 
   it('keeps unsupported evidence out of PostgreSQL', async () => {

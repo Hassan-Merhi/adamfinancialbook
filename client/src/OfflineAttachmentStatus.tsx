@@ -175,10 +175,13 @@ export default function OfflineAttachmentStatus() {
     if (!window.confirm('Discard this unsynced entry? It has not been posted to the server.')) return;
     setBusy(id);
     try {
+      const item = outbox.records().find((record) => record.id === id);
+      const clientRef = item?.input.clientRef ?? item?.id ?? id;
       await outbox.drop(id);
+      const discardedReceipts = await attachmentQueue.discardForClientRef(clientRef);
       emitSyncResult(0, null);
       await refresh();
-      setMessage('Unsynced entry discarded. No server ledger entry was created.');
+      setMessage(`Unsynced entry discarded. No server ledger entry was created.${discardedReceipts ? ` ${discardedReceipts} local ${discardedReceipts === 1 ? 'receipt was' : 'receipts were'} removed too.` : ''}`);
     } finally {
       setBusy('');
     }
