@@ -1,5 +1,11 @@
 import type { LoadedBook } from './api';
-import type { OfflineEntryInput, OfflineSyncContext } from '../../shared/offline-conflict';
+import type {
+  OfflineEntryInput,
+  OfflineRevisionContext,
+  OfflineSyncContext,
+} from '../../shared/offline-conflict';
+import { offlineEffectSignature } from '../../shared/offline-conflict';
+import type { Entry } from '../../shared/types';
 
 type MaybeLoadedBook = Partial<LoadedBook>;
 
@@ -45,5 +51,33 @@ export function captureOfflineContext(book: MaybeLoadedBook, input: OfflineEntry
       amount: receipt.amount,
       inCash: receipt.inCash,
     } : null,
+  };
+}
+
+/** Exact entry/effect state a queued correction or void is allowed to supersede. */
+export function captureOfflineRevisionContext(entry: Entry): OfflineRevisionContext {
+  return {
+    version: 1,
+    capturedAt: new Date().toISOString(),
+    entry: {
+      id: entry.id,
+      occurredOn: entry.occurredOn,
+      kind: entry.kind,
+      amount: Number(entry.amount),
+      purpose: entry.purpose ?? '',
+      raw: entry.raw ?? '',
+      accountId: entry.accountId ?? null,
+      toAccountId: entry.toAccountId ?? null,
+      projectId: entry.projectId ?? null,
+      personId: entry.personId ?? null,
+      forBusiness: entry.forBusiness ?? null,
+      historical: Boolean(entry.historical),
+      linkReceiptId: entry.linkReceiptId ?? null,
+      correctedFrom: entry.correctedFrom == null ? null : Number(entry.correctedFrom),
+      correctedAt: entry.correctedAt ?? null,
+      voided: Boolean(entry.voided),
+      voidedAt: entry.voidedAt ?? null,
+      effectSignature: offlineEffectSignature(entry.effects ?? []),
+    },
   };
 }
