@@ -104,7 +104,7 @@ export default function OfflineAttachmentStatus() {
     .slice(0, 25);
 
   const syncNow = async () => {
-    if (!online || busy) return;
+    if (!online || busy === 'sync') return;
     setBusy('sync');
     setMessage('');
     let sent = 0;
