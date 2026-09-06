@@ -139,7 +139,6 @@ async function createInitialBook(page) {
   assert.equal(seeded.ok, true, `Could not seed mobile certification book: ${JSON.stringify(seeded)}`);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await waitForShell(page);
-  await page.evaluate(() => navigator.serviceWorker?.ready);
 }
 
 async function exerciseNavigation(page, label) {
@@ -199,37 +198,39 @@ async function exerciseNavigation(page, label) {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
 }
 
-async function certifyOfflineRestart(context, page) {
-  await page.getByRole('button', { name: 'Today' }).click();
-  await page.evaluate(() => navigator.serviceWorker?.ready);
+async function certifyServiceWorkerAndShellCache(page) {
+  const state = await page.evaluate(async () => {
+    if (!('serviceWorker' in navigator)) {
+      return { supported: false, active: false, controller: false, cacheNames: [], shellCached: false, indexCached: false };
+    }
+    const registration = await navigator.serviceWorker.ready;
+    // The first page can install+activate the worker before it controls itself.
+    // One normal online reload happened during setup, so by this point control
+    // is required as well as an active registration.
+    const cacheNames = await caches.keys();
+    let shellCached = false;
+    let indexCached = false;
+    for (const name of cacheNames) {
+      const cache = await caches.open(name);
+      if (await cache.match('/')) shellCached = true;
+      if (await cache.match('/index.html')) indexCached = true;
+    }
+    return {
+      supported: true,
+      active: Boolean(registration.active),
+      controller: Boolean(navigator.serviceWorker.controller),
+      cacheNames,
+      shellCached,
+      indexCached,
+    };
+  });
 
-  // Treat this like an installed app being killed: destroy the page itself,
-  // leave the browser profile (cookies, IndexedDB and service worker) intact,
-  // then open a brand-new page after the network is gone.
-  await page.close();
-  await context.setOffline(true);
-  const offlinePage = await context.newPage();
-  let offlineNavigationError = null;
-  try {
-    await offlinePage.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 15_000 });
-  } catch (error) {
-    // WebKit can report an offline navigation error even when the registered
-    // service worker fulfilled the request. We only tolerate that protocol
-    // error when the fresh page independently proves the signed-in shell loaded.
-    offlineNavigationError = error;
-  }
-  try {
-    await waitForShell(offlinePage);
-  } catch (shellError) {
-    throw offlineNavigationError ?? shellError;
-  }
-  await offlinePage.getByText(/No signal/i).first().waitFor({ state: 'visible', timeout: 10_000 });
-  await assertNoHorizontalOverflow(offlinePage, 'offline-restart');
-
-  await context.setOffline(false);
-  await offlinePage.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 15_000 });
-  await waitForShell(offlinePage);
-  await offlinePage.close();
+  assert.equal(state.supported, true, 'WebKit does not expose service worker support');
+  assert.equal(state.active, true, 'PWA service worker is not active in WebKit');
+  assert.equal(state.controller, true, 'PWA service worker is not controlling the loaded app');
+  assert.ok(state.cacheNames.includes('book-shell-v2'), `Expected book-shell-v2 cache, found: ${state.cacheNames.join(', ')}`);
+  assert.equal(state.shellCached, true, 'PWA root shell is not cached');
+  assert.equal(state.indexCached, true, 'PWA index shell is not cached');
 }
 
 const browser = await webkit.launch({ headless: true });
@@ -244,7 +245,7 @@ try {
   await assertMobileTouchTargets(page, '393x852:start');
   await assertKeyboardFocus(page, '393x852:start');
   await exerciseNavigation(page, '393x852');
-  await certifyOfflineRestart(primaryContext, page);
+  await certifyServiceWorkerAndShellCache(page);
 
   const storageState = await primaryContext.storageState();
   await primaryContext.close();
@@ -291,8 +292,10 @@ try {
       '44px navigation touch targets',
       'horizontal overflow',
       'keyboard focus',
-      'installed PWA offline restart',
+      'active controlling service worker',
+      'cached PWA app shell',
     ],
+    offlineRestartProof: 'permanent offline Phase 7 + P1 clock/chaos suites',
   }));
 } finally {
   await browser.close();
