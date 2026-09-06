@@ -15,15 +15,19 @@ describe('Advanced offline Phase 3 contract', () => {
     expect(state).toContain('indexedDB.open(OFFLINE_DB_NAME, OFFLINE_DB_VERSION)');
   });
 
-  it('persists explicit queue states and recovers interrupted syncing work', () => {
+  it('persists explicit queue states, strict enqueue order, and recovers interrupted syncing work', () => {
     const state = read('client/src/offline-sync-state.ts');
+    const offline = read('client/src/offline.ts');
     for (const status of ['pending', 'syncing', 'retry_wait', 'blocked_auth', 'rejected']) {
       expect(state).toContain(`'${status}'`);
     }
+    expect(state).toContain('nextOrder: 1');
+    expect(state).toContain('this.state.nextOrder++');
     expect(state).toContain('recoverInterrupted(queue: Queued[]');
-    expect(state).toContain("current.status === 'syncing'");
+    expect(state).toContain("current?.status === 'syncing'");
     expect(state).toContain("status: 'retry_wait'");
     expect(state).toContain("kind: 'interrupted'");
+    expect(offline).toContain('offlineSyncState.ordered(offlineRepository.queueAll())');
   });
 
   it('never deletes a queued financial write on network, auth, or permanent refusal', () => {
