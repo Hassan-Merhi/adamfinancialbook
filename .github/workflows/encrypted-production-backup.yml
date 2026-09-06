@@ -1,4 +1,5 @@
 name: Encrypted Production Backup
+# P1 final-certification trigger: this comment intentionally causes one exact-release backup on merge.
 
 on:
   schedule:
