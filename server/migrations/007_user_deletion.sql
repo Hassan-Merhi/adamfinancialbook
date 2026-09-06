@@ -9,6 +9,39 @@
 DROP TRIGGER IF EXISTS users_no_delete ON users;
 DROP FUNCTION IF EXISTS prevent_physical_user_delete();
 
+-- Physical deletion remains database-guarded. Only an application transaction
+-- that explicitly opts in with app.allow_user_delete=true may delete a user.
+-- This preserves the direct-SQL safety boundary while allowing the owner's
+-- disable-then-delete workflow and Factory Reset to work.
+CREATE OR REPLACE FUNCTION guard_user_physical_delete()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  other_owners INT;
+BEGIN
+  IF current_setting('app.allow_user_delete', true) IS DISTINCT FROM 'true' THEN
+    RAISE EXCEPTION 'Users cannot be deleted directly; disable access and use the permanent-delete action.';
+  END IF;
+
+  IF OLD.active = true AND OLD.role = 'owner' THEN
+    SELECT count(*)::int INTO other_owners
+      FROM users
+     WHERE id <> OLD.id AND active = true AND role = 'owner';
+    IF other_owners = 0 THEN
+      RAISE EXCEPTION 'The last active owner cannot be deleted.';
+    END IF;
+  END IF;
+
+  RETURN OLD;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS users_guard_delete ON users;
+CREATE TRIGGER users_guard_delete
+BEFORE DELETE ON users
+FOR EACH ROW EXECUTE FUNCTION guard_user_physical_delete();
+
 -- Sessions have no accounting value. Once the login is permanently deleted,
 -- remove its session rows as well.
 ALTER TABLE user_sessions
