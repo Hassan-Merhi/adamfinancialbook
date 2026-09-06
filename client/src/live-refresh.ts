@@ -143,11 +143,29 @@ export function installLiveMutationBridge(target: Window = window): () => void {
       nextInit = { ...init, headers };
     }
 
-    const response = await originalFetch(input, nextInit);
+    let response: Response;
+    try {
+      response = await originalFetch(input, nextInit);
+    } catch (error) {
+      // navigator.onLine can remain true through Wi-Fi captive portals, Render
+      // restarts, DNS failures, and brief server/network outages. If startup's
+      // auth/book read cannot reach the server, let EventSource keep attempting
+      // its native reconnect; its later successful open becomes the catch-up
+      // signal. This is transport recovery, not an application polling loop.
+      if (
+        sameOrigin
+        && target.navigator.onLine
+        && (url?.pathname === '/api/me' || url?.pathname === '/api/overview')
+      ) {
+        gaps.streamError();
+        startRealtime();
+      }
+      throw error;
+    }
     if (!response.ok || !sameOrigin || !url) return response;
 
     // Overview is only reachable after authentication and is loaded on every
-    // signed-in startup, making it the safe point to open the live stream.
+    // signed-in startup, making it the normal safe point to open the live stream.
     if (method === 'GET' && url.pathname === '/api/overview') startRealtime();
     if (url.pathname === '/api/logout' && method !== 'GET') stopRealtime();
 
