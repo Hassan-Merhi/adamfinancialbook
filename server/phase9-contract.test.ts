@@ -40,13 +40,22 @@ describe('Phase 9 backup, recovery and observability contract', () => {
 
   it('provisions automatic off-site backup and independent health monitoring', () => {
     const render = read('render.yaml');
+    const workflow = read('.github/workflows/encrypted-production-backup.yml');
+    const oidc = read('server/github-actions-oidc.ts');
+    const readiness = read('server/readiness.ts');
+
     expect(render).toContain('healthCheckPath: /api/health/ready');
-    expect(render).toContain('name: adam-financial-book-encrypted-backup');
-    expect(render).toContain('startCommand: npm run backup:send');
     expect(render).toContain('name: adam-financial-book-health-monitor');
     expect(render).toContain('schedule: "*/10 * * * *"');
-    expect(render).toContain('envVarKey: BACKUP_ENCRYPTION_KEY');
     expect(render).toContain('envVarKey: RENDER_EXTERNAL_URL');
+    expect(render).toContain('key: BACKUP_ENCRYPTION_KEY');
+    expect(workflow).toContain("cron: '30 1 * * *'");
+    expect(workflow).toContain('id-token: write');
+    expect(workflow).toContain('retention-days: 90');
+    expect(workflow).toContain('Acknowledge durable delivery in production');
+    expect(oidc).toContain("const REPOSITORY_ID = '1342187497'");
+    expect(readiness).toContain("destination = 'github-actions-artifact'");
+    expect(readiness).toContain('BACKUP_STALE_HOURS ?? 36');
   });
 
   it('keeps operations detail owner-only without blocking unrelated delegated routes', () => {

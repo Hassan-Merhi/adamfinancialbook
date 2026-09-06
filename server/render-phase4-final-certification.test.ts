@@ -32,14 +32,32 @@ describe('Render Phase 4 final production certification contract', () => {
     expect(deploy).toContain('[Production Deploy] Adam Financial Book release certification failure');
   });
 
-  it('keeps the encrypted production backup contract recoverable', () => {
+  it('keeps the encrypted production backup contract recoverable and off-site without SMTP', () => {
     const render = read('render.yaml');
+    const workflow = read('.github/workflows/encrypted-production-backup.yml');
+    const oidc = read('server/github-actions-oidc.ts');
+    const exportRoute = read('server/backup-export.ts');
+    const delivery = read('server/backup-delivery.ts');
     const backup = read('server/backup-service.ts');
+    const readiness = read('server/readiness.ts');
 
-    expect(render).toContain('name: adam-financial-book-encrypted-backup');
-    expect(render).toContain('schedule: "30 1 * * *"');
-    expect(render).toContain('startCommand: npm run backup:send');
-    expect(render).toContain('envVarKey: BACKUP_ENCRYPTION_KEY');
+    expect(render).not.toContain('name: adam-financial-book-encrypted-backup');
+    expect(workflow).toContain("cron: '30 1 * * *'");
+    expect(workflow).toContain('id-token: write');
+    expect(workflow).toContain('adam-financial-book-backup');
+    expect(workflow).toContain('retention-days: 90');
+    expect(workflow).toContain('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02');
+    expect(workflow).toContain("headers.get('x-afb-sha256'");
+    expect(workflow).toContain('Acknowledge durable delivery in production');
+    expect(workflow).toContain('[Production Backup] Adam Financial Book encrypted backup failure');
+    expect(oidc).toContain("const REPOSITORY_ID = '1342187497'");
+    expect(oidc).toContain('workflow_ref');
+    expect(oidc).toContain('claims.sha !== expectedRelease');
+    expect(exportRoute).toContain("createEncryptedDatabaseBackup('github-actions-export')");
+    expect(delivery).toContain("destination = 'github-actions-artifact'");
+    expect(delivery).toContain('retention_until');
+    expect(readiness).toContain("BACKUP_STALE_HOURS ?? 36");
+    expect(readiness).toContain("destination = 'github-actions-artifact'");
     expect(backup).toContain("createCipheriv('aes-256-gcm'");
     expect(backup).toContain("createDecipheriv('aes-256-gcm'");
     expect(backup).toContain("logOperationalEvent('backup.completed'");

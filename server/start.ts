@@ -39,6 +39,7 @@ const [
   { operationsRouter },
   { requestTelemetry },
   { healthRouter },
+  { backupExportRouter },
   { publicSecurityRouter, protectedSecurityRouter },
   { liveUpdatesRouter, liveMutationObserver, liveSecuritySessionObserver },
   { offlineSyncRouter },
@@ -53,6 +54,7 @@ const [
   import('./operations.js'),
   import('./observability.js'),
   import('./health.js'),
+  import('./backup-export.js'),
   import('./security-gate.js'),
   import('./live-updates.js'),
   import('./offline-sync.js'),
@@ -63,6 +65,10 @@ const [
 ]);
 
 publicSecurityRouter.use(healthRouter);
+// GitHub-hosted Actions authenticate these narrow machine-to-machine routes with
+// a short-lived signed OIDC identity. No session cookie, database credential,
+// or backup encryption key ever leaves the production service.
+publicSecurityRouter.use(backupExportRouter);
 // publicSecurityRouter is mounted after loadSecuritySession but before
 // requireAuthenticatedApi. Fixed public routes finish first; this fallthrough
 // therefore observes all later successful writes, including the protected

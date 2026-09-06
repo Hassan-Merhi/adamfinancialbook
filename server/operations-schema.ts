@@ -16,11 +16,22 @@ export async function ensureOperationsSchema() {
           checksum          CHAR(64),
           migration_version BIGINT,
           encrypted         BOOLEAN NOT NULL DEFAULT true,
-          error             TEXT
+          error             TEXT,
+          delivered_at      TIMESTAMPTZ,
+          delivery_ref      TEXT,
+          artifact_digest   TEXT,
+          retention_until   TIMESTAMPTZ
         )
       `);
+      await query('ALTER TABLE backup_runs ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ');
+      await query('ALTER TABLE backup_runs ADD COLUMN IF NOT EXISTS delivery_ref TEXT');
+      await query('ALTER TABLE backup_runs ADD COLUMN IF NOT EXISTS artifact_digest TEXT');
+      await query('ALTER TABLE backup_runs ADD COLUMN IF NOT EXISTS retention_until TIMESTAMPTZ');
       await query('CREATE INDEX IF NOT EXISTS backup_runs_started_idx ON backup_runs (started_at DESC)');
       await query('CREATE INDEX IF NOT EXISTS backup_runs_status_idx ON backup_runs (status, started_at DESC)');
+      await query(
+        'CREATE INDEX IF NOT EXISTS backup_runs_delivery_idx ON backup_runs (destination, delivered_at DESC)',
+      );
       await query(`
         CREATE TABLE IF NOT EXISTS operational_events (
           id          TEXT PRIMARY KEY,
