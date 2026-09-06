@@ -41,6 +41,7 @@ const [
   { healthRouter },
   { publicSecurityRouter, protectedSecurityRouter },
   { offlineSyncRouter },
+  { offlineRevisionRouter },
   { handoffConfirmationSafetyRouter },
   { offlineAttachmentRouter },
 ] = await Promise.all([
@@ -52,6 +53,7 @@ const [
   import('./health.js'),
   import('./security-gate.js'),
   import('./offline-sync.js'),
+  import('./offline-revisions.js'),
   import('./handoff-confirmation-safety.js'),
   import('./offline-attachments.js'),
 ]);
@@ -68,6 +70,9 @@ protectedSecurityRouter.use(handoffConfirmationSafetyRouter);
 // Stable Phase 5 attachment ids make uncertain/retried uploads exactly-once and
 // resolve an offline financial clientRef after the entry reaches PostgreSQL.
 protectedSecurityRouter.use(offlineAttachmentRouter);
+// Corrections and voids carrying an offline precondition are write-ahead queued
+// and must be checked before the legacy owner-only routes can mutate history.
+protectedSecurityRouter.use(offlineRevisionRouter);
 // Offline retries carrying a clientRef must reach the idempotent/conflict-safe
 // routes before the legacy delegation route. Requests without an offline marker
 // call next() and preserve existing production behavior unchanged.
