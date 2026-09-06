@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'node:crypto';
 import { existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { gzipSync, gunzipSync } from 'node:zlib';
+import type { PoolClient } from 'pg';
 import { pool, newId, query } from './db.js';
 import { getMigrationStatus } from './migration.js';
 import { fireOperationalAlert, logOperationalEvent } from './alerts.js';
@@ -12,6 +13,7 @@ const EXCLUDED_TABLES = new Set(['schema_migrations', 'backup_runs', 'operationa
 export interface BackupTable {
   name: string;
   columns: string[];
+  binaryColumns: string[];
   rows: Record<string, unknown>[];
   rowCount: number;
   checksum: string;
@@ -87,9 +89,6 @@ async function appTables(): Promise<string[]> {
     const ready = [...remaining].filter((table) =>
       [...(parents.get(table) ?? [])].every((parent) => !remaining.has(parent)));
     if (!ready.length) {
-      // A database-level cycle is unusual for this schema. Preserve a stable
-      // order in the artifact; restore will fail atomically rather than silently
-      // accepting a partial database.
       ordered.push(...[...remaining].sort());
       break;
     }
@@ -102,15 +101,32 @@ async function appTables(): Promise<string[]> {
   return ordered;
 }
 
-async function tableColumns(table: string) {
-  const rows = await query<{ column_name: string }>(
-    `SELECT column_name
+async function tableShape(table: string) {
+  const rows = await query<{ column_name: string; udt_name: string }>(
+    `SELECT column_name, udt_name
        FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = $1 AND is_generated = 'NEVER'
       ORDER BY ordinal_position`,
     [table],
   );
-  return rows.map((row) => row.column_name);
+  return {
+    columns: rows.map((row) => row.column_name),
+    binaryColumns: rows.filter((row) => row.udt_name === 'bytea').map((row) => row.column_name),
+  };
+}
+
+function backupSafeRow(row: Record<string, unknown>, binaryColumns: Set<string>) {
+  return Object.fromEntries(Object.entries(row).map(([column, value]) => {
+    if (!binaryColumns.has(column) || value === null || value === undefined) return [column, value];
+    if (!Buffer.isBuffer(value)) throw new Error(`Expected BYTEA column ${column} to be a Buffer.`);
+    return [column, value.toString('base64')];
+  }));
+}
+
+function restoreValue(table: BackupTable, column: string, value: unknown) {
+  if (!table.binaryColumns.includes(column) || value === null || value === undefined) return value;
+  if (typeof value !== 'string') throw new Error(`Backup BYTEA value ${table.name}.${column} is invalid.`);
+  return Buffer.from(value, 'base64');
 }
 
 function canonicalRows(rows: Record<string, unknown>[]) {
@@ -122,19 +138,39 @@ export async function createBackupSnapshot(): Promise<DatabaseBackupSnapshot> {
   if (migration.pending.length) {
     throw new Error(`Refusing to back up while ${migration.pending.length} migration(s) are pending.`);
   }
+
+  const tableNames = await appTables();
+  const shapes = new Map<string, Awaited<ReturnType<typeof tableShape>>>();
+  for (const name of tableNames) shapes.set(name, await tableShape(name));
+
+  const client = await pool.connect();
   const tables: BackupTable[] = [];
-  for (const name of await appTables()) {
-    const columns = await tableColumns(name);
-    const result = await pool.query<Record<string, unknown>>(`SELECT * FROM ${quoteIdent(name)}`);
-    const rows = result.rows;
-    tables.push({
-      name,
-      columns,
-      rows,
-      rowCount: rows.length,
-      checksum: sha256(canonicalRows(rows)),
-    });
+  try {
+    // Every table is read from the same MVCC snapshot. A transfer/entry cannot
+    // land in one table midway through the backup and disappear from another.
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    for (const name of tableNames) {
+      const shape = shapes.get(name)!;
+      const binary = new Set(shape.binaryColumns);
+      const result = await client.query<Record<string, unknown>>(`SELECT * FROM ${quoteIdent(name)}`);
+      const rows = result.rows.map((row) => backupSafeRow(row, binary));
+      tables.push({
+        name,
+        columns: shape.columns,
+        binaryColumns: shape.binaryColumns,
+        rows,
+        rowCount: rows.length,
+        checksum: sha256(canonicalRows(rows)),
+      });
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
   }
+
   return {
     format: 'adam-financial-book-postgres',
     version: 1,
@@ -183,7 +219,7 @@ export function decryptBackupBuffer(buffer: Buffer): DatabaseBackupSnapshot {
     throw new Error('Backup payload is not a supported Adam Financial Book database snapshot.');
   }
   for (const table of parsed.tables) {
-    if (!table.name || !Array.isArray(table.columns) || !Array.isArray(table.rows)) {
+    if (!table.name || !Array.isArray(table.columns) || !Array.isArray(table.binaryColumns) || !Array.isArray(table.rows)) {
       throw new Error('Backup payload contains an invalid table record.');
     }
     if (table.rowCount !== table.rows.length || table.checksum !== sha256(canonicalRows(table.rows))) {
@@ -270,6 +306,24 @@ export function pruneBackupFiles(directory: string, retentionDays: number) {
   return removed;
 }
 
+async function reseedOwnedSequences(client: PoolClient, tables: BackupTable[]) {
+  for (const table of tables) {
+    for (const column of table.columns) {
+      const sequence = await client.query<{ seq: string | null }>(
+        'SELECT pg_get_serial_sequence($1,$2) AS seq',
+        [`public.${table.name}`, column],
+      );
+      const seq = sequence.rows[0]?.seq;
+      if (!seq) continue;
+      const maximum = await client.query<{ max_value: string | number | null }>(
+        `SELECT max(${quoteIdent(column)})::bigint AS max_value FROM ${quoteIdent(table.name)}`,
+      );
+      const next = Number(maximum.rows[0]?.max_value ?? 0) + 1;
+      await client.query('SELECT setval($1::regclass,$2,false)', [seq, Math.max(1, next)]);
+    }
+  }
+}
+
 export async function restoreBackupSnapshot(snapshot: DatabaseBackupSnapshot) {
   const migration = await getMigrationStatus();
   if (migration.pending.length) throw new Error('Restore target has pending migrations. Apply them before restoring.');
@@ -293,7 +347,7 @@ export async function restoreBackupSnapshot(snapshot: DatabaseBackupSnapshot) {
       if (!table.rows.length) continue;
       const columns = table.columns.map(quoteIdent);
       for (const row of table.rows) {
-        const values = table.columns.map((column) => row[column] ?? null);
+        const values = table.columns.map((column) => restoreValue(table, column, row[column] ?? null));
         const placeholders = values.map((_value, index) => `$${index + 1}`);
         await client.query(
           `INSERT INTO ${quoteIdent(table.name)} (${columns.join(', ')}) VALUES (${placeholders.join(', ')})`,
@@ -301,6 +355,7 @@ export async function restoreBackupSnapshot(snapshot: DatabaseBackupSnapshot) {
         );
       }
     }
+    await reseedOwnedSequences(client, snapshot.tables);
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
