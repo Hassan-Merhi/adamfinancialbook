@@ -57,4 +57,12 @@ describe('Advanced offline Phase 1 contract', () => {
     expect(clearSession).not.toContain('this.queues.delete');
     expect(clearSession).not.toContain('objectStore(OUTBOX)');
   });
+
+  it('waits for durable IndexedDB clearing before a successful reset reloads the app', () => {
+    const reset = read('client/src/views/ResetData.tsx');
+    expect(reset).toContain('await outbox.clear();');
+    expect(reset).toContain('await snapshot.save(null);');
+    expect(reset.indexOf('await outbox.clear();')).toBeLessThan(reset.indexOf('window.location.reload();'));
+    expect(reset.indexOf('await snapshot.save(null);')).toBeLessThan(reset.indexOf('window.location.reload();'));
+  });
 });
