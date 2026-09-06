@@ -1,8 +1,11 @@
 import 'dotenv/config';
 import { sendOperationalAlert, logOperationalEvent } from './alerts.js';
 
-const url = process.env.APP_HEALTH_URL;
-if (!url) throw new Error('APP_HEALTH_URL is required for the external production monitor.');
+const base = process.env.APP_HEALTH_URL;
+if (!base) throw new Error('APP_HEALTH_URL is required for the external production monitor.');
+const url = base.endsWith('/api/health/ready')
+  ? base
+  : `${base.replace(/\/$/, '')}/api/health/ready`;
 
 try {
   const started = Date.now();
