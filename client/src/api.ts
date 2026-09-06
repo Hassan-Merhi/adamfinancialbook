@@ -198,7 +198,7 @@ export interface Reading { draft: Draft; source: 'claude' | 'rules'; duplicate: 
 export interface PendingTransferSave {
   mode: 'pending_transfer';
   id: string;
-  status: 'pending';
+  status: 'pending' | 'confirmed' | 'rejected';
 }
 export type EntrySaveResult = Entry | PendingTransferSave;
 
@@ -299,7 +299,8 @@ export interface EvidenceDashboard {
  * destination is a delegated wallet, the server intentionally refuses a direct
  * ledger transfer. In that one case, turn the exact same confirmed draft into a
  * cash-handoff request so the recipient must confirm receipt before anything
- * posts to the ledger.
+ * posts to the ledger. The original clientRef follows that fallback so a retry
+ * after an uncertain response cannot create a second pending handoff.
  */
 async function addEntry(input: EntryInput): Promise<EntrySaveResult> {
   try {
@@ -311,12 +312,13 @@ async function addEntry(input: EntryInput): Promise<EntrySaveResult> {
       throw err;
     }
 
-    const pending = await send<{ id: string; status: 'pending' }>('/delegation/transfers', 'POST', {
+    const pending = await send<{ id: string; status: 'pending' | 'confirmed' | 'rejected' }>('/delegation/transfers', 'POST', {
       fromAccountId: input.accountId,
       toAccountId: input.toAccountId,
       amount: input.amount,
       purpose: input.purpose || 'Cash handoff',
       occurredOn: input.occurredOn,
+      clientRef: input.clientRef ?? null,
     });
     return { mode: 'pending_transfer', ...pending };
   }
