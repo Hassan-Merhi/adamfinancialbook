@@ -1,0 +1,41 @@
+name: Phase 4 Offline Conflict Safety Builder
+
+on:
+  push:
+    branches:
+      - feature/offline-conflict-safety-phase4-hardening
+    paths:
+      - .github/workflows/phase4-builder.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: feature/offline-conflict-safety-phase4-hardening
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply Phase 4 hardening
+        run: node scripts/phase4-build.mjs
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test -- --passWithNoTests
+      - name: Production build
+        run: npm run build
+      - name: Commit verified Phase 4 code
+        run: |
+          git config user.name "Hassan Merhi Dakik"
+          git config user.email "hassmerhi.etshadi@gmail.com"
+          git add client/src/offline-sync-state.ts client/src/offline-safe-setup-phase4.test.ts docs/OFFLINE_SAFE_SETUP_PHASE4_CONFLICT_SAFETY.md
+          git diff --cached --quiet && exit 0
+          git commit -m "feat: harden dependency-aware offline conflict safety"
+          git push origin HEAD:feature/offline-conflict-safety-phase4-hardening
