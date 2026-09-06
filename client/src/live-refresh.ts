@@ -7,6 +7,7 @@ import {
 import {
   dispatchLiveRecovery,
   LiveGapTracker,
+  type LiveRecoveryReason,
 } from './live-recovery';
 
 export { classifyLiveMutation, classifyLiveTopics } from '../../shared/live-updates';
@@ -70,6 +71,23 @@ export function installLiveMutationBridge(target: Window = window): () => void {
     target.dispatchEvent(new CustomEvent<LiveMutationDetail>(LIVE_MUTATION_EVENT, { detail }));
   };
 
+  const recover = (reason: LiveRecoveryReason, at = Date.now()) => {
+    // Keep a dedicated lifecycle signal for diagnostics/tests, then route the
+    // actual catch-up through the same mutation invalidation system as Phases
+    // 1-4. App.tsx already flushes the offline outbox on `online`; if that flush
+    // is still running, its successful writes emit newer mutation events and
+    // the existing refresh-start timestamps suppress stale duplicate reads.
+    dispatchLiveRecovery(target, reason, at);
+    dispatch({
+      book: true,
+      dashboard: true,
+      topics: [...ALL_LIVE_TOPICS],
+      path: '/api/live-updates/recovery',
+      method: 'RECOVER',
+      at,
+    });
+  };
+
   const stopRealtime = () => {
     source?.close();
     source = null;
@@ -81,7 +99,7 @@ export function installLiveMutationBridge(target: Window = window): () => void {
 
     next.addEventListener('open', () => {
       const recovery = gaps.streamOpen();
-      if (recovery) dispatchLiveRecovery(target, recovery);
+      if (recovery) recover(recovery);
     });
 
     next.addEventListener('error', () => {
@@ -148,7 +166,10 @@ export function installLiveMutationBridge(target: Window = window): () => void {
   };
 
   const online = () => {
-    dispatchLiveRecovery(target, gaps.online());
+    // Try an immediate authoritative catch-up. If connectivity is only nominal
+    // and the server still cannot be reached, EventSource will mark a gap and a
+    // later successful `open` will trigger another recovery without polling.
+    recover(gaps.online());
     startRealtime();
   };
   const offline = () => {
@@ -163,7 +184,7 @@ export function installLiveMutationBridge(target: Window = window): () => void {
     }
     const recovery = gaps.visible(now);
     if (recovery && target.navigator.onLine) {
-      dispatchLiveRecovery(target, recovery, now);
+      recover(recovery, now);
       startRealtime();
     }
   };
