@@ -19,6 +19,7 @@ export default function Statement({ book, focus, back, run }: {
   const [kind, setKind] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [rows, setRows] = useState<StatementRowView[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [summary, setSummary] = useState({ total: 0, inSum: 0, outSum: 0 });
@@ -93,6 +94,8 @@ export default function Statement({ book, focus, back, run }: {
 
   const head = describe(book, focus);
   const filtered = !!(q || kind || from || to);
+  const activeFilterCount = [q.trim(), kind, from, to].filter(Boolean).length;
+  const showFilters = filtersOpen || filtered;
 
   const queueCorrection = (entry: Entry, amount: number) => {
     run(async () => {
@@ -123,7 +126,18 @@ export default function Statement({ book, focus, back, run }: {
         </div>
       </div>
 
-      <div className="filters">
+      <button
+        type="button"
+        className="statement-filter-toggle"
+        aria-expanded={showFilters}
+        aria-controls="statement-filters"
+        onClick={() => setFiltersOpen((open) => !open)}
+      >
+        <span>{activeFilterCount > 0 ? `${activeFilterCount} ${activeFilterCount === 1 ? 'filter' : 'filters'} active` : 'Filter statement'}</span>
+        <span aria-hidden="true">{showFilters ? '−' : '+'}</span>
+      </button>
+
+      <div id="statement-filters" className={`filters statement-filters${showFilters ? ' is-open' : ''}`}>
         <input className="fi grow" value={q} onChange={(e) => setQ(e.target.value)}
           placeholder="Search purpose or description" />
         <select className="fi" value={kind} onChange={(e) => setKind(e.target.value)}>
@@ -133,7 +147,13 @@ export default function Statement({ book, focus, back, run }: {
         <label className="flab">From <input className="fi" type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
         <label className="flab">To <input className="fi" type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
         {filtered && (
-          <button className="btn ghost small" onClick={() => { setQ(''); setKind(''); setFrom(''); setTo(''); }}>Clear</button>
+          <button className="btn ghost small" onClick={() => {
+            setQ('');
+            setKind('');
+            setFrom('');
+            setTo('');
+            setFiltersOpen(false);
+          }}>Clear</button>
         )}
       </div>
 

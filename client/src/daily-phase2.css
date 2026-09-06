@@ -1,0 +1,168 @@
+/* Phase 2 — structural mobile simplification.
+   These rules deliberately change only the phone presentation of the daily path:
+   optional controls stay out of the way until requested, Money scans as collapsed
+   business summaries, and statement filters are opt-in instead of permanent UI. */
+
+.money-businesses-mobile,
+.statement-filter-toggle {
+  display:none;
+}
+
+@media (max-width:760px) {
+  /* A normal transaction should be confirmable without scrolling through optional
+     evidence controls. The receipt picker becomes available with More details. */
+  .review:not(:has(.reviewdetails)) .receipt-picker {
+    display:none;
+  }
+
+  /* Money is scan-first on phones: one line per business until the user opens it. */
+  .money-businesses-desktop {
+    display:none;
+  }
+
+  .money-businesses-mobile {
+    display:grid;
+    gap:8px;
+    margin-bottom:10px;
+  }
+
+  .money-business-details {
+    overflow:hidden;
+    border:1px solid var(--line);
+    border-radius:16px;
+    background:var(--card);
+  }
+
+  .money-business-details > summary {
+    min-height:58px;
+    padding:10px 12px;
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto auto;
+    align-items:center;
+    gap:8px;
+    cursor:pointer;
+    list-style:none;
+  }
+
+  .money-business-details > summary::-webkit-details-marker {
+    display:none;
+  }
+
+  .money-business-details[open] > summary {
+    background:var(--sunk);
+    border-bottom:1px solid var(--line-soft);
+  }
+
+  .money-business-summary-copy {
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+  }
+
+  .money-business-summary-copy b {
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    font-size:13.5px;
+  }
+
+  .money-business-summary-copy small {
+    color:var(--ink-3);
+    font-size:10.5px;
+    line-height:1.25;
+  }
+
+  .money-business-summary-balance {
+    font-size:13px;
+    font-weight:650;
+    white-space:nowrap;
+  }
+
+  .money-business-summary-chevron {
+    width:24px;
+    color:var(--ink-3);
+    font-size:16px;
+    line-height:1;
+    text-align:center;
+    transition:transform .16s ease;
+  }
+
+  .money-business-details[open] .money-business-summary-chevron {
+    transform:rotate(180deg);
+  }
+
+  .money-business-body {
+    min-width:0;
+  }
+
+  .money-business-body .row {
+    margin:0;
+  }
+
+  .money-business-empty {
+    min-height:46px;
+    padding:11px 13px;
+    display:flex;
+    align-items:center;
+    color:var(--ink-3);
+    font-size:12.5px;
+  }
+
+  /* Search/date/type controls are useful, but they should not consume the first
+     screen of every statement. A single filter control expands them on demand. */
+  .statement-filter-toggle {
+    width:100%;
+    min-height:44px;
+    margin:-3px 0 9px;
+    padding:9px 12px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    border:1px solid var(--line-soft);
+    border-radius:13px;
+    background:var(--sunk);
+    color:var(--ink-2);
+    font-size:12.5px;
+    font-weight:650;
+    text-align:left;
+  }
+
+  .statement-filter-toggle > span:last-child {
+    flex:none;
+    color:var(--ink-3);
+    font-size:16px;
+  }
+
+  .statement-filters {
+    display:none !important;
+  }
+
+  .statement-filters.is-open {
+    display:grid !important;
+  }
+
+  .statement-filters.is-open .fi,
+  .statement-filters.is-open .flab {
+    min-width:0;
+  }
+}
+
+@media (max-width:420px) {
+  .money-business-details > summary {
+    min-height:54px;
+    padding:9px 10px;
+    gap:6px;
+  }
+
+  .money-business-summary-balance {
+    font-size:12.5px;
+  }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  .money-business-summary-chevron {
+    transition:none;
+  }
+}

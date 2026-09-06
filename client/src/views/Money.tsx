@@ -51,6 +51,20 @@ export default function Money({ book, open }: { book: LoadedBook; open: (f: Focu
     />
   );
 
+  const loanLine = (loan: LoadedBook['loans'][number], businessId: string) => {
+    const raw = book.balances.loans[loan.id] ?? 0;
+    const value = loan.fromBusiness === businessId ? -raw : raw;
+    const otherId = loan.fromBusiness === businessId ? loan.toBusiness : loan.fromBusiness;
+    const other = book.businesses.find((candidate) => candidate.id === otherId)?.name ?? 'another business';
+    return (
+      <Row key={loan.id}
+        title={`${value < 0 ? 'Owes' : 'Owed by'} ${other}`}
+        sub={value < 0 ? 'must be returned' : 'waiting on it'}
+        value={money(value)} valueTone={tone(value)}
+        onOpen={() => open({ type: 'loan', fromBusiness: loan.fromBusiness, toBusiness: loan.toBusiness, view: businessId })} />
+    );
+  };
+
   return (
     <div className="money-page daily-page">
       <section className="money-hero" aria-label="Money overview">
@@ -81,7 +95,7 @@ export default function Money({ book, open }: { book: LoadedBook; open: (f: Focu
         </Card>
       )}
 
-      <div className="money-businesses">
+      <div className="money-businesses money-businesses-desktop">
         {book.businesses.map((business) => {
           const accounts = book.accounts.filter((account) => account.businessId === business.id);
           const loans = book.loans.filter((loan) =>
@@ -93,23 +107,39 @@ export default function Money({ book, open }: { book: LoadedBook; open: (f: Focu
               title={<span className="money-business-title">{business.name}<small>{accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}{loans.length ? ` · ${loans.length} intercompany` : ''}</small></span>}
               aside={money(businessBalance)}>
               {accounts.map((account) => accountLine(account))}
-              {loans.map((loan) => {
-                const raw = book.balances.loans[loan.id] ?? 0;
-                const value = loan.fromBusiness === business.id ? -raw : raw;
-                const otherId = loan.fromBusiness === business.id ? loan.toBusiness : loan.fromBusiness;
-                const other = book.businesses.find((candidate) => candidate.id === otherId)?.name ?? 'another business';
-                return (
-                  <Row key={loan.id}
-                    title={`${value < 0 ? 'Owes' : 'Owed by'} ${other}`}
-                    sub={value < 0 ? 'must be returned' : 'waiting on it'}
-                    value={money(value)} valueTone={tone(value)}
-                    onOpen={() => open({ type: 'loan', fromBusiness: loan.fromBusiness, toBusiness: loan.toBusiness, view: business.id })} />
-                );
-              })}
+              {loans.map((loan) => loanLine(loan, business.id))}
               {accounts.length === 0 && loans.length === 0 && (
                 <div className="row muted" style={{ fontSize: 13.5 }}>No money activity here yet.</div>
               )}
             </Card>
+          );
+        })}
+      </div>
+
+      <div className="money-businesses-mobile" aria-label="Business money">
+        {book.businesses.map((business) => {
+          const accounts = book.accounts.filter((account) => account.businessId === business.id);
+          const loans = book.loans.filter((loan) =>
+            (loan.fromBusiness === business.id || loan.toBusiness === business.id) && (book.balances.loans[loan.id] ?? 0) !== 0);
+          const businessBalance = book.balances.businesses[business.id] ?? 0;
+          return (
+            <details className="money-business-details" key={business.id}>
+              <summary>
+                <span className="money-business-summary-copy">
+                  <b>{business.name}</b>
+                  <small>{accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}{loans.length ? ` · ${loans.length} intercompany` : ''}</small>
+                </span>
+                <span className="money-business-summary-balance num">{money(businessBalance)}</span>
+                <span className="money-business-summary-chevron" aria-hidden="true">⌄</span>
+              </summary>
+              <div className="money-business-body">
+                {accounts.map((account) => accountLine(account))}
+                {loans.map((loan) => loanLine(loan, business.id))}
+                {accounts.length === 0 && loans.length === 0 && (
+                  <div className="money-business-empty">No money activity here yet.</div>
+                )}
+              </div>
+            </details>
           );
         })}
       </div>
