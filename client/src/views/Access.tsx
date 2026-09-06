@@ -308,6 +308,18 @@ function OwnPassword({ say }: { say: (t: string, bad?: boolean) => void }) {
   );
 }
 
+async function permanentlyDeleteUser(id: string): Promise<void> {
+  const response = await fetch(`/api/users/${encodeURIComponent(id)}/permanent`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+    headers: { 'x-book': '1' },
+  });
+  const text = await response.text();
+  let data: any = null;
+  try { data = text ? JSON.parse(text) : null; } catch { /* handled below */ }
+  if (!response.ok) throw new Error(data?.error || `Delete failed (${response.status})`);
+}
+
 function Person({ person, me, say, reload, accounts, delegates }: {
   person: Keyholder;
   me: NonNullable<Me['user']>;
@@ -348,12 +360,20 @@ function Person({ person, me, say, reload, accounts, delegates }: {
         <div className="personmore access-person-more">
           {!person.active ? (
             <div className="personactions access-person-actions">
-              <span className="muted small">Their historical activity stays attached to them. Restoring access does not restore old cash-account assignments.</span>
+              <span className="muted small">Access is disabled. You can restore this login, or permanently delete it. Financial records and evidence are kept.</span>
               <button className="btn small" onClick={() => void run(
                 () => api.restoreUser(person.id),
                 `${person.email} can open the book again.`,
               )}>
                 Restore access
+              </button>
+              <button className="btn ghost small danger"
+                onClick={() => {
+                  if (confirm(`Permanently delete ${person.email}? Their login, password, MFA and sessions will be erased and cannot be restored. Financial records will stay.`)) {
+                    void run(() => permanentlyDeleteUser(person.id), `${person.email} was permanently deleted.`);
+                  }
+                }}>
+                Delete user
               </button>
             </div>
           ) : (

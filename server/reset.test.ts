@@ -5,11 +5,13 @@ const mocks = vi.hoisted(() => {
   const release = vi.fn();
   const connect = vi.fn(async () => ({ query: clientQuery, release }));
   const poolQuery = vi.fn();
-  return { clientQuery, release, connect, poolQuery };
+  const query = vi.fn();
+  return { clientQuery, release, connect, poolQuery, query };
 });
 
 vi.mock('./db.js', () => ({
   pool: { connect: mocks.connect, query: mocks.poolQuery },
+  query: mocks.query,
 }));
 
 vi.mock('./auth.js', () => ({
