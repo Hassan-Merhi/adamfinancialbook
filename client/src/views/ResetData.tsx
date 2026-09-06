@@ -119,10 +119,11 @@ export default function ResetData() {
     try {
       await request('/', 'POST', { scope, password, confirmation });
 
-      // A successful server reset must also remove stale offline state. Without
-      // this, an old queued entry could be posted into a brand-new book later.
-      outbox.clear();
-      snapshot.save(null);
+      // A successful server reset must also remove stale offline state. Await
+      // both IndexedDB writes before reloading so an old queued entry cannot
+      // survive the reset because the page closed before the transaction landed.
+      await outbox.clear();
+      await snapshot.save(null);
       if (scope !== 'activity') {
         try { localStorage.removeItem(PINNED_ACCOUNTS_KEY); } catch { /* private mode */ }
       }
