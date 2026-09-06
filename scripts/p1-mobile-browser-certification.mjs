@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { webkit } from 'playwright';
+
+const playwrightModule = process.env.P1_PLAYWRIGHT_MODULE;
+const { webkit } = playwrightModule
+  ? await import(playwrightModule)
+  : await import('playwright');
 
 const baseUrl = process.env.P1_MOBILE_BASE_URL ?? 'http://127.0.0.1:43192';
 const username = 'p1-mobile-owner';
