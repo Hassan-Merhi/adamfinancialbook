@@ -12,6 +12,8 @@ export type OfflineSetupInput = (OfflineSetupDraft & {
   offlineOperation: 'setup_create';
   /** The durable outbox id. It is also the idempotency key for server replay. */
   clientRef?: string | null;
+  /** Durable outbox ids that must be acknowledged before this setup row can sync. */
+  offlineDependsOn?: string[];
 });
 
 const PREFIX: Record<OfflineSetupType, string> = {
@@ -38,6 +40,14 @@ export function offlineSetupEntityId(input: Pick<OfflineSetupInput, 'setupType' 
 
 export function offlineSetupReceiptId(clientRef: string | null | undefined): string {
   return `rcp_${token(clientRef)}`;
+}
+
+/** Entity id this setup row requires to exist first, if any. */
+export function offlineSetupParentEntityId(input: OfflineSetupDraft | OfflineSetupInput): string | null {
+  if (input.setupType === 'business') return null;
+  if (input.setupType === 'account') return input.businessId ?? null;
+  if (input.setupType === 'project' || input.setupType === 'person') return input.businessId;
+  return input.accountId ?? null;
 }
 
 export function isOfflineSetupInput(value: unknown): value is OfflineSetupInput {
