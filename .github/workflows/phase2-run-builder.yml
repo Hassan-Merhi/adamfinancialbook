@@ -24,7 +24,10 @@ jobs:
       - run: npm ci
       - name: Extract and execute implementation script
         shell: bash
-        run: sed -n "/python3 <<'PY'/,/^          PY$/p" .github/workflows/phase2-offline-safe-setup-builder.yml | sed '1d;$d;s/^          //' > /tmp/phase2-builder.py && python3 /tmp/phase2-builder.py
+        run: |
+          sed -n "/python3 <<'PY'/,/^          PY$/p" .github/workflows/phase2-offline-safe-setup-builder.yml | sed '1d;$d;s/^          //' > /tmp/phase2-builder.py
+          sed -i "s/: 'Sync pending — balances include unsynced entries/? 'Sync pending — balances include unsynced entries/" /tmp/phase2-builder.py
+          python3 /tmp/phase2-builder.py
       - name: Verify implementation
         run: npm run typecheck && npm test -- --passWithNoTests && npm run build
       - name: Commit implementation
