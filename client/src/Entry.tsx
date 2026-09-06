@@ -170,10 +170,10 @@ function EntryCard({ draft, duplicate, source, book, done, cancel, fail, onQueue
       }
     } catch (e) {
       if (looksOffline(e)) {
-        // No signal: keep it, in order, and send it when there is one.
-        outbox.add(withLink);
+        // Only say it is kept after the IndexedDB outbox write is durable.
+        await outbox.add(withLink);
         onQueued?.();
-        done(`Kept — ${money(input.amount)} ${input.purpose}. It will be sent when you are back on a network.`);
+        done(`Kept — ${money(input.amount)} ${input.purpose}. Its projected effect is shown now and it will be sent when you are back on a network.`);
       } else fail((e as Error).message);
     }
     finally { setBusy(false); }
