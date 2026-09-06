@@ -21,6 +21,7 @@
     "test:financial-e2e": "vitest run server/financial-e2e.integration.test.ts",
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm test -- --passWithNoTests && npm run build",
+    "certify:production": "npm run verify && npm run db:status && npm run db:integrity",
     "user:add": "npm run db:migrate && tsx server/add-user.ts",
     "report:send": "npm run db:migrate && tsx server/send-report.ts",
     "backup": "npm run db:migrate && tsx server/backup.ts",
