@@ -153,16 +153,23 @@ export default function Statement({ book, focus, back, run }: {
                     <td className={`r num ${tone(r.delta)}`}>{r.delta ? signed(r.delta) : '—'}</td>
                     <td className="r num">{money(r.running)}</td>
                     <td className="r nowrap">
-                      <button className="btn ghost small" onClick={() => {
-                        const next = prompt(`Correct the amount for "${r.entry.purpose}"`, String(r.entry.amount));
-                        const amount = Number(next);
-                        if (next && amount > 0 && amount !== r.entry.amount) {
-                          run(() => api.correct(r.entry.id, amount), 'Corrected.');
+                      {r.entry.correctedAt != null || r.entry.correctedFrom != null ? (
+                        <button className="btn ghost small" type="button" disabled
+                          title="This entry is locked after its correction">Corrected</button>
+                      ) : (
+                        <button className="btn ghost small" type="button" onClick={() => {
+                          const next = prompt(`Correct the amount for "${r.entry.purpose}"`, String(r.entry.amount));
+                          const amount = Number(next);
+                          if (next && amount > 0 && amount !== r.entry.amount) {
+                            run(() => api.correct(r.entry.id, amount), 'Corrected — this entry is now locked.');
+                          }
+                        }}>Correct</button>
+                      )}
+                      <button className="btn ghost small" type="button" onClick={() => {
+                        const reason = prompt(`Void "${r.entry.purpose}"? This reverses its accounting effect and removes it from active statements.\n\nWhy:`);
+                        if (reason?.trim()) {
+                          run(() => api.voidEntry(r.entry.id, reason.trim()), 'Voided — accounting reversed and removed from the statement.');
                         }
-                      }}>Correct</button>
-                      <button className="btn ghost small" onClick={() => {
-                        const reason = prompt(`Void "${r.entry.purpose}"? It will stop counting but stay on the record.\n\nWhy:`);
-                        if (reason?.trim()) run(() => api.voidEntry(r.entry.id, reason.trim()), 'Voided — it counts for nothing now.');
                       }}>Void</button>
                     </td>
                   </tr>
