@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Router, type RequestHandler } from 'express';
+import { rateLimit } from 'express-rate-limit';
 import { z } from 'zod';
 import { accountBalance } from '../shared/engine.js';
 import { recordRequired } from './audit.js';
@@ -10,6 +11,17 @@ const router = Router();
 
 const wrap = (fn: RequestHandler): RequestHandler =>
   (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+// This endpoint can perform several reads/writes while reconciling an uncertain
+// offline retry. Keep it below the app-wide 300/min ceiling as an additional
+// database-write guard. 429 remains a retryable Phase 3 state, so a legitimate
+// reconnect burst is delayed rather than dropped.
+const offlineHandoffLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 240,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+});
 
 const bodySchema = z.object({
   fromAccountId: z.string(),
@@ -81,11 +93,11 @@ async function existingHandoff(id: string): Promise<HandoffRow | null> {
  * Phase 3 interception for offline/retried delegated handoffs.
  *
  * The existing route remains authoritative for ordinary requests that do not
- * carry a clientRef.  A clientRef makes the handoff id deterministic, so a
+ * carry a clientRef. A clientRef makes the handoff id deterministic, so a
  * request whose response was lost can be repeated without creating a second
  * pending transfer, notification or audit line.
  */
-router.post('/delegation/transfers', wrap(async (req, res, next) => {
+router.post('/delegation/transfers', offlineHandoffLimit, wrap(async (req, res, next) => {
   const candidate = req.body as { clientRef?: unknown };
   if (typeof candidate?.clientRef !== 'string' || !candidate.clientRef) return next();
   if (req.user?.role !== 'owner') return res.status(403).json({ error: 'Only the owner can send delegated funds.' });
