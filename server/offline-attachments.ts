@@ -15,6 +15,7 @@ const uploadRateLimit = rateLimit({
 });
 
 const rawAttachment = express.raw({ type: () => true, limit: '6mb' });
+const MAX_OFFLINE_ATTACHMENTS_PER_ENTRY = 20;
 
 type AttachmentMime = 'image/jpeg' | 'image/png' | 'image/webp' | 'application/pdf';
 
@@ -148,6 +149,17 @@ router.post(
         mimeType: existing.mime_type,
         byteSize: Number(existing.byte_size),
         deduplicated: true,
+      });
+    }
+
+    const countRows = await query<{ count: number | string }>(
+      'SELECT count(*) AS count FROM attachments WHERE entry_id = $1',
+      [entryId],
+    );
+    if (Number(countRows[0]?.count ?? 0) >= MAX_OFFLINE_ATTACHMENTS_PER_ENTRY) {
+      return res.status(409).json({
+        error: `Attach at most ${MAX_OFFLINE_ATTACHMENTS_PER_ENTRY} receipts to one transaction.`,
+        code: 'OFFLINE_ATTACHMENT_LIMIT_REACHED',
       });
     }
 
