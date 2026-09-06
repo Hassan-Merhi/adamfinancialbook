@@ -73,37 +73,305 @@
   font-size: .86rem;
 }
 
-.offline-attachment-status {
+.offline-attachment-status.sync-center {
   margin-top: 10px;
-  padding: 10px 12px;
   border: 1px solid var(--border, #d7d9df);
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  border-radius: 14px;
   background: var(--card, #fff);
+  overflow: hidden;
 }
 
-.offline-attachment-status > div {
+.offline-attachment-status.sync-center.warn {
+  border-color: color-mix(in srgb, #b7791f 35%, var(--border, #d7d9df));
+}
+
+.offline-attachment-status.sync-center.bad {
+  border-color: color-mix(in srgb, var(--danger, #b42318) 45%, var(--border, #d7d9df));
+}
+
+.sync-center-compact {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 10px;
+}
+
+.sync-center-toggle {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sync-center-toggle:hover {
+  background: color-mix(in srgb, var(--card, #fff) 92%, currentColor 8%);
+}
+
+.sync-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 50%;
+  background: #2f855a;
+}
+
+.sync-dot.warn { background: #b7791f; }
+.sync-dot.bad { background: var(--danger, #b42318); }
+
+.sync-center-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.sync-center-copy strong {
+  font-size: .9rem;
+}
+
+.sync-center-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sync-chevron {
+  margin-left: auto;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--muted, #6f7480);
+}
+
+.sync-now-compact {
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+.sync-center-panel {
+  border-top: 1px solid var(--border, #d7d9df);
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.sync-center-stats {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sync-stat {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--border, #d7d9df);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--card, #fff) 96%, currentColor 4%);
+}
+
+.sync-stat span {
+  font-size: .74rem;
+  color: var(--muted, #6f7480);
+}
+
+.sync-stat b {
+  font-size: .9rem;
+}
+
+.sync-stat.bad {
+  border-color: color-mix(in srgb, var(--danger, #b42318) 35%, var(--border, #d7d9df));
+}
+
+.sync-balance-card {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--card, #fff) 92%, currentColor 8%);
+}
+
+.sync-balance-card > div {
   display: grid;
   gap: 2px;
 }
 
-.offline-attachment-status.failed {
-  border-color: color-mix(in srgb, var(--danger, #b42318) 45%, var(--border, #d7d9df));
+.sync-balance-card > div span,
+.sync-balance-card small {
+  color: var(--muted, #6f7480);
+  font-size: .78rem;
+}
+
+.sync-balance-card > div strong {
+  font-size: 1rem;
+}
+
+.sync-balance-card small {
+  grid-column: 1 / -1;
+  line-height: 1.4;
+}
+
+.sync-center-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sync-center-message {
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--card, #fff) 92%, currentColor 8%);
+  font-size: .84rem;
+}
+
+.sync-center-message.bad {
+  color: var(--danger, #b42318);
+}
+
+.sync-center-list {
+  display: grid;
+  gap: 7px;
+}
+
+.sync-center-list h4 {
+  margin: 3px 0 1px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: .88rem;
+}
+
+.sync-center-list h4 span {
+  font-weight: 500;
+  color: var(--muted, #6f7480);
+}
+
+.sync-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--border, #d7d9df);
+  border-radius: 10px;
+}
+
+.sync-item.problem {
+  border-color: color-mix(in srgb, var(--danger, #b42318) 35%, var(--border, #d7d9df));
+}
+
+.sync-item-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.sync-item-copy b,
+.sync-item-copy span,
+.sync-item-copy small {
+  overflow-wrap: anywhere;
+}
+
+.sync-item-copy span,
+.sync-item-copy small {
+  color: var(--muted, #6f7480);
+  font-size: .77rem;
+  line-height: 1.35;
+}
+
+.sync-item-copy small {
+  color: var(--danger, #b42318);
+}
+
+.sync-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.sync-chip {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card, #fff) 86%, currentColor 14%);
+  font-size: .72rem;
+  font-weight: 700;
+}
+
+.sync-chip.failed { color: var(--danger, #b42318); }
+
+.sync-center-clear {
+  display: grid;
+  gap: 2px;
+  padding: 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, #2f855a 8%, var(--card, #fff));
+}
+
+.sync-center-clear span {
+  color: var(--muted, #6f7480);
+  font-size: .82rem;
+}
+
+@media (max-width: 900px) {
+  .sync-center-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (max-width: 640px) {
-  .receipt-picker-head,
-  .offline-attachment-status {
+  .receipt-picker-head {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .receipt-picker-head .btn,
-  .offline-attachment-status .btn {
+  .receipt-picker-head .btn {
     width: 100%;
+    min-height: 44px;
+  }
+
+  .sync-center-compact {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 6px;
+  }
+
+  .sync-center-toggle,
+  .sync-now-compact,
+  .sync-center-actions .btn {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .sync-center-copy span {
+    white-space: normal;
+    line-height: 1.3;
+  }
+
+  .sync-center-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sync-balance-card { grid-template-columns: 1fr; }
+  .sync-balance-card small { grid-column: auto; }
+
+  .sync-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .sync-item-actions {
+    grid-column: 1 / -1;
+    justify-content: stretch;
+  }
+
+  .sync-item-actions .btn {
+    flex: 1 1 120px;
     min-height: 44px;
   }
 }
