@@ -73,3 +73,106 @@ jobs:
         run: npm run db:migrate
       - name: Final database integrity certification
         run: npm run db:integrity
+
+  p1-scale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: book
+          POSTGRES_PASSWORD: book
+          POSTGRES_DB: book_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U book -d book_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      TEST_DATABASE_URL: postgres://book:book@127.0.0.1:5432/book_test
+      DATABASE_URL: postgres://book:book@127.0.0.1:5432/book_test
+      PGSSL: off
+      SESSION_SECRET: p1-scale-ci-session-secret-that-is-at-least-32-characters
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Prepare production-sized schema
+        run: npm run db:migrate
+      - name: P1 production-scale load certification
+        run: npm run test:p1-scale
+
+  p1-mobile-webkit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: book
+          POSTGRES_PASSWORD: book
+          POSTGRES_DB: book_mobile_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U book -d book_mobile_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      TEST_DATABASE_URL: postgres://book:book@127.0.0.1:5432/book_mobile_test
+      DATABASE_URL: postgres://book:book@127.0.0.1:5432/book_mobile_test
+      PGSSL: off
+      SESSION_SECRET: p1-mobile-ci-session-secret-that-is-at-least-32-characters
+      NODE_ENV: test
+      PORT: 43192
+      P1_MOBILE_BASE_URL: http://127.0.0.1:43192
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install pinned WebKit mobile test runtime
+        run: |
+          npm install --no-save --package-lock=false --ignore-scripts playwright@1.55.0
+          npx playwright install --with-deps webkit
+      - name: Build production client
+        run: npm run build
+      - name: Prepare mobile test database
+        run: npm run db:migrate
+      - name: Start production server
+        run: |
+          npm start > /tmp/p1-mobile-server.log 2>&1 &
+          echo $! > /tmp/p1-mobile-server.pid
+          for attempt in $(seq 1 120); do
+            if curl --fail --silent http://127.0.0.1:43192/api/health > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/p1-mobile-server.log
+          exit 1
+      - name: P1 WebKit touch/mobile certification
+        run: npm run test:p1-mobile
+      - name: Show mobile server log on failure
+        if: failure()
+        run: cat /tmp/p1-mobile-server.log || true
+      - name: Stop mobile test server
+        if: always()
+        run: |
+          if [ -f /tmp/p1-mobile-server.pid ]; then
+            kill "$(cat /tmp/p1-mobile-server.pid)" || true
+          fi
