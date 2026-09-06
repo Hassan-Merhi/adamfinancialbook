@@ -1,6 +1,7 @@
 /** Paginated target statement with server-side filtering and projected offline rows. */
 import { useEffect, useRef, useState } from 'react';
 import { api, type LoadedBook, type StatementRowView, type StatementTarget } from '../api';
+import { flushOutbox, outbox } from '../offline';
 import { isProjectedEntry } from '../offline-projection';
 import { deltaFor } from '../../../shared/engine';
 import type { Entry } from '../../../shared/types';
@@ -71,8 +72,41 @@ export default function Statement({ book, focus, back, run }: {
     .filter((row) => row.delta !== 0);
   const pendingRows = pendingForTarget.filter(({ entry }) => matchesFilters(entry, filters));
 
+  // Server pagination remains authoritative for confirmed rows. While a queued
+  // correction/void is waiting, overlay that exact entry from the projected
+  // book and carry its delta adjustment through every following running balance.
+  const projectedById = new Map(book.entries.map((entry) => [entry.id, entry]));
+  let runningAdjustment = 0;
+  const displayRows: StatementRowView[] = [];
+  for (const row of rows) {
+    const entry = projectedById.get(row.entry.id) ?? row.entry;
+    const projectedDelta = entry.voided ? 0 : deltaFor(entry, focus, person);
+    runningAdjustment += projectedDelta - row.delta;
+    if (entry.voided) continue;
+    displayRows.push({
+      entry,
+      delta: projectedDelta,
+      running: row.running + runningAdjustment,
+    });
+  }
+  const pendingRevisionCount = book.entries.filter((entry) => entry.offlinePendingRevision).length;
+
   const head = describe(book, focus);
   const filtered = !!(q || kind || from || to);
+
+  const queueCorrection = (entry: Entry, amount: number) => {
+    run(async () => {
+      await outbox.correct(entry, amount);
+      await flushOutbox((input) => api.addEntry(input));
+    }, `Correction kept — ${money(amount)} is projected now and will sync automatically.`);
+  };
+
+  const queueVoid = (entry: Entry, reason: string) => {
+    run(async () => {
+      await outbox.void(entry, reason);
+      await flushOutbox((input) => api.addEntry(input));
+    }, 'Voided — its accounting effect is reversed now and the change will sync automatically.');
+  };
 
   return (
     <>
@@ -84,7 +118,7 @@ export default function Statement({ book, focus, back, run }: {
           <p className="muted">{head.sub}</p>
         </div>
         <div className="bal">
-          <small>{head.balanceLabel}{pendingForTarget.length ? ' · projected' : ''}</small>
+          <small>{head.balanceLabel}{pendingForTarget.length || pendingRevisionCount ? ' · projected' : ''}</small>
           <span className={`num ${head.signed ? tone(head.balance) : ''}`}>{money(head.balance)}</span>
         </div>
       </div>
@@ -121,12 +155,14 @@ export default function Statement({ book, focus, back, run }: {
 
       <Card
         title="Statement"
-        aside={!loading ? `${summary.total} server-confirmed matching · in ${money(summary.inSum)} · out ${money(Math.abs(summary.outSum))}` : undefined}
+        aside={!loading
+          ? `${summary.total} server-confirmed matching · in ${money(summary.inSum)} · out ${money(Math.abs(summary.outSum))}${pendingRevisionCount ? ' · projected revision pending' : ''}`
+          : undefined}
       >
-        {error && <Empty>{pendingForTarget.length ? 'Server-confirmed statement is unavailable right now. Pending projected entries are shown above.' : error}</Empty>}
+        {error && <Empty>{pendingForTarget.length || displayRows.length ? 'Server-confirmed statement is unavailable right now. Cached/projected rows remain shown.' : error}</Empty>}
         {loading && !error && <Empty>Reading the statement…</Empty>}
-        {!loading && !error && rows.length === 0 && <Empty>Nothing matches these filters.</Empty>}
-        {rows.length > 0 && (
+        {!loading && !error && displayRows.length === 0 && <Empty>Nothing matches these filters.</Empty>}
+        {displayRows.length > 0 && (
           <div className="tblwrap">
             <table>
               <thead>
@@ -138,13 +174,16 @@ export default function Statement({ book, focus, back, run }: {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {displayRows.map((r) => (
                   <tr key={r.entry.id}>
                     <td className="num small">{shortDate(r.entry.occurredOn)}</td>
                     <td>
                       <b>{r.entry.purpose}</b>
                       <small>{alsoChanged(book, r.entry, focus)}</small>
-                      {r.entry.correctedFrom != null && (
+                      {r.entry.offlinePendingRevision === 'correction' && (
+                        <small className="flag">correction pending sync</small>
+                      )}
+                      {r.entry.correctedFrom != null && !r.entry.offlinePendingRevision && (
                         <small className="flag">corrected · was {money(r.entry.correctedFrom)}</small>
                       )}
                       {r.entry.historical && <small className="flag">historical</small>}
@@ -153,24 +192,27 @@ export default function Statement({ book, focus, back, run }: {
                     <td className={`r num ${tone(r.delta)}`}>{r.delta ? signed(r.delta) : '—'}</td>
                     <td className="r num">{money(r.running)}</td>
                     <td className="r nowrap">
-                      {r.entry.correctedAt != null || r.entry.correctedFrom != null ? (
+                      {r.entry.offlinePendingRevision ? (
+                        <button className="btn ghost small" type="button" disabled
+                          title="This entry already has a change waiting to sync">
+                          {r.entry.offlinePendingRevision === 'correction' ? 'Correction pending' : 'Void pending'}
+                        </button>
+                      ) : r.entry.correctedAt != null || r.entry.correctedFrom != null ? (
                         <button className="btn ghost small" type="button" disabled
                           title="This entry is locked after its correction">Corrected</button>
                       ) : (
                         <button className="btn ghost small" type="button" onClick={() => {
                           const next = prompt(`Correct the amount for "${r.entry.purpose}"`, String(r.entry.amount));
                           const amount = Number(next);
-                          if (next && amount > 0 && amount !== r.entry.amount) {
-                            run(() => api.correct(r.entry.id, amount), 'Corrected — this entry is now locked.');
-                          }
+                          if (next && amount > 0 && amount !== r.entry.amount) queueCorrection(r.entry, amount);
                         }}>Correct</button>
                       )}
-                      <button className="btn ghost small" type="button" onClick={() => {
-                        const reason = prompt(`Void "${r.entry.purpose}"? This reverses its accounting effect and removes it from active statements.\n\nWhy:`);
-                        if (reason?.trim()) {
-                          run(() => api.voidEntry(r.entry.id, reason.trim()), 'Voided — accounting reversed and removed from the statement.');
-                        }
-                      }}>Void</button>
+                      {!r.entry.offlinePendingRevision && (
+                        <button className="btn ghost small" type="button" onClick={() => {
+                          const reason = prompt(`Void "${r.entry.purpose}"? This reverses its accounting effect and removes it from active statements.\n\nWhy:`);
+                          if (reason?.trim()) queueVoid(r.entry, reason.trim());
+                        }}>Void</button>
+                      )}
                     </td>
                   </tr>
                 ))}
