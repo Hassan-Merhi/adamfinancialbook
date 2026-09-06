@@ -5,8 +5,13 @@ const JWKS_URL = `${ISSUER}/.well-known/jwks`;
 const AUDIENCE = 'adam-financial-book-backup';
 const REPOSITORY = 'Hassan-Merhi/adamfinancialbook';
 const REPOSITORY_ID = '1342187497';
+const REPOSITORY_OWNER_ID = '241374101';
 const WORKFLOW_REF = `${REPOSITORY}/.github/workflows/encrypted-production-backup.yml@refs/heads/main`;
-const SUBJECT = `repo:${REPOSITORY}:ref:refs/heads/main`;
+// GitHub repositories created after 2026-07-15 use immutable default OIDC
+// subjects containing both owner and repository ids. adamfinancialbook was
+// created after that cutoff, so require the exact immutable identity observed
+// for this repository rather than weakening the subject check to a prefix.
+const SUBJECT = `repo:Hassan-Merhi@${REPOSITORY_OWNER_ID}/adamfinancialbook@${REPOSITORY_ID}:ref:refs/heads/main`;
 const ALLOWED_EVENTS = new Set(['schedule', 'workflow_dispatch', 'push']);
 const MAX_TOKEN_BYTES = 16 * 1024;
 
@@ -26,6 +31,7 @@ type GitHubOidcClaims = {
   sub?: string;
   repository?: string;
   repository_id?: string;
+  repository_owner_id?: string;
   ref?: string;
   sha?: string;
   workflow_ref?: string;
@@ -84,7 +90,11 @@ function validateClaims(claims: GitHubOidcClaims, expectedRelease: string) {
   if (!claims.exp || claims.exp < now - 30) throw new Error('GitHub OIDC token has expired.');
   if (claims.nbf && claims.nbf > now + 30) throw new Error('GitHub OIDC token is not active yet.');
   if (claims.iat && claims.iat > now + 30) throw new Error('GitHub OIDC issued-at time is invalid.');
-  if (claims.repository !== REPOSITORY || claims.repository_id !== REPOSITORY_ID) {
+  if (
+    claims.repository !== REPOSITORY
+    || claims.repository_id !== REPOSITORY_ID
+    || claims.repository_owner_id !== REPOSITORY_OWNER_ID
+  ) {
     throw new Error('GitHub OIDC repository identity is invalid.');
   }
   if (claims.ref !== 'refs/heads/main' || claims.sub !== SUBJECT) {
