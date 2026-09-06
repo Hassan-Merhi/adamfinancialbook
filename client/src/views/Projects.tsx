@@ -7,6 +7,20 @@ export default function Projects({ book, open }: { book: LoadedBook; open: (f: F
   const waitingTotal = waitingReceipts.reduce((sum, receipt) => sum + receipt.amount, 0);
   const receivedTotal = book.projects.reduce((sum, project) => sum + (book.balances.projects[project.id] ?? 0), 0);
 
+  const waitingRows = (
+    <div className="operations-list waiting-list">
+      {waitingReceipts.map((receipt) => (
+        <Row
+          key={receipt.id}
+          title={book.projects.find((project) => project.id === receipt.projectId)?.name ?? 'Project'}
+          sub={`${shortDate(receipt.occurredOn)} · recorded already, not a new receipt when banked`}
+          value={money(receipt.amount)}
+          onOpen={() => open({ type: 'project', id: receipt.projectId })}
+        />
+      ))}
+    </div>
+  );
+
   return (
     <div className="operations-page projects-page">
       <div className="operations-hero">
@@ -16,7 +30,7 @@ export default function Projects({ book, open }: { book: LoadedBook; open: (f: F
           <p>Tap a project to see every receipt and transaction behind it.</p>
         </div>
         <div className="operations-stats" aria-label="Project summary">
-          <div><span>Projects</span><b className="num">{book.projects.length}</b></div>
+          <div className="operations-count-stat"><span>Projects</span><b className="num">{book.projects.length}</b></div>
           <div><span>Received</span><b className="num">{money(receivedTotal)}</b></div>
           <div className={waitingTotal ? 'needs-action' : ''}><span>Waiting for cash</span><b className="num">{money(waitingTotal)}</b></div>
         </div>
@@ -46,19 +60,23 @@ export default function Projects({ book, open }: { book: LoadedBook; open: (f: F
       </Card>
 
       {waitingReceipts.length > 0 && (
-        <Card title="Waiting to reach cash" aside={`${waitingReceipts.length} recorded`}>
-          <div className="operations-list waiting-list">
-            {waitingReceipts.map((receipt) => (
-              <Row
-                key={receipt.id}
-                title={book.projects.find((project) => project.id === receipt.projectId)?.name ?? 'Project'}
-                sub={`${shortDate(receipt.occurredOn)} · recorded already, not a new receipt when banked`}
-                value={money(receipt.amount)}
-                onOpen={() => open({ type: 'project', id: receipt.projectId })}
-              />
-            ))}
+        <>
+          <div className="projects-waiting-desktop">
+            <Card title="Waiting to reach cash" aside={`${waitingReceipts.length} recorded`}>
+              {waitingRows}
+            </Card>
           </div>
-        </Card>
+          <details className="operations-mobile-fold projects-waiting-mobile">
+            <summary>
+              <span>
+                <b>Waiting to reach cash</b>
+                <small>{waitingReceipts.length} recorded receipt{waitingReceipts.length === 1 ? '' : 's'}</small>
+              </span>
+              <strong className="num">{money(waitingTotal)}</strong>
+            </summary>
+            {waitingRows}
+          </details>
+        </>
       )}
 
       <details className="operations-explainer">
