@@ -1,9 +1,9 @@
-export const LIVE_MUTATION_EVENT = 'book:live-mutation';
+import { classifyLiveMutation, type LiveMutationImpact } from '../../shared/live-updates';
 
-export interface LiveMutationImpact {
-  book: boolean;
-  dashboard: boolean;
-}
+export { classifyLiveMutation } from '../../shared/live-updates';
+export type { LiveMutationImpact } from '../../shared/live-updates';
+
+export const LIVE_MUTATION_EVENT = 'book:live-mutation';
 
 export interface LiveMutationDetail extends LiveMutationImpact {
   path: string;
@@ -12,86 +12,101 @@ export interface LiveMutationDetail extends LiveMutationImpact {
 }
 
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+const CLIENT_KEY = 'book.live-client';
 
-/**
- * Describe which top-level client snapshots a successful API write can make
- * stale. This is deliberately about UI revalidation only: the server remains
- * the source of truth and all accounting rules stay in the shared engine.
- */
-export function classifyLiveMutation(path: string, method: string): LiveMutationImpact | null {
-  const verb = method.toUpperCase();
-  if (READ_METHODS.has(verb) || !path.startsWith('/api/')) return null;
-
-  // Authentication/security actions manage their own signed-in state. They do
-  // not reshape the financial book or delegation dashboard.
-  if (
-    path === '/api/login'
-    || path === '/api/logout'
-    || path === '/api/first-owner'
-    || path === '/api/password'
-    || path.startsWith('/api/security/')
-    || path === '/api/security'
-  ) {
-    return null;
+function liveClientId(target: Window): string {
+  try {
+    const kept = target.sessionStorage.getItem(CLIENT_KEY);
+    if (kept) return kept;
+    const made = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `live_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    target.sessionStorage.setItem(CLIENT_KEY, made);
+    return made;
+  } catch {
+    return `live_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   }
-
-  const coreBookWrite =
-    path === '/api/reset-book'
-    || /^\/api\/(?:entries|businesses|accounts|projects|people|loans|reminders)(?:\/|$)/.test(path);
-
-  const delegatedBookWrite =
-    /^\/api\/delegation\/transfers\/[^/]+\/confirm$/.test(path)
-    || path === '/api/delegation/expense-reviews/assign';
-
-  const book = coreBookWrite || delegatedBookWrite;
-  const dashboard =
-    book
-    || path.startsWith('/api/delegation/')
-    || /^\/api\/users(?:\/|$)/.test(path);
-
-  return book || dashboard ? { book, dashboard } : null;
 }
 
 /**
- * Observe successful writes made through fetch, including older screens that
- * still have a small local request helper. App.tsx listens for this event and
- * revalidates only the snapshots affected by the write. No timer polls the
- * server and no page reload is involved.
+ * Observe successful local writes and subscribe to authenticated server push.
+ * The server uses PostgreSQL NOTIFY + SSE, so a write on another phone/browser
+ * reaches this tab without polling. This tab's id is attached to its writes so
+ * its own server echo can be skipped.
  */
 export function installLiveMutationBridge(target: Window = window): () => void {
   const originalFetch = target.fetch.bind(target);
+  const clientId = liveClientId(target);
+  let source: EventSource | null = null;
+
+  const dispatch = (detail: LiveMutationDetail) => {
+    target.dispatchEvent(new CustomEvent<LiveMutationDetail>(LIVE_MUTATION_EVENT, { detail }));
+  };
+
+  const stopRealtime = () => {
+    source?.close();
+    source = null;
+  };
+
+  const startRealtime = () => {
+    if (source || typeof EventSource === 'undefined' || !target.navigator.onLine) return;
+    const next = new EventSource(`/api/live-updates?client=${encodeURIComponent(clientId)}`);
+    next.addEventListener('mutation', (event) => {
+      try {
+        const payload = JSON.parse((event as MessageEvent<string>).data) as LiveMutationImpact & { at?: number };
+        if (typeof payload.book !== 'boolean' || typeof payload.dashboard !== 'boolean') return;
+        dispatch({
+          book: payload.book,
+          dashboard: payload.dashboard,
+          path: '/api/live-updates',
+          method: 'REMOTE',
+          at: typeof payload.at === 'number' ? payload.at : Date.now(),
+        });
+      } catch { /* malformed events are ignored */ }
+    });
+    source = next;
+  };
 
   const wrappedFetch: typeof fetch = async (input, init) => {
-    const response = await originalFetch(input, init);
-    if (!response.ok) return response;
-
     const isRequest = typeof Request !== 'undefined' && input instanceof Request;
     const method = (init?.method ?? (isRequest ? input.method : 'GET')).toUpperCase();
-    if (READ_METHODS.has(method)) return response;
-
-    let url: URL;
+    let url: URL | null = null;
     try {
       url = new URL(isRequest ? input.url : String(input), target.location.origin);
-    } catch {
-      return response;
-    }
-    if (url.origin !== target.location.origin) return response;
+    } catch { /* non-URL fetch input */ }
 
+    const sameOrigin = url?.origin === target.location.origin;
+    let nextInit = init;
+    if (sameOrigin && !READ_METHODS.has(method)) {
+      const headers = new Headers(isRequest ? input.headers : init?.headers);
+      headers.set('x-live-client', clientId);
+      nextInit = { ...init, headers };
+    }
+
+    const response = await originalFetch(input, nextInit);
+    if (!response.ok || !sameOrigin || !url) return response;
+
+    // Overview is only reachable after authentication and is loaded on every
+    // signed-in startup, making it the safe point to open the live stream.
+    if (method === 'GET' && url.pathname === '/api/overview') startRealtime();
+    if (url.pathname === '/api/logout' && method !== 'GET') stopRealtime();
+
+    if (READ_METHODS.has(method)) return response;
     const impact = classifyLiveMutation(url.pathname, method);
     if (impact) {
-      const detail: LiveMutationDetail = {
-        ...impact,
-        path: url.pathname,
-        method,
-        at: Date.now(),
-      };
-      target.dispatchEvent(new CustomEvent<LiveMutationDetail>(LIVE_MUTATION_EVENT, { detail }));
+      dispatch({ ...impact, path: url.pathname, method, at: Date.now() });
     }
     return response;
   };
 
   target.fetch = wrappedFetch;
+  target.addEventListener('online', startRealtime);
+  target.addEventListener('offline', stopRealtime);
+
   return () => {
+    stopRealtime();
+    target.removeEventListener('online', startRealtime);
+    target.removeEventListener('offline', stopRealtime);
     if (target.fetch === wrappedFetch) target.fetch = originalFetch;
   };
 }
