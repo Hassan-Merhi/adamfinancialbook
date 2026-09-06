@@ -1,5 +1,6 @@
 import { api, ApiError, NotSignedIn } from './api';
 import type { EntryInput } from '../../shared/types';
+import { isOfflineSetupInput, type OfflineSetupInput } from '../../shared/offline-setup';
 import {
   isOfflineCorrectionInput,
   isOfflineRevisionInput,
@@ -35,8 +36,31 @@ async function sendRevision(input: OfflineRevisionInput): Promise<unknown> {
   return data;
 }
 
-/** One sender for the strict outbox: ordinary entries, corrections, and voids. */
+async function sendSetup(input: OfflineSetupInput): Promise<unknown> {
+  const path = input.setupType === 'business' ? '/api/businesses'
+    : input.setupType === 'account' ? '/api/accounts'
+    : input.setupType === 'project' ? '/api/projects'
+    : input.setupType === 'person' ? '/api/people'
+    : '/api/reminders';
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-book': '1' },
+    credentials: 'same-origin',
+    body: JSON.stringify(input),
+  });
+  const text = await response.text();
+  const data = text ? safeParse(text) : null;
+  if (response.status === 401) throw new NotSignedIn();
+  if (!response.ok) {
+    const said = data?.error ?? (text ? text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) : '');
+    throw new ApiError(said || `Request failed (${response.status})`, response.status, data?.code);
+  }
+  return data;
+}
+
+/** One sender for the strict outbox: entries, revisions, and safe setup creation. */
 export function sendOfflineQueued(input: EntryInput): Promise<unknown> {
   if (isOfflineRevisionInput(input)) return sendRevision(input);
+  if (isOfflineSetupInput(input as unknown)) return sendSetup(input as unknown as OfflineSetupInput);
   return api.addEntry(input);
 }

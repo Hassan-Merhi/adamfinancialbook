@@ -43,6 +43,7 @@ const [
   { liveUpdatesRouter, liveMutationObserver },
   { offlineSyncRouter },
   { offlineRevisionRouter },
+  { offlineSetupRouter },
   { handoffConfirmationSafetyRouter },
   { offlineAttachmentRouter },
 ] = await Promise.all([
@@ -56,6 +57,7 @@ const [
   import('./live-updates.js'),
   import('./offline-sync.js'),
   import('./offline-revisions.js'),
+  import('./offline-setup.js'),
   import('./handoff-confirmation-safety.js'),
   import('./offline-attachments.js'),
 ]);
@@ -79,6 +81,10 @@ protectedSecurityRouter.use(offlineAttachmentRouter);
 // Corrections and voids carrying an offline precondition are write-ahead queued
 // and must be checked before the legacy owner-only routes can mutate history.
 protectedSecurityRouter.use(offlineRevisionRouter);
+// Safe setup creations use the same durable outbox and final ids while destructive
+// setup/admin operations stay authoritative-server-only. Intercept only the explicit
+// offline setup marker; legacy online setup continues to fall through unchanged.
+protectedSecurityRouter.use(offlineSetupRouter);
 // Offline retries carrying a clientRef must reach the idempotent/conflict-safe
 // routes before the legacy delegation route. Requests without an offline marker
 // call next() and preserve existing production behavior unchanged.

@@ -3,6 +3,7 @@ import type { Queued } from './offline-db';
 import { offlineSyncState } from './offline-sync-state';
 import { round, withLoanEffects } from '../../shared/engine';
 import { isOfflineCorrectionInput, isOfflineRevisionInput } from '../../shared/offline-conflict';
+import { isOfflineSetupInput, offlineSetupEntityId, offlineSetupReceiptId, type OfflineSetupInput } from '../../shared/offline-setup';
 import type { Effect, Entry, EntryInput, Person } from '../../shared/types';
 
 const PROJECTED_PREFIX = 'offline:';
@@ -43,10 +44,50 @@ export function projectOfflineBook(confirmed: LoadedBook, queue: Queued[]): Load
     projects: { ...confirmed.balances.projects },
   };
   const entries = confirmed.entries.map((entry) => ({ ...entry, effects: entry.effects.map((effect) => ({ ...effect })) }));
+  const businesses = confirmed.businesses.map((item) => ({ ...item }));
+  const accounts = confirmed.accounts.map((item) => ({ ...item }));
+  const projects = confirmed.projects.map((item) => ({ ...item }));
+  const people = confirmed.people.map((item) => ({ ...item }));
+  const reminders = confirmed.reminders.map((item) => ({ ...item }));
   let receipts = confirmed.receipts.map((receipt) => ({ ...receipt }));
   const projectedEntries: Entry[] = [];
 
   for (const item of [...projectable].sort((a, b) => a.queuedAt.localeCompare(b.queuedAt) || a.id.localeCompare(b.id))) {
+    if (isOfflineSetupInput(item.input as unknown)) {
+      const setup = item.input as unknown as OfflineSetupInput;
+      const id = offlineSetupEntityId(setup);
+      if (setup.setupType === 'business') {
+        if (!businesses.some((row) => row.id === id)) {
+businesses.push({ id, name: setup.name });
+balances.businesses[id] = 0;
+        }
+      } else if (setup.setupType === 'account') {
+        if (!accounts.some((row) => row.id === id)) {
+accounts.push({ id, name: setup.name, businessId: setup.businessId as string, opening: setup.opening });
+balances.accounts[id] = round(setup.opening);
+balances.totalCash = round(balances.totalCash + setup.opening);
+if (setup.businessId) balances.businesses[setup.businessId] = round((balances.businesses[setup.businessId] ?? 0) + setup.opening);
+        }
+      } else if (setup.setupType === 'project') {
+        if (!projects.some((row) => row.id === id)) {
+projects.push({ id, name: setup.name, scope: setup.scope ?? '', businessId: setup.businessId });
+balances.projects[id] = round(setup.opening);
+if (setup.opening > 0) {
+  const receiptId = offlineSetupReceiptId(setup.clientRef);
+  if (!receipts.some((row) => row.id === receiptId)) receipts.push({ id: receiptId, projectId: id, occurredOn: '', amount: setup.opening, inCash: true, entryId: null });
+}
+        }
+      } else if (setup.setupType === 'person') {
+        if (!people.some((row) => row.id === id)) {
+people.push({ id, name: setup.name, role: setup.role, businessId: setup.businessId, kind: setup.kind, opening: setup.opening, salary: setup.salary });
+balances.people[id] = round(setup.kind === 'receivable' ? setup.opening : setup.kind === 'payable' ? -setup.opening : setup.opening - setup.salary);
+        }
+      } else if (!reminders.some((row) => row.id === id)) {
+        reminders.push({ id, what: setup.what, amount: setup.amount, accountId: setup.accountId, note: setup.note ?? '', settled: false });
+      }
+      continue;
+    }
+
     if (isOfflineRevisionInput(item.input)) {
       const revision = item.input;
       const index = entries.findIndex((entry) => entry.id === revision.entryId);
@@ -137,6 +178,11 @@ export function projectOfflineBook(confirmed: LoadedBook, queue: Queued[]): Load
   // Revisions clone/overlay confirmed rows first, so `entries` is the immutable working copy.
   return {
     ...confirmed,
+    businesses,
+    accounts,
+    projects,
+    people,
+    reminders,
     receipts,
     entries: [...entries, ...projectedEntries],
     balances,

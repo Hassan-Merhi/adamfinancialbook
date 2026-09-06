@@ -51,7 +51,7 @@ describe('Advanced offline Phase 2 contract', () => {
     const today = read('client/src/views/Today.tsx');
     const statement = read('client/src/views/Statement.tsx');
     expect(app).toContain('balances below are projected from the last confirmed book plus your unsynced entries');
-    expect(app).toContain('balances include unsynced entries until the server confirms them');
+    expect(app).toContain('balances include unsynced changes until the server confirms them');
     expect(today).toContain("'Pending sync · projected'");
     expect(statement).toContain('title="Pending sync"');
     expect(statement).toContain('not server-confirmed yet');

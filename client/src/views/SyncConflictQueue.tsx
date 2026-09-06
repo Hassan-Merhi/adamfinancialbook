@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api, type LoadedBook } from '../api';
-import { flushOutbox, outbox, snapshot } from '../offline';
+import { flushOutbox, outbox, sendOfflineQueued, snapshot } from '../offline';
+import { isOfflineSetupInput, offlineSetupEntityId } from '../../../shared/offline-setup';
 import {
   isOfflineCorrectionInput,
   isOfflineRevisionInput,
@@ -22,11 +23,28 @@ export default function SyncConflictQueue({ book, refresh, say }: {
       const fresh = await api.overview();
       await snapshot.save(fresh);
       await outbox.rebase(id, fresh, patch);
-      const sent = await flushOutbox((input) => api.addEntry(input));
+      const sent = await flushOutbox(sendOfflineQueued);
       await refresh();
       say(sent
         ? `${sent} reviewed offline ${sent === 1 ? 'change was' : 'changes were'} synced.`
         : 'The conflict was reviewed. Any remaining blocked change still needs attention.');
+    } catch (error) {
+      await refresh().catch(() => undefined);
+      say((error as Error).message, true);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const retrySetup = async (id: string) => {
+    setBusy(id);
+    try {
+      const fresh = await api.overview();
+      await snapshot.save(fresh);
+      await outbox.retry(id);
+      const sent = await flushOutbox(sendOfflineQueued);
+      await refresh();
+      say(sent ? 'Offline setup change synced.' : 'Setup retry is still waiting behind an earlier blocked change.');
     } catch (error) {
       await refresh().catch(() => undefined);
       say((error as Error).message, true);
@@ -83,17 +101,20 @@ export default function SyncConflictQueue({ book, refresh, say }: {
       {!conflicts.length && <Empty>No offline conflicts.</Empty>}
       {conflicts.map(({ item, state }) => {
         const revision = isOfflineRevisionInput(item.input) ? item.input : null;
-        const input = revision ? null : item.input;
+        const setup = isOfflineSetupInput(item.input as unknown) ? item.input as any : null;
+        const input = revision || setup ? null : item.input;
         const account = input?.accountId ? book.accounts.find((candidate) => candidate.id === input.accountId) : null;
         const expectedEntry = revision?.offlineContext.entry;
         const title = revision
           ? isOfflineCorrectionInput(revision)
             ? `Correction to ${money(revision.amount)} · ${expectedEntry?.purpose || 'entry'}`
             : `Void · ${expectedEntry?.purpose || 'entry'}`
-          : input?.purpose || input?.raw || 'Offline financial entry';
+          : setup
+            ? `${setup.setupType} · ${setup.name || setup.what || offlineSetupEntityId(setup)}`
+            : input?.purpose || input?.raw || 'Offline financial entry';
         const value = revision
           ? isOfflineCorrectionInput(revision) ? revision.amount : expectedEntry?.amount ?? 0
-          : input?.amount ?? 0;
+          : setup ? Number(setup.opening ?? setup.amount ?? 0) : input?.amount ?? 0;
         return (
           <div className="attention-row" key={item.id}>
             <div className="attention-copy">
@@ -101,14 +122,18 @@ export default function SyncConflictQueue({ book, refresh, say }: {
               <small>
                 {[
                   state.conflict?.message,
-                  revision ? expectedEntry?.occurredOn : account?.name,
-                  revision ? 'latest entry must be reviewed before retrying' : input?.occurredOn,
+                  revision ? expectedEntry?.occurredOn : setup ? 'safe setup creation' : account?.name,
+                  revision ? 'latest entry must be reviewed before retrying' : setup ? 'retry unchanged or discard after review' : input?.occurredOn,
                 ].filter(Boolean).join(' · ')}
               </small>
             </div>
             <strong className="num attention-value">{money(value)}</strong>
             <div className="attention-actions">
-              {revision ? (
+              {setup ? (
+                <button className="btn small" disabled={busy === item.id || !navigator.onLine} onClick={() => void retrySetup(item.id)}>
+                  {busy === item.id ? 'Retrying…' : 'Retry setup'}
+                </button>
+              ) : revision ? (
                 <button
                   className="btn small"
                   disabled={busy === item.id || !navigator.onLine}
