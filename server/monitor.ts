@@ -25,13 +25,15 @@ try {
   let payload: ReadinessPayload | null = null;
   try { payload = await response.json() as ReadinessPayload; } catch { /* status below is enough */ }
   const durationMs = Date.now() - started;
-  const healthy = response.ok
-    && payload?.ok === true
-    && payload?.database === 'ok'
-    && payload?.migrations === 'current'
-    && Number(payload?.pendingMigrations ?? -1) === 0;
 
-  if (!healthy) {
+  if (
+    !payload
+    || !response.ok
+    || payload.ok !== true
+    || payload.database !== 'ok'
+    || payload.migrations !== 'current'
+    || Number(payload.pendingMigrations ?? -1) !== 0
+  ) {
     throw new Error([
       `health endpoint returned HTTP ${response.status}`,
       `ok=${String(payload?.ok)}`,
