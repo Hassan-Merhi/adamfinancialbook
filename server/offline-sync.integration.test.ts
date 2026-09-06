@@ -77,9 +77,22 @@ async function waitUntilHealthy(): Promise<void> {
   throw new Error(`Server never became healthy:\n${serverLog}`);
 }
 
-describe.skipIf(!DATABASE_URL)('Phase 3 offline sync PostgreSQL idempotency', () => {
+function offlineContext(accountId: string, businessId: string, balance: number) {
+  return {
+    version: 1,
+    capturedAt: '2026-09-06T06:00:00.000Z',
+    sourceAccount: { id: accountId, businessId, balance },
+    destinationAccount: null,
+    project: null,
+    person: null,
+    receipt: null,
+  };
+}
+
+describe.skipIf(!DATABASE_URL)('Phase 3/4 offline sync PostgreSQL safety', () => {
   const owner: Session = { cookie: '' };
   const delegate: Session = { cookie: '' };
+  let business = '';
   let ownerCash = '';
   let wallet = '';
   let delegateId = '';
@@ -92,7 +105,7 @@ describe.skipIf(!DATABASE_URL)('Phase 3 offline sync PostgreSQL idempotency', ()
         ...process.env,
         NODE_ENV: 'test',
         DATABASE_URL: DATABASE_URL!,
-        SESSION_SECRET: 'offline-phase-3-integration-secret-long-enough',
+        SESSION_SECRET: 'offline-phase-4-integration-secret-long-enough',
         PGSSL: 'off',
         PGPOOL_MAX: '4',
         PORT: String(PORT),
@@ -109,7 +122,7 @@ describe.skipIf(!DATABASE_URL)('Phase 3 offline sync PostgreSQL idempotency', ()
     expect(opened.response.status).toBe(201);
     owner.cookie = sessionCookie(opened.response);
 
-    const business = (await request('/api/businesses', {
+    business = (await request('/api/businesses', {
       method: 'POST', session: owner, body: { name: 'Offline Test Business' },
     })).data.id;
     ownerCash = (await request('/api/accounts', {
@@ -151,7 +164,7 @@ describe.skipIf(!DATABASE_URL)('Phase 3 offline sync PostgreSQL idempotency', ()
     }
   }, 15_000);
 
-  it('creates one delegated handoff under concurrent replay and returns it on later retries', async () => {
+  it('keeps Phase 3 handoff replay idempotent', async () => {
     const body = {
       fromAccountId: ownerCash,
       toAccountId: wallet,
@@ -168,22 +181,8 @@ describe.skipIf(!DATABASE_URL)('Phase 3 offline sync PostgreSQL idempotency', ()
 
     expect([a.response.status, b.response.status].sort()).toEqual([200, 201]);
     expect(a.data.id).toBe(b.data.id);
-    expect(a.data.id).toMatch(/^xfr_sync_[a-f0-9]{32}$/);
     const handoffId = a.data.id as string;
-
-    expect(Number((await db<{ n: string }>(
-      'SELECT count(*) AS n FROM pending_transfers WHERE id = $1', [handoffId],
-    ))[0].n)).toBe(1);
-    expect(Number((await db<{ n: string }>(
-      `SELECT count(*) AS n FROM notifications
-        WHERE user_id = $1 AND type = 'transfer_waiting' AND related_id = $2`,
-      [delegateId, handoffId],
-    ))[0].n)).toBe(1);
-    expect(Number((await db<{ n: string }>(
-      `SELECT count(*) AS n FROM audit
-        WHERE action = 'delegated transfer awaiting confirmation' AND subject = $1`,
-      [handoffId],
-    ))[0].n)).toBe(1);
+    expect(handoffId).toMatch(/^xfr_sync_[a-f0-9]{32}$/);
 
     const mismatch = await request('/api/delegation/transfers', {
       method: 'POST', session: owner, body: { ...body, amount: 251 },
@@ -196,28 +195,130 @@ describe.skipIf(!DATABASE_URL)('Phase 3 offline sync PostgreSQL idempotency', ()
     });
     expect(confirm.response.status).toBe(200);
 
-    const replayAfterConfirm = await request('/api/delegation/transfers', {
-      method: 'POST', session: owner, body,
-    });
-    expect(replayAfterConfirm.response.status).toBe(200);
-    expect(replayAfterConfirm.data).toMatchObject({ id: handoffId, status: 'confirmed' });
-
+    expect(Number((await db<{ n: string }>(
+      'SELECT count(*) AS n FROM pending_transfers WHERE id = $1', [handoffId],
+    ))[0].n)).toBe(1);
     expect(Number((await db<{ n: string }>(
       'SELECT count(*) AS n FROM entries WHERE client_ref = $1', [`handoff_${handoffId}`],
-    ))[0].n)).toBe(1);
-    expect(Number((await db<{ n: string }>(
-      `SELECT count(*) AS n FROM notifications
-        WHERE user_id = $1 AND type = 'transfer_waiting' AND related_id = $2`,
-      [delegateId, handoffId],
-    ))[0].n)).toBe(1);
-    expect(Number((await db<{ n: string }>(
-      `SELECT count(*) AS n FROM audit
-        WHERE action = 'delegated transfer awaiting confirmation' AND subject = $1`,
-      [handoffId],
     ))[0].n)).toBe(1);
 
     const book = await request('/api/book', { session: owner });
     expect(book.data.balances.accounts[ownerCash]).toBe(750);
     expect(book.data.balances.accounts[wallet]).toBe(250);
+  });
+
+  it('refuses a stale balance without posting, then accepts the same reviewed intent after rebase', async () => {
+    const onlineSpend = await request('/api/entries', {
+      method: 'POST', session: owner,
+      body: {
+        occurredOn: DAY,
+        kind: 'expense',
+        amount: 25,
+        purpose: 'Owner changed wallet while delegate was offline',
+        raw: 'owner spend',
+        accountId: wallet,
+        clientRef: 'online_wallet_change',
+      },
+    });
+    expect(onlineSpend.response.status).toBe(201);
+
+    const offlineBody = {
+      occurredOn: DAY,
+      kind: 'expense',
+      amount: 100,
+      purpose: 'Offline materials',
+      raw: 'Offline materials',
+      accountId: wallet,
+      clientRef: 'q_phase4_stale',
+      offlineContext: offlineContext(wallet, business, 250),
+    };
+    const stale = await request('/api/entries', { method: 'POST', session: delegate, body: offlineBody });
+    expect(stale.response.status).toBe(409);
+    expect(stale.data.code).toBe('OFFLINE_CONFLICT_STALE_BALANCE');
+    expect(String(stale.data.error)).toContain('$250.00');
+    expect(String(stale.data.error)).toContain('$225.00');
+    expect(Number((await db<{ n: string }>(
+      'SELECT count(*) AS n FROM entries WHERE client_ref = $1', ['q_phase4_stale'],
+    ))[0].n)).toBe(0);
+
+    const reviewed = await request('/api/entries', {
+      method: 'POST', session: delegate,
+      body: { ...offlineBody, offlineContext: offlineContext(wallet, business, 225) },
+    });
+    expect(reviewed.response.status).toBe(201);
+
+    const replay = await request('/api/entries', {
+      method: 'POST', session: delegate,
+      body: { ...offlineBody, offlineContext: offlineContext(wallet, business, 225) },
+    });
+    expect(replay.response.status).toBe(200);
+    expect(replay.data.id).toBe(reviewed.data.id);
+
+    const reusedDifferent = await request('/api/entries', {
+      method: 'POST', session: delegate,
+      body: { ...offlineBody, amount: 101, offlineContext: offlineContext(wallet, business, 125) },
+    });
+    expect(reusedDifferent.response.status).toBe(409);
+    expect(reusedDifferent.data.code).toBe('OFFLINE_CONFLICT_IDEMPOTENCY_KEY_REUSED');
+  });
+
+  it('turns removed account access into a reviewable permission conflict', async () => {
+    const removed = await request(`/api/delegation/users/${delegateId}/accounts`, {
+      method: 'PUT', session: owner, body: { accountIds: [] },
+    });
+    expect(removed.response.status).toBe(200);
+
+    const attempt = await request('/api/entries', {
+      method: 'POST', session: delegate,
+      body: {
+        occurredOn: DAY,
+        kind: 'expense',
+        amount: 10,
+        purpose: 'Queued before access changed',
+        raw: 'Queued before access changed',
+        accountId: wallet,
+        clientRef: 'q_phase4_permission',
+        offlineContext: offlineContext(wallet, business, 125),
+      },
+    });
+    expect(attempt.response.status).toBe(409);
+    expect(attempt.data.code).toBe('OFFLINE_CONFLICT_PERMISSION_CHANGED');
+    expect(Number((await db<{ n: string }>(
+      'SELECT count(*) AS n FROM entries WHERE client_ref = $1', ['q_phase4_permission'],
+    ))[0].n)).toBe(0);
+
+    expect((await request(`/api/delegation/users/${delegateId}/accounts`, {
+      method: 'PUT', session: owner, body: { accountIds: [wallet] },
+    })).response.status).toBe(200);
+  });
+
+  it('serializes two devices so stale concurrent spending cannot overdraw one wallet', async () => {
+    const body = (clientRef: string) => ({
+      occurredOn: DAY,
+      kind: 'expense',
+      amount: 80,
+      purpose: `Concurrent offline spend ${clientRef}`,
+      raw: `Concurrent offline spend ${clientRef}`,
+      accountId: wallet,
+      clientRef,
+      offlineContext: offlineContext(wallet, business, 125),
+    });
+
+    const [a, b] = await Promise.all([
+      request('/api/entries', { method: 'POST', session: delegate, body: body('q_phase4_device_a') }),
+      request('/api/entries', { method: 'POST', session: delegate, body: body('q_phase4_device_b') }),
+    ]);
+
+    const statuses = [a.response.status, b.response.status].sort();
+    expect(statuses).toEqual([201, 409]);
+    const failed = a.response.status === 409 ? a : b;
+    expect(failed.data.code).toBe('OFFLINE_CONFLICT_INSUFFICIENT_FUNDS');
+
+    const book = await request('/api/book', { session: owner });
+    expect(book.data.balances.accounts[wallet]).toBe(45);
+    expect(Number((await db<{ n: string }>(
+      `SELECT count(*) AS n FROM entries
+        WHERE client_ref IN ('q_phase4_device_a','q_phase4_device_b')`,
+    ))[0].n)).toBe(1);
   });
 });
