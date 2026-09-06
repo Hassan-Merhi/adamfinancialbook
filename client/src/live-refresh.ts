@@ -50,6 +50,17 @@ function topicsFromRemote(payload: LiveMutationImpact & { topics?: unknown }): L
   return [...ALL_LIVE_TOPICS];
 }
 
+/** Parse the value-free Phase 6 session-control event. */
+export function parseLiveSessionRefresh(data: string, fallbackAt = Date.now()): number | null {
+  try {
+    const value = JSON.parse(data) as { state?: unknown; at?: unknown };
+    if (value.state !== 'refresh') return null;
+    return typeof value.at === 'number' && Number.isFinite(value.at) ? value.at : fallbackAt;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Observe successful local writes and subscribe to authenticated server push.
  * The server uses PostgreSQL NOTIFY + SSE, so a write on another phone/browser
@@ -60,6 +71,11 @@ function topicsFromRemote(payload: LiveMutationImpact & { topics?: unknown }): L
  * device that was offline, background-suspended, or temporarily disconnected
  * does one authoritative revalidation after the gap instead of pretending it
  * can replay notifications it never received.
+ *
+ * Phase 6 also lets the server terminate a stream whose durable security session
+ * was revoked. The browser closes EventSource before revalidating, so an invalid
+ * cookie signs out cleanly while a same-browser credential/role change can use
+ * its newly issued cookie and reconnect under the new authority.
  */
 export function installLiveMutationBridge(target: Window = window): () => void {
   const originalFetch = target.fetch.bind(target);
@@ -108,6 +124,25 @@ export function installLiveMutationBridge(target: Window = window): () => void {
       // source permanently closed, let a later online/resume/overview action
       // create a fresh one without introducing a retry polling loop here.
       if (next.readyState === EventSource.CLOSED && source === next) source = null;
+    });
+
+    next.addEventListener('session', (event) => {
+      const at = parseLiveSessionRefresh((event as MessageEvent<string>).data);
+      if (at == null) return;
+      // Server-side session control is authoritative. Prevent EventSource from
+      // retrying a now-invalid stream; the following overview revalidation will
+      // either reconnect with the browser's newly issued cookie or move App to
+      // signed-out state on 401.
+      next.close();
+      if (source === next) source = null;
+      dispatch({
+        book: true,
+        dashboard: true,
+        topics: [...ALL_LIVE_TOPICS],
+        path: '/api/live-updates/session',
+        method: 'SESSION',
+        at,
+      });
     });
 
     next.addEventListener('mutation', (event) => {

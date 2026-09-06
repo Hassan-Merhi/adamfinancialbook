@@ -6,6 +6,7 @@ import { initializeOfflineStorage } from './offline';
 import { installOfflineExitGuards } from './offline-exit-guard';
 import { installOfflineLiveRecovery } from './offline-live-recovery';
 import { installLiveMutationBridge } from './live-refresh';
+import { installSessionQuarantine } from './session-quarantine';
 import './multilingual-offline';
 
 // Apply an explicit appearance before React renders so returning users do not
@@ -35,6 +36,12 @@ async function boot() {
   // localStorage keys into the correct user scope.
   await initializeOfflineStorage();
   await installOfflineExitGuards();
+
+  // Wrap the live fetch bridge only after IndexedDB is ready. A protected 401
+  // can then quarantine the cached offline identity before the response reaches
+  // the UI, while preserving the user's durable per-user outbox for later
+  // authenticated recovery.
+  installSessionQuarantine();
 
   // A long mobile suspension can delay retry timers without producing a clean
   // offline/online transition. Live recovery nudges the same single-flight
