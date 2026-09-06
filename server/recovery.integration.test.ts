@@ -8,14 +8,61 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const sourceUrl = process.env.TEST_DATABASE_URL;
 const backupKey = 'phase9-ci-backup-key-that-is-definitely-longer-than-thirty-two-characters';
+const evidenceBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4, 5]);
 let admin: pg.Client | null = null;
 let targetUrl = '';
 let targetDatabase = '';
 let temp = '';
+let sourceAuditId = 0;
 
 describe.skipIf(!sourceUrl)('Phase 9 backup and recovery drill', () => {
   beforeAll(async () => {
     process.env.BACKUP_ENCRYPTION_KEY = backupKey;
+
+    // Earlier integration suites deliberately tear public down to test upgrades.
+    // Recovery owns its starting state instead of depending on test file order.
+    const { runMigrations } = await import('./migration.js');
+    await runMigrations();
+
+    const sourceClient = new pg.Client({ connectionString: sourceUrl!, ssl: false });
+    await sourceClient.connect();
+    try {
+      await sourceClient.query(
+        `INSERT INTO businesses (id, name) VALUES ('recovery_business','Recovery Business')
+         ON CONFLICT (id) DO NOTHING`,
+      );
+      await sourceClient.query(
+        `INSERT INTO accounts (id, name, business_id, opening)
+         VALUES ('recovery_account','Recovery Cash','recovery_business',0)
+         ON CONFLICT (id) DO NOTHING`,
+      );
+      await sourceClient.query(
+        `INSERT INTO users (id, email, password_hash, role)
+         VALUES ('recovery_user','recovery@example.com','not-a-real-login-hash','owner')
+         ON CONFLICT (id) DO NOTHING`,
+      );
+      await sourceClient.query(
+        `INSERT INTO approval_requests (id, created_by, account_id, request_text, amount, status)
+         VALUES ('recovery_request','recovery_user','recovery_account','Recovery evidence',12.34,'pending')
+         ON CONFLICT (id) DO NOTHING`,
+      );
+      await sourceClient.query(
+        `INSERT INTO attachments
+           (id, uploaded_by, approval_request_id, filename, mime_type, byte_size, data)
+         VALUES ('recovery_attachment','recovery_user','recovery_request','recovery.png','image/png',$1,$2)
+         ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, byte_size = EXCLUDED.byte_size`,
+        [evidenceBytes.length, evidenceBytes],
+      );
+      const audit = await sourceClient.query<{ id: string | number }>(
+        `INSERT INTO audit (actor, actor_email, action, subject, detail)
+         VALUES ('recovery_user','recovery@example.com','phase9 restore marker','recovery','{}'::jsonb)
+         RETURNING id`,
+      );
+      sourceAuditId = Number(audit.rows[0].id);
+    } finally {
+      await sourceClient.end();
+    }
+
     const source = new URL(sourceUrl!);
     targetDatabase = `book_restore_${randomBytes(6).toString('hex')}`;
     const adminUrl = new URL(source.toString());
@@ -43,10 +90,7 @@ describe.skipIf(!sourceUrl)('Phase 9 backup and recovery drill', () => {
   });
 
   it('creates an authenticated encrypted snapshot and restores it into a clean database', async () => {
-    const [{ createEncryptedDatabaseBackup, decryptBackupBuffer }, { pool }] = await Promise.all([
-      import('./backup-service.js'),
-      import('./db.js'),
-    ]);
+    const { createEncryptedDatabaseBackup, decryptBackupBuffer } = await import('./backup-service.js');
     const artifact = await createEncryptedDatabaseBackup('ci-restore-drill');
     expect(artifact.buffer.subarray(0, 4).toString('utf8')).toBe('AFB9');
     expect(artifact.bytes).toBeGreaterThan(64);
@@ -54,7 +98,14 @@ describe.skipIf(!sourceUrl)('Phase 9 backup and recovery drill', () => {
 
     const snapshot = decryptBackupBuffer(artifact.buffer);
     expect(snapshot.tables.length).toBeGreaterThan(5);
-    expect(snapshot.migrationVersion).toBe(7);
+    expect(snapshot.migrationVersion).toBe(6);
+    expect(snapshot.tables.map((table) => table.name)).not.toContain('backup_runs');
+    expect(snapshot.tables.map((table) => table.name)).not.toContain('operational_events');
+    expect(snapshot.tables.map((table) => table.name)).not.toContain('translation_cache');
+    const attachment = snapshot.tables.find((table) => table.name === 'attachments');
+    expect(attachment?.binaryColumns).toContain('data');
+    expect(attachment?.rows.some((row) => row.id === 'recovery_attachment')).toBe(true);
+
     const file = join(temp, artifact.filename);
     writeFileSync(file, artifact.buffer);
 
@@ -82,14 +133,24 @@ describe.skipIf(!sourceUrl)('Phase 9 backup and recovery drill', () => {
         );
         expect(Number(count.rows[0]?.n ?? -1), table.name).toBe(table.rowCount);
       }
+      const binary = await target.query<{ data: Buffer }>(
+        `SELECT data FROM attachments WHERE id = 'recovery_attachment'`,
+      );
+      expect(Buffer.compare(binary.rows[0].data, evidenceBytes)).toBe(0);
+
       const migration = await target.query<{ version: string | number }>(
         'SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1',
       );
-      expect(Number(migration.rows[0]?.version)).toBe(7);
+      expect(Number(migration.rows[0]?.version)).toBe(6);
+
+      const nextAudit = await target.query<{ id: string | number }>(
+        `INSERT INTO audit (actor, action, subject, detail)
+         VALUES ('restore-check','post restore sequence','recovery','{}'::jsonb)
+         RETURNING id`,
+      );
+      expect(Number(nextAudit.rows[0].id)).toBeGreaterThan(sourceAuditId);
     } finally {
       await target.end();
-      // Leave the source pool open for any later integration files in this run.
-      expect(pool.totalCount).toBeGreaterThanOrEqual(0);
     }
   }, 60_000);
 
