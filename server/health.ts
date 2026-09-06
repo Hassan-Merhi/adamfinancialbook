@@ -16,6 +16,7 @@ healthRouter.get('/health/ready', wrap(async (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.status(state.ok ? 200 : 503).json({
     ok: state.ok,
+    release: process.env.RENDER_GIT_COMMIT ?? process.env.GIT_COMMIT ?? 'unknown',
     database: state.database,
     migrations: state.migrations,
     pendingMigrations: state.pendingMigrations,
