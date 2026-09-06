@@ -12,6 +12,7 @@ import { isOfflineRevisionInput } from '../../shared/offline-conflict';
 import { offlineRepository, type OfflineUser, type Queued } from './offline-db';
 import { captureOfflineContext, captureOfflineRevisionContext } from './offline-conflict';
 import { projectOfflineBook } from './offline-projection';
+import { sendOfflineQueued } from './offline-revision-api';
 import {
   offlineSyncState,
   type SyncErrorInfo,
@@ -416,7 +417,9 @@ async function runFlush(
     });
 
     try {
-      await send(item.input);
+      await (isOfflineRevisionInput(item.input)
+        ? sendOfflineQueued(item.input as unknown as EntryInput)
+        : send(item.input));
       await offlineRepository.queueDrop(item.id);
       await offlineSyncState.remove(item.id);
       const successAt = new Date(nowMs()).toISOString();
