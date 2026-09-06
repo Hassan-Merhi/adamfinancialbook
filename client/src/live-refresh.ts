@@ -4,11 +4,17 @@ import {
   type LiveMutationImpact,
   type LiveTopic,
 } from '../../shared/live-updates';
+import {
+  dispatchLiveRecovery,
+  LiveGapTracker,
+  type LiveRecoveryReason,
+} from './live-recovery';
 
 export { classifyLiveMutation, classifyLiveTopics } from '../../shared/live-updates';
 export type { LiveMutationImpact, LiveTopic } from '../../shared/live-updates';
 
 export const LIVE_MUTATION_EVENT = 'book:live-mutation';
+export const ALL_LIVE_TOPICS: readonly LiveTopic[] = ['approvals', 'access', 'files', 'history'];
 
 export interface LiveMutationDetail extends LiveMutationImpact {
   topics: LiveTopic[];
@@ -36,13 +42,12 @@ function liveClientId(target: Window): string {
 
 function topicsFromRemote(payload: LiveMutationImpact & { topics?: unknown }): LiveTopic[] {
   if (Array.isArray(payload.topics)) {
-    return payload.topics.filter((topic): topic is LiveTopic =>
-      topic === 'approvals' || topic === 'access' || topic === 'files' || topic === 'history');
+    return payload.topics.filter((topic): topic is LiveTopic => ALL_LIVE_TOPICS.includes(topic as LiveTopic));
   }
   if (!payload.book && !payload.dashboard) return [];
   // Compatibility with a Phase 3 server during a rolling deploy. Correctness
-  // wins over a few temporary extra reads; Phase 4 servers send precise topics.
-  return ['approvals', 'access', 'files', 'history'];
+  // wins over a few temporary extra reads; Phase 4+ servers send precise topics.
+  return [...ALL_LIVE_TOPICS];
 }
 
 /**
@@ -50,14 +55,37 @@ function topicsFromRemote(payload: LiveMutationImpact & { topics?: unknown }): L
  * The server uses PostgreSQL NOTIFY + SSE, so a write on another phone/browser
  * reaches this tab without polling. This tab's id is attached to its writes so
  * its own server echo can be skipped.
+ *
+ * Phase 5 adds gap recovery. PostgreSQL NOTIFY is deliberately ephemeral, so a
+ * device that was offline, background-suspended, or temporarily disconnected
+ * does one authoritative revalidation after the gap instead of pretending it
+ * can replay notifications it never received.
  */
 export function installLiveMutationBridge(target: Window = window): () => void {
   const originalFetch = target.fetch.bind(target);
   const clientId = liveClientId(target);
+  const gaps = new LiveGapTracker();
   let source: EventSource | null = null;
 
   const dispatch = (detail: LiveMutationDetail) => {
     target.dispatchEvent(new CustomEvent<LiveMutationDetail>(LIVE_MUTATION_EVENT, { detail }));
+  };
+
+  const recover = (reason: LiveRecoveryReason, at = Date.now()) => {
+    // Keep a dedicated lifecycle signal for diagnostics/tests, then route the
+    // actual catch-up through the same mutation invalidation system as Phases
+    // 1-4. App.tsx already flushes the offline outbox on `online`; if that flush
+    // is still running, its successful writes emit newer mutation events and
+    // the existing refresh-start timestamps suppress stale duplicate reads.
+    dispatchLiveRecovery(target, reason, at);
+    dispatch({
+      book: true,
+      dashboard: true,
+      topics: [...ALL_LIVE_TOPICS],
+      path: '/api/live-updates/recovery',
+      method: 'RECOVER',
+      at,
+    });
   };
 
   const stopRealtime = () => {
@@ -68,6 +96,20 @@ export function installLiveMutationBridge(target: Window = window): () => void {
   const startRealtime = () => {
     if (source || typeof EventSource === 'undefined' || !target.navigator.onLine) return;
     const next = new EventSource(`/api/live-updates?client=${encodeURIComponent(clientId)}`);
+
+    next.addEventListener('open', () => {
+      const recovery = gaps.streamOpen();
+      if (recovery) recover(recovery);
+    });
+
+    next.addEventListener('error', () => {
+      gaps.streamError();
+      // EventSource normally reconnects itself. If the browser declares this
+      // source permanently closed, let a later online/resume/overview action
+      // create a fresh one without introducing a retry polling loop here.
+      if (next.readyState === EventSource.CLOSED && source === next) source = null;
+    });
+
     next.addEventListener('mutation', (event) => {
       try {
         const payload = JSON.parse((event as MessageEvent<string>).data) as LiveMutationImpact & { topics?: unknown; at?: number };
@@ -101,11 +143,29 @@ export function installLiveMutationBridge(target: Window = window): () => void {
       nextInit = { ...init, headers };
     }
 
-    const response = await originalFetch(input, nextInit);
+    let response: Response;
+    try {
+      response = await originalFetch(input, nextInit);
+    } catch (error) {
+      // navigator.onLine can remain true through Wi-Fi captive portals, Render
+      // restarts, DNS failures, and brief server/network outages. If startup's
+      // auth/book read cannot reach the server, let EventSource keep attempting
+      // its native reconnect; its later successful open becomes the catch-up
+      // signal. This is transport recovery, not an application polling loop.
+      if (
+        sameOrigin
+        && target.navigator.onLine
+        && (url?.pathname === '/api/me' || url?.pathname === '/api/overview')
+      ) {
+        gaps.streamError();
+        startRealtime();
+      }
+      throw error;
+    }
     if (!response.ok || !sameOrigin || !url) return response;
 
     // Overview is only reachable after authentication and is loaded on every
-    // signed-in startup, making it the safe point to open the live stream.
+    // signed-in startup, making it the normal safe point to open the live stream.
     if (method === 'GET' && url.pathname === '/api/overview') startRealtime();
     if (url.pathname === '/api/logout' && method !== 'GET') stopRealtime();
 
@@ -123,14 +183,40 @@ export function installLiveMutationBridge(target: Window = window): () => void {
     return response;
   };
 
+  const online = () => {
+    // Try an immediate authoritative catch-up. If connectivity is only nominal
+    // and the server still cannot be reached, EventSource will mark a gap and a
+    // later successful `open` will trigger another recovery without polling.
+    recover(gaps.online());
+    startRealtime();
+  };
+  const offline = () => {
+    gaps.offline();
+    stopRealtime();
+  };
+  const visibility = () => {
+    const now = Date.now();
+    if (target.document.visibilityState === 'hidden') {
+      gaps.hidden(now);
+      return;
+    }
+    const recovery = gaps.visible(now);
+    if (recovery && target.navigator.onLine) {
+      recover(recovery, now);
+      startRealtime();
+    }
+  };
+
   target.fetch = wrappedFetch;
-  target.addEventListener('online', startRealtime);
-  target.addEventListener('offline', stopRealtime);
+  target.addEventListener('online', online);
+  target.addEventListener('offline', offline);
+  target.document.addEventListener('visibilitychange', visibility);
 
   return () => {
     stopRealtime();
-    target.removeEventListener('online', startRealtime);
-    target.removeEventListener('offline', stopRealtime);
+    target.removeEventListener('online', online);
+    target.removeEventListener('offline', offline);
+    target.document.removeEventListener('visibilitychange', visibility);
     if (target.fetch === wrappedFetch) target.fetch = originalFetch;
   };
 }

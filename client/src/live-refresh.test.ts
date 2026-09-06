@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyLiveMutation } from './live-refresh';
+import { ALL_LIVE_TOPICS, classifyLiveMutation } from './live-refresh';
 
 describe('live mutation refresh classification', () => {
   it('ignores reads and authentication-only writes', () => {
@@ -36,5 +36,10 @@ describe('live mutation refresh classification', () => {
       .toEqual({ book: false, dashboard: true });
     expect(classifyLiveMutation('/api/delegation/users/usr_1/accounts', 'PUT'))
       .toEqual({ book: true, dashboard: true });
+  });
+
+  it('covers every independently loaded Phase 4 dataset during gap recovery', () => {
+    expect(ALL_LIVE_TOPICS).toEqual(['approvals', 'access', 'files', 'history']);
+    expect(new Set(ALL_LIVE_TOPICS).size).toBe(ALL_LIVE_TOPICS.length);
   });
 });

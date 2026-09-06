@@ -4,6 +4,7 @@ import App from './App';
 import { LanguageProvider } from './i18n';
 import { initializeOfflineStorage } from './offline';
 import { installOfflineExitGuards } from './offline-exit-guard';
+import { installOfflineLiveRecovery } from './offline-live-recovery';
 import { installLiveMutationBridge } from './live-refresh';
 import './multilingual-offline';
 
@@ -30,10 +31,15 @@ if ('serviceWorker' in navigator) {
 
 async function boot() {
   // IndexedDB must be hydrated before App reads the last user, snapshot or
-  // outbox.  This also performs the one-time migration from the old global
+  // outbox. This also performs the one-time migration from the old global
   // localStorage keys into the correct user scope.
   await initializeOfflineStorage();
   await installOfflineExitGuards();
+
+  // A long mobile suspension can delay retry timers without producing a clean
+  // offline/online transition. Live recovery nudges the same single-flight
+  // durable outbox when the transport reconnects or the app resumes.
+  installOfflineLiveRecovery();
 
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
