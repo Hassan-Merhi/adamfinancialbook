@@ -78,5 +78,5 @@ delegationGate.use(operationsRouter);
 
 await import('./index.js');
 
-const { startIntegrityMonitor } = await import('./integrity.js');
-startIntegrityMonitor();
+const { startAlertingIntegrityMonitor } = await import('./integrity-monitor.js');
+startAlertingIntegrityMonitor();
