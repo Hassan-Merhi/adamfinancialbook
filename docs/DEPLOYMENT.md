@@ -32,7 +32,15 @@ If any gate fails, the application does not open for traffic.
 
 ## Health/readiness
 
-Render uses `/api/health`. The route checks PostgreSQL with `SELECT 1`. Because the HTTP server is only opened after migration validation succeeds, this endpoint acts as both the production liveness and readiness check: a process cannot report healthy while its schema is behind the code.
+Render must use `/api/health/ready` as the service health-check path. It verifies PostgreSQL connectivity and that the schema has no pending migrations. `/api/health/live` is the process-only liveness endpoint.
+
+The independent production monitor also calls `/api/health/ready` every ten minutes and verifies all of these fields before treating production as healthy:
+
+- HTTP 2xx;
+- `ok: true`;
+- `database: "ok"`;
+- `migrations: "current"`;
+- `pendingMigrations: 0`.
 
 For explicit schema diagnostics, run:
 
@@ -40,7 +48,7 @@ For explicit schema diagnostics, run:
 npm run db:status
 ```
 
-A healthy deployment has zero pending migrations.
+A healthy deployment has zero pending migrations and `current === latest`.
 
 ## Pre-deploy verification
 
@@ -51,12 +59,13 @@ npm ci
 npm run verify
 ```
 
-`npm run verify` runs typecheck, tests, and the production Vite build.
+`npm run verify` runs typecheck, tests, and the production Vite build. The integration workflow additionally runs migrations twice, API integration, the encrypted backup/restore drill, financial end-to-end reconciliation, and the final database-integrity certification against disposable PostgreSQL.
 
 ## Required Render environment
 
 - `DATABASE_URL` — pooled Neon PostgreSQL URL.
 - `SESSION_SECRET` — generated random value, at least 32 characters.
+- `BACKUP_ENCRYPTION_KEY` — stable value of at least 32 characters. Do not rotate without preserving the old key for old archives.
 - `NODE_ENV=production`.
 - `NODE_VERSION=22`.
 - `PGSSL=verify`.
@@ -69,8 +78,26 @@ Optional integrations:
 - `REPORT_TO`
 - `REPORT_FROM`
 - `SMTP_URL`
+- `ALERT_WEBHOOK_URL`
 
 Secrets must never be committed to the repository or printed in application logs.
+
+## Recovery certification
+
+The repository contains a destructive-safety restore drill in `server/recovery.integration.test.ts`. It never restores over the source database. The drill:
+
+1. creates an authenticated AES-256-GCM `.afb` backup;
+2. creates a brand-new disposable PostgreSQL database;
+3. migrates the disposable target;
+4. restores all application tables and binary attachments;
+5. verifies every restored table row count;
+6. verifies attachment bytes exactly;
+7. verifies migrations are current;
+8. verifies sequence reseeding by performing a post-restore insert;
+9. runs the full accounting/data integrity checker;
+10. rejects a deliberately tampered encrypted backup.
+
+`server/restore.ts` requires `RESTORE_DATABASE_URL` and refuses to restore over `DATABASE_URL` unless the explicit emergency override `ALLOW_PRODUCTION_RESTORE=1` is present.
 
 ## Rollback procedure
 
@@ -78,17 +105,31 @@ Application rollbacks and database rollbacks are intentionally different.
 
 ### Safe application rollback
 
-1. Identify the last known-good Git commit/deploy.
-2. Redeploy that commit through Render.
+1. Identify the last known-good Git commit/deploy in Render deploy history.
+2. Redeploy that known-good revision.
 3. Do not delete rows from `schema_migrations`.
-4. Verify `/api/health` and `npm run db:status`.
-5. Smoke-test sign-in and a read-only account view before resuming normal use.
+4. Verify `/api/health/ready` returns HTTP 2xx, `database=ok`, `migrations=current`, and zero pending migrations.
+5. Verify the independent production health monitor is green.
+6. Smoke-test sign-in and a read-only account view before resuming normal use.
 
 Forward-compatible migrations should be preferred so the previous application release can still operate after a schema migration.
 
 ### Schema rollback
 
 Do not edit an already-applied migration and do not manually remove its migration ledger row. If a schema change must be reversed, create a new higher-numbered migration that performs the corrective change. This preserves an auditable history and checksum integrity.
+
+### Data recovery
+
+Use a recent encrypted `.afb` archive and always restore it to a disposable database first:
+
+```sh
+DATABASE_URL='postgres://production-or-source' \
+RESTORE_DATABASE_URL='postgres://disposable-recovery-db' \
+BACKUP_ENCRYPTION_KEY='stable-production-backup-key' \
+npm run restore -- backups/adam-financial-book-....afb
+```
+
+Only consider an emergency production restore after the disposable restore reports `restore.verified` with zero integrity errors and current migrations.
 
 ## Failed deploy handling
 
@@ -101,7 +142,7 @@ If startup fails:
 
 ## Release verification
 
-Every production startup emits structured JSON events containing the runtime mode, Node version, service name, release SHA, and current/latest migration version. Use those entries to prove which application release and schema version are running together.
+Every production startup emits structured JSON events containing the runtime mode, Node version, service name, release SHA, and current/latest migration version. Use those entries together with the Render deploy history and the independent GitHub production monitor to prove which application release and schema version are running together.
 
 ## Manual database changes
 
