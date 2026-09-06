@@ -6,7 +6,7 @@ export type { Queued } from './offline-db';
 /**
  * Phase 1 offline foundation.
  *
- * The browser boots the IndexedDB repository before React renders.  These small
+ * The browser boots the IndexedDB repository before React renders. These small
  * facades keep the rest of the app simple while all sensitive cached state is
  * stored per user instead of in global localStorage keys.
  */
@@ -24,12 +24,12 @@ export const snapshot = {
 };
 
 /**
- * Who was holding the book last time.  The repository stores only a global
+ * Who was holding the book last time. The repository stores only a global
  * pointer to that user id; the actual profile, snapshot and queued work live in
  * separate user-scoped records.
  */
 export const lastUser = {
-  save: <T extends OfflineUser>(user: T) => offlineRepository.setActiveUser(user),
+  save: <T extends OfflineUser>(user: T | null) => user ? offlineRepository.setActiveUser(user) : Promise.resolve(),
   load: <T>(): T | null => offlineRepository.getActiveUser<T>(),
   clear: () => offlineRepository.clearSession(),
 };
@@ -70,7 +70,7 @@ async function runFlush(send: (input: EntryInput) => Promise<unknown>): Promise<
     } catch (err) {
       if (looksOffline(err)) break;
       // Phase 3 will replace this terminal refusal behavior with richer durable
-      // rejected/conflict states.  Phase 1 preserves the existing semantics.
+      // rejected/conflict states. Phase 1 preserves the existing semantics.
       await outbox.drop(item.id);
       throw err;
     }
