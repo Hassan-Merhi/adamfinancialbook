@@ -41,7 +41,9 @@ const deliveryInput = z.object({
   artifactId: z.string().min(1).max(120),
   artifactDigest: z.string().min(1).max(160),
   artifactUrl: z.string().url().max(1000),
-  retentionUntil: z.string().datetime(),
+  // GitHub's acknowledgement runner uses Python datetime.isoformat(), which
+  // emits a valid RFC 3339 UTC offset ("+00:00"). Accept offsets as well as Z.
+  retentionUntil: z.string().datetime({ offset: true }),
 });
 
 // These machine endpoints sit outside cookie authentication by design, so keep
