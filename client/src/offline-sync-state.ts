@@ -6,6 +6,7 @@ import {
 } from './offline-db';
 import type { EntryInput } from '../../shared/types';
 import type { OfflineConflictInfo, OfflineEntryInput } from '../../shared/offline-conflict';
+import { orderQueuedByDependencies } from './offline-dependencies';
 
 const SYNC_META_STORE = 'syncMeta';
 
@@ -351,7 +352,7 @@ class OfflineSyncState {
 
   projectablePrefix(queue: Queued[]): Queued[] {
     const visible: Queued[] = [];
-    for (const item of this.effective(queue)) {
+    for (const item of orderQueuedByDependencies(this.effective(queue))) {
       const status = this.stateFor(item.id).status;
       if (status === 'conflict' || status === 'rejected') break;
       visible.push(item);
@@ -435,7 +436,7 @@ class OfflineSyncState {
     let nextRetryAt: string | null = null;
     let orderBlocked = false;
 
-    for (const item of this.ordered(queue)) {
+    for (const item of orderQueuedByDependencies(this.effective(queue))) {
       const state = this.stateFor(item.id);
       if (orderBlocked) blockedByOrder += 1;
       if (state.status === 'pending') pending += 1;
