@@ -274,6 +274,24 @@ class OfflineSyncState {
     });
   }
 
+  /** A server-authenticated session makes prior 401 blocks safe to try again. */
+  async resumeAfterAuthentication(queue: Queued[]): Promise<void> {
+    let changed = false;
+    for (const item of queue) {
+      const current = this.state.items[item.id];
+      if (current?.status !== 'blocked_auth') continue;
+      this.state.items[item.id] = {
+        ...current,
+        status: 'pending',
+        nextAttemptAt: null,
+        lastError: null,
+      };
+      changed = true;
+    }
+    if (changed && this.state.lastError?.kind === 'auth') this.state.lastError = null;
+    if (changed) await this.persist();
+  }
+
   ordered(queue: Queued[]): Queued[] {
     return [...queue].sort((a, b) => {
       const aOrder = this.state.items[a.id]?.order ?? 0;
