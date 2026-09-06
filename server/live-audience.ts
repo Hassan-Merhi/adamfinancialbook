@@ -1,27 +1,20 @@
 import type { Request } from 'express';
 import { query } from './db.js';
 import type { LiveMutationImpact } from '../shared/live-updates.js';
+import {
+  audienceAllows,
+  type LiveAudience,
+  type LiveClientIdentity,
+} from './live-audience-policy.js';
 
-export interface LiveAudience {
-  all: boolean;
-  owners: boolean;
-  userIds: string[];
-}
-
-export interface LiveClientIdentity {
-  userId: string;
-  role: 'owner' | 'entry';
-}
+export { audienceAllows } from './live-audience-policy.js';
+export type { LiveAudience, LiveClientIdentity } from './live-audience-policy.js';
 
 const ownersOnly = (): LiveAudience => ({ all: false, owners: true, userIds: [] });
 const everyone = (): LiveAudience => ({ all: true, owners: true, userIds: [] });
 
 function unique(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.filter((value): value is string => !!value))];
-}
-
-export function audienceAllows(audience: LiveAudience, client: LiveClientIdentity): boolean {
-  return audience.all || (audience.owners && client.role === 'owner') || audience.userIds.includes(client.userId);
 }
 
 async function usersForAccounts(accountIds: string[]): Promise<string[]> {
@@ -99,24 +92,17 @@ export async function resolveLiveAudience(
   const actorRole = req.user?.role ?? null;
   const body = bodyObject(req);
 
-  // A full book reset changes every delegated wallet as well as the owner view.
   if (path === '/api/reset-book') return everyone();
 
-  // Changing assigned accounts must immediately reshape that delegate's own
-  // overview, even though the change itself was made by an owner.
   const assignmentMatch = /^\/api\/delegation\/users\/([^/]+)\/accounts$/.exec(path);
   if (assignmentMatch) {
     return { all: false, owners: true, userIds: unique([assignmentMatch[1]]) };
   }
 
-  // User administration is private to owners plus the user whose access/state
-  // changed. Collection-level writes have no pre-existing target id.
   const userMatch = /^\/api\/users\/([^/]+)/.exec(path);
   if (userMatch) return { all: false, owners: true, userIds: unique([userMatch[1]]) };
   if (/^\/api\/users(?:\/|$)/.test(path)) return ownersOnly();
 
-  // Owner-only catalog/setup changes do not change another delegate's current
-  // assigned-wallet snapshot unless an assignment route above says so.
   if (/^\/api\/(?:businesses|accounts|projects|people|loans|reminders)(?:\/|$)/.test(path)) {
     return ownersOnly();
   }
@@ -153,9 +139,6 @@ export async function resolveLiveAudience(
   const approvalMatch = /^\/api\/delegation\/approvals\/([^/]+)\/decision$/.exec(path);
   if (approvalMatch) return approvalAudience(approvalMatch[1]);
 
-  // Generic delegation writes are usually relevant only to owners plus the
-  // actor/explicit delegate. Account ids in the body extend that audience to
-  // whoever is assigned to those accounts.
   if (path.startsWith('/api/delegation/')) {
     const accountIds = unique([
       text(body, 'accountId'), text(body, 'fromAccountId'), text(body, 'toAccountId'),
@@ -169,9 +152,6 @@ export async function resolveLiveAudience(
     };
   }
 
-  // Conservative fallback: owner writes stay owner-only; delegated writes keep
-  // the actor in sync. If future routes are added, tests should give them a
-  // more precise audience rather than widening every connected device.
   return {
     all: false,
     owners: true,
