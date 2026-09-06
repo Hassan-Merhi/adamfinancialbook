@@ -47,8 +47,10 @@ The gate enforces:
 - focused statement p95 < 500 ms
 - global entry search p95 < 500 ms
 - audit-history page p95 < 500 ms
+- file-library page p95 < 500 ms
 - normal overview p95 < 500 ms
 - heavy historical overview p95 < 1.5 s
+- 30 simultaneous authenticated users with p95 < 1 s and total wall time < 2.5 s
 - bounded response sizes
 - required performance indexes
 - no orphan effects
@@ -65,7 +67,7 @@ CI runs this in an isolated PostgreSQL 16 service so its dataset cannot hide fai
 - 393 × 852
 - 430 × 932
 
-The automated gate exercises:
+The automated WebKit gate exercises:
 
 - first-owner setup and signed-in startup
 - Today, Money, Projects, and People
@@ -76,12 +78,14 @@ The automated gate exercises:
 - 44 × 44 minimum mobile navigation targets
 - horizontal-overflow detection after each major navigation path
 - keyboard focus entry
-- service-worker registration
-- installed-PWA offline reload/restart using the cached snapshot
-- restoration back online
+- an active, controlling service worker
+- the expected `book-shell-v2` cache
+- cached `/` and `/index.html` PWA app shells
 - unhandled WebKit page errors
 
-This is an executable WebKit/Safari-engine mobile gate, not a claim that CI owns physical iPhone hardware. It is designed to catch the layout, touch, PWA, RTL, accessibility, and navigation failures that static CSS assertions cannot.
+Airplane-mode startup, killed-app recovery, queued-write recovery, reconnect storms, and offline restart are certified by the permanent Phase 7/P1 offline suites rather than by Playwright's WebKit `setOffline()` transport. Playwright WebKit currently throws an engine-level internal navigation error when forced offline before a service-worker navigation, so the release gate intentionally separates browser rendering/PWA-install proof from offline-state-machine/restart proof instead of treating that engine error as an application result.
+
+This is an executable WebKit/Safari-engine mobile gate, not a claim that CI owns physical iPhone hardware. It catches layout, touch, PWA installation/cache, RTL, accessibility, and navigation failures that static CSS assertions cannot, while the offline suites independently prove the data-safety behavior.
 
 ## Release rule
 
@@ -94,7 +98,7 @@ P1 may merge only when the PR head passes all of the following and the resulting
 5. existing API integration suite
 6. offline chaos and multi-device PostgreSQL certification
 7. P1 production-scale PostgreSQL certification
-8. P1 WebKit touch/mobile certification
+8. P1 WebKit touch/mobile + service-worker/cache certification
 9. financial end-to-end reconciliation
 10. final database integrity certification
 11. dependency/secret security gate
