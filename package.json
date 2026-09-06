@@ -45,6 +45,7 @@
     "@types/pg": "^8.15.5",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.1",
     "concurrently": "^10.0.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
