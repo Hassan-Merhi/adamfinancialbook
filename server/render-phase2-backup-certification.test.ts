@@ -26,7 +26,8 @@ describe('Render Phase 2 encrypted production backup contract', () => {
     expect(service).toContain('scryptSync(secret(), salt, 32)');
     expect(service).toContain('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     expect(service).toContain('sha256(canonicalRows(rows))');
-    expect(service).toContain('checksum: sha256(buffer)');
+    expect(service).toContain('const checksum = sha256(buffer)');
+    expect(service).toContain('checksum,');
     expect(service).toContain('BACKUP_ENCRYPTION_KEY must be set to at least 32 characters');
     expect(service).toContain('Refusing to back up while');
   });
