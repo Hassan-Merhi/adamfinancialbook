@@ -32,6 +32,17 @@ describe('Advanced offline Phase 2 contract', () => {
     expect(entry.indexOf('await outbox.add(withLink);')).toBeLessThan(entry.indexOf("done(`Kept —"));
   });
 
+  it('recomputes the projected React book immediately whenever the queue changes', () => {
+    const app = read('client/src/App.tsx');
+    expect(app).toContain('const refreshProjection = () => {');
+    expect(app).toContain('const projected = snapshot.load<LoadedBook>();');
+    expect(app).toContain('onQueued={refreshProjection}');
+    const flush = app.slice(app.indexOf('const flush = async () => {'), app.indexOf('useEffect(() => {', app.indexOf('const flush = async () => {'));
+    expect(flush.match(/refreshProjection\(\);/g)?.length).toBe(2);
+    expect(app).toContain('await snapshot.save(fresh);');
+    expect(app).toContain('setBook(snapshot.load<LoadedBook>() ?? fresh);');
+  });
+
   it('labels projected values and pending ledger rows as unconfirmed', () => {
     const app = read('client/src/App.tsx');
     const today = read('client/src/views/Today.tsx');
