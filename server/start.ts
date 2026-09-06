@@ -40,7 +40,7 @@ const [
   { requestTelemetry },
   { healthRouter },
   { publicSecurityRouter, protectedSecurityRouter },
-  { liveUpdatesRouter, liveMutationObserver },
+  { liveUpdatesRouter, liveMutationObserver, liveSecuritySessionObserver },
   { offlineSyncRouter },
   { offlineRevisionRouter },
   { offlineSetupRouter },
@@ -63,14 +63,17 @@ const [
 ]);
 
 publicSecurityRouter.use(healthRouter);
-// publicSecurityRouter is mounted before requireAuthenticatedApi. Its fixed
-// public routes finish first; this fallthrough therefore observes every other
-// /api request before protected/delegated/core routing can finish it.
+// publicSecurityRouter is mounted after loadSecuritySession but before
+// requireAuthenticatedApi. Fixed public routes finish first; this fallthrough
+// therefore observes all later successful writes, including the protected
+// security routes that terminate inside protectedSecurityRouter.
 publicSecurityRouter.use(requestTelemetry);
-// Cross-device updates are authenticated. The SSE route terminates here, while
-// the observer falls through and reports successful downstream mutations only.
+publicSecurityRouter.use(liveMutationObserver);
+publicSecurityRouter.use(liveSecuritySessionObserver);
+// The SSE endpoint itself stays behind requireAuthenticatedApi. Observers live
+// above that gate only so they can attach before protected routes finish; failed
+// or unauthenticated responses never publish because their status is >= 400.
 protectedSecurityRouter.use(liveUpdatesRouter);
-protectedSecurityRouter.use(liveMutationObserver);
 // Confirmation is a financial write too: intercept it before the legacy
 // delegation route so the balance re-check, ledger posting, transfer status,
 // notifications and audit commit atomically.

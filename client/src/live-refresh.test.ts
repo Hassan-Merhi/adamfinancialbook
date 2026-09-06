@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_LIVE_TOPICS, classifyLiveMutation } from './live-refresh';
+import {
+  ALL_LIVE_TOPICS,
+  classifyLiveMutation,
+  parseLiveSessionRefresh,
+} from './live-refresh';
 
 describe('live mutation refresh classification', () => {
   it('ignores reads and authentication-only writes', () => {
@@ -41,5 +45,12 @@ describe('live mutation refresh classification', () => {
   it('covers every independently loaded Phase 4 dataset during gap recovery', () => {
     expect(ALL_LIVE_TOPICS).toEqual(['approvals', 'access', 'files', 'history']);
     expect(new Set(ALL_LIVE_TOPICS).size).toBe(ALL_LIVE_TOPICS.length);
+  });
+
+  it('accepts only the value-free Phase 6 session refresh signal', () => {
+    expect(parseLiveSessionRefresh('{"state":"refresh","at":1234}', 99)).toBe(1234);
+    expect(parseLiveSessionRefresh('{"state":"refresh"}', 99)).toBe(99);
+    expect(parseLiveSessionRefresh('{"state":"revoked","at":1234}', 99)).toBeNull();
+    expect(parseLiveSessionRefresh('{bad json', 99)).toBeNull();
   });
 });

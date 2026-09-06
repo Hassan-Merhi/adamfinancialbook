@@ -8,9 +8,19 @@ import {
   type LiveAudience,
   type LiveClientIdentity,
 } from './live-audience.js';
+import {
+  classifyLiveSessionControl,
+  liveSessionControlMatches,
+  preserveReplacementSession,
+  type LiveSessionControl,
+} from './live-session-control.js';
 
 const CHANNEL = 'book_live_updates';
-type ConnectedClient = LiveClientIdentity & { response: Response; clientId: string | null };
+type ConnectedClient = LiveClientIdentity & {
+  response: Response;
+  clientId: string | null;
+  securitySessionId: string | null;
+};
 const clients = new Set<ConnectedClient>();
 let listenerClient: PoolClient | null = null;
 let listenerStarting: Promise<void> | null = null;
@@ -24,6 +34,8 @@ interface LivePayload {
   sourceClientId: string | null;
   audience: LiveAudience;
 }
+
+type LiveWirePayload = LivePayload | LiveSessionControl;
 
 function legacyTopics(payload: Pick<LivePayload, 'book' | 'dashboard'>): LiveTopic[] {
   if (!payload.book && !payload.dashboard) return [];
@@ -51,6 +63,18 @@ function broadcast(payload: LivePayload): void {
   }
 }
 
+function closeRevokedSessions(control: LiveSessionControl): void {
+  for (const client of [...clients]) {
+    if (!liveSessionControlMatches(control, client)) continue;
+    clients.delete(client);
+    if (client.response.writableEnded || client.response.destroyed) continue;
+    // Do not expose which security action happened. The browser only needs to
+    // know that its cached authorization must be checked again.
+    client.response.write(`event: session\ndata: ${JSON.stringify({ state: 'refresh', at: control.at })}\n\n`);
+    client.response.end();
+  }
+}
+
 function scheduleReconnect(): void {
   if (reconnectTimer || clients.size === 0) return;
   reconnectTimer = setTimeout(() => {
@@ -58,6 +82,16 @@ function scheduleReconnect(): void {
     void ensureListener();
   }, 1_000);
   reconnectTimer.unref?.();
+}
+
+function isSessionControl(payload: unknown): payload is LiveSessionControl {
+  if (!payload || typeof payload !== 'object') return false;
+  const value = payload as Partial<LiveSessionControl>;
+  return value.kind === 'session-control'
+    && typeof value.userId === 'string'
+    && typeof value.at === 'number'
+    && (value.sessionId == null || typeof value.sessionId === 'string')
+    && (value.exceptSessionId == null || typeof value.exceptSessionId === 'string');
 }
 
 async function ensureListener(): Promise<void> {
@@ -68,7 +102,11 @@ async function ensureListener(): Promise<void> {
     client.on('notification', (message) => {
       if (message.channel !== CHANNEL || !message.payload) return;
       try {
-        const payload = JSON.parse(message.payload) as LivePayload;
+        const payload = JSON.parse(message.payload) as LiveWirePayload;
+        if (isSessionControl(payload)) {
+          closeRevokedSessions(payload);
+          return;
+        }
         if (typeof payload.at !== 'number' || !payload.audience) return;
         broadcast(payload);
       } catch { /* malformed notifications are ignored */ }
@@ -90,7 +128,7 @@ async function ensureListener(): Promise<void> {
   return listenerStarting;
 }
 
-async function publish(payload: LivePayload): Promise<void> {
+async function publish(payload: LiveWirePayload): Promise<void> {
   await pool.query('SELECT pg_notify($1, $2)', [CHANNEL, JSON.stringify(payload)]);
 }
 
@@ -111,6 +149,7 @@ liveUpdatesRouter.get('/live-updates', async (req, res, next) => {
       clientId: typeof req.query.client === 'string' && req.query.client.length <= 120 ? req.query.client : null,
       userId: req.user!.id,
       role: req.user!.role,
+      securitySessionId: req.securitySession?.id ?? null,
     };
     clients.add(client);
     res.write('retry: 1500\n: connected\n\n');
@@ -131,6 +170,10 @@ liveUpdatesRouter.get('/live-updates', async (req, res, next) => {
  * finished. PostgreSQL NOTIFY fans the signal to every app instance. Phase 3
  * resolves the smallest authorized audience; Phase 4 adds value-free refresh
  * topics so mounted pages can revalidate only the datasets they own.
+ *
+ * This observer must be mounted in the public-router fallthrough (after fixed
+ * public routes but before requireAuthenticatedApi) so successful security
+ * routes such as role/access changes are observed too.
  */
 export const liveMutationObserver: RequestHandler = (req, res, next) => {
   const path = new URL(req.originalUrl, 'http://local').pathname;
@@ -154,6 +197,45 @@ export const liveMutationObserver: RequestHandler = (req, res, next) => {
         // The write already committed successfully. A transient notification
         // failure must not turn a successful financial action into an API error.
       });
+  });
+  next();
+};
+
+/**
+ * Mirrors durable security-session revocations into the live transport. It is
+ * deliberately event-driven: no heartbeat performs database/session polling.
+ * A successful revoking write publishes one small control message through the
+ * same PostgreSQL channel, and every app instance immediately closes matching
+ * SSE connections.
+ */
+export const liveSecuritySessionObserver: RequestHandler = (req, res, next) => {
+  const path = new URL(req.originalUrl, 'http://local').pathname;
+  const startingSessionId = req.securitySession?.id ?? null;
+  const target = classifyLiveSessionControl(
+    path,
+    req.method,
+    req.user?.id,
+    startingSessionId,
+  );
+  if (!target) return next();
+
+  res.on('finish', () => {
+    if (res.statusCode < 200 || res.statusCode >= 400) return;
+    const finalTarget = preserveReplacementSession(
+      target,
+      req.user?.id,
+      startingSessionId,
+      req.securitySession?.id,
+    );
+    void publish({
+      kind: 'session-control',
+      ...finalTarget,
+      at: Date.now(),
+    }).catch(() => {
+      // The security write already committed. Never report it as failed just
+      // because a best-effort live disconnect notification could not publish.
+      // Revoked sessions still fail every subsequent authenticated HTTP request.
+    });
   });
   next();
 };
