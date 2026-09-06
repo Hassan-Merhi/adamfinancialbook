@@ -1,0 +1,141 @@
+name: Production Deploy Certification
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: production-deploy-certification
+  cancel-in-progress: true
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      HEALTH_URL: https://adamfinancialbook.onrender.com/api/health/ready
+      EXPECTED_RELEASE: ${{ github.sha }}
+      INCIDENT_TITLE: '[Production Deploy] Adam Financial Book release certification failure'
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPOSITORY: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Wait for exact healthy production release
+        shell: bash
+        run: |
+          python - <<'PY'
+          import datetime as dt
+          import json
+          import os
+          import time
+          import urllib.request
+
+          health_url = os.environ['HEALTH_URL']
+          expected_release = os.environ['EXPECTED_RELEASE']
+          incident_title = os.environ['INCIDENT_TITLE']
+          repository = os.environ['REPOSITORY']
+          token = os.environ['GH_TOKEN']
+          run_url = os.environ['RUN_URL']
+          api_base = f'https://api.github.com/repos/{repository}'
+
+          def github(path, method='GET', body=None):
+              data = None if body is None else json.dumps(body).encode('utf-8')
+              request = urllib.request.Request(
+                  f'{api_base}{path}',
+                  data=data,
+                  method=method,
+                  headers={
+                      'Authorization': f'Bearer {token}',
+                      'Accept': 'application/vnd.github+json',
+                      'X-GitHub-Api-Version': '2022-11-28',
+                      'Content-Type': 'application/json',
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  raw = response.read().decode('utf-8')
+                  return json.loads(raw) if raw else None
+
+          def open_incident():
+              issues = github('/issues?state=open&per_page=100') or []
+              return next((item for item in issues
+                           if 'pull_request' not in item and item.get('title') == incident_title), None)
+
+          attempts = 40
+          last = None
+          for attempt in range(1, attempts + 1):
+              checked_at = dt.datetime.now(dt.timezone.utc).isoformat()
+              payload = None
+              status = None
+              error = None
+              try:
+                  request = urllib.request.Request(
+                      health_url,
+                      headers={
+                          'Accept': 'application/json',
+                          'User-Agent': 'adam-financial-book-deploy-certifier',
+                      },
+                  )
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      status = response.status
+                      payload = json.loads(response.read().decode('utf-8'))
+              except Exception as exc:
+                  error = f'{type(exc).__name__}: {exc}'
+
+              healthy = (
+                  status is not None
+                  and 200 <= status < 300
+                  and isinstance(payload, dict)
+                  and payload.get('ok') is True
+                  and payload.get('database') == 'ok'
+                  and payload.get('migrations') == 'current'
+                  and payload.get('pendingMigrations') == 0
+                  and payload.get('release') == expected_release
+              )
+              last = {
+                  'checkedAt': checked_at,
+                  'attempt': attempt,
+                  'status': status,
+                  'expectedRelease': expected_release,
+                  'observedRelease': payload.get('release') if isinstance(payload, dict) else None,
+                  'database': payload.get('database') if isinstance(payload, dict) else None,
+                  'migrations': payload.get('migrations') if isinstance(payload, dict) else None,
+                  'currentMigration': payload.get('currentMigration') if isinstance(payload, dict) else None,
+                  'latestMigration': payload.get('latestMigration') if isinstance(payload, dict) else None,
+                  'error': error,
+                  'run': run_url,
+              }
+
+              if healthy:
+                  incident = open_incident()
+                  if incident:
+                      number = incident['number']
+                      github(
+                          f'/issues/{number}/comments',
+                          'POST',
+                          {'body': f'✅ Exact production release `{expected_release}` certified healthy at `{checked_at}`.\n\nRun: {run_url}'},
+                      )
+                      github(f'/issues/{number}', 'PATCH', {'state': 'closed', 'state_reason': 'completed'})
+                  print(json.dumps({'event': 'production.release.certified', **last}))
+                  raise SystemExit(0)
+
+              if attempt < attempts:
+                  time.sleep(15)
+
+          incident = open_incident()
+          if not incident:
+              github('/issues', 'POST', {
+                  'title': incident_title,
+                  'body': (
+                      'Production did not reach the exact healthy `main` revision within the certification window.\n\n'
+                      f'```json\n{json.dumps(last, indent=2)}\n```\n\n'
+                      'A newer main push cancels this certification and starts a fresh one for the newest revision.'
+                  ),
+              })
+          print(json.dumps({'event': 'production.release.certification_failed', **(last or {})}))
+          raise SystemExit('Production release certification failed.')
+          PY
