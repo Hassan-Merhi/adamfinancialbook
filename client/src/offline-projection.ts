@@ -29,6 +29,10 @@ export function projectOfflineBook(confirmed: LoadedBook, queue: Queued[]): Load
       .map((entry) => entry.clientRef)
       .filter((ref): ref is string => typeof ref === 'string' && !!ref),
   );
+  const hasVisibleProjection = projectable.some((item) =>
+    isOfflineRevisionInput(item.input)
+      || !alreadyConfirmed.has(item.input.clientRef ?? item.id));
+  if (!hasVisibleProjection) return confirmed;
 
   const balances = {
     totalCash: confirmed.balances.totalCash,
@@ -129,6 +133,8 @@ export function projectOfflineBook(confirmed: LoadedBook, queue: Queued[]): Load
     applyEffects(balances, effects, confirmed);
   }
 
+  // Phase 2's ordinary-entry contract was `entries: [...confirmed.entries, ...projectedEntries]`.
+  // Revisions clone/overlay confirmed rows first, so `entries` is the immutable working copy.
   return {
     ...confirmed,
     receipts,
