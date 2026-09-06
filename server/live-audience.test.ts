@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { audienceAllows, type LiveAudience } from './live-audience';
+import { audienceAllows, type LiveAudience } from './live-audience-policy';
 
 const owner = { userId: 'owner_1', role: 'owner' as const };
 const alice = { userId: 'user_a', role: 'entry' as const };
