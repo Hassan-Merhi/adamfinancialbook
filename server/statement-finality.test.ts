@@ -24,15 +24,16 @@ describe('statement correction and void finality', () => {
 
     expect(voidBody).toContain('await supersedeEffects(client, entryId');
     expect(voidBody).toContain("UPDATE project_receipts SET in_cash = false");
-    expect(voidBody).toContain("UPDATE pending_transfers SET status = 'voided'");
     expect(voidBody).toContain("writeEntryRevision(client, entryId, transactionId, 'void'");
     expect(voidBody).not.toContain('DELETE FROM entries');
     expect(performance).toContain('WHERE e.voided = false');
   });
 
-  it('has a migration for the historical voided handoff state', () => {
-    const migration = read('server/migrations/007_voided_handoffs.sql');
-    expect(migration).toContain("'pending','confirmed','rejected','voided'");
-    expect(migration).toContain('pending_transfers_status_check');
+  it('keeps a confirmed handoff as history but rejects any active effects after its ledger entry is voided', () => {
+    const integrity = read('server/integrity.ts');
+    expect(integrity).toContain("'voided_transfer_still_active'");
+    expect(integrity).toContain('e.voided = true');
+    expect(integrity).toContain('ef.active = true');
+    expect(integrity).not.toContain("pt.entry_id IS NULL OR e.id IS NULL OR e.voided = true OR e.kind <> 'transfer'");
   });
 });
