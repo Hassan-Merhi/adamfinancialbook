@@ -4,11 +4,17 @@ import { gzipSync, gunzipSync } from 'node:zlib';
 import type { PoolClient } from 'pg';
 import { pool, newId, query } from './db.js';
 import { getMigrationStatus } from './migration.js';
+import { ensureOperationsSchema } from './operations-schema.js';
 import { fireOperationalAlert, logOperationalEvent } from './alerts.js';
 
 const MAGIC = Buffer.from('AFB9');
 const FORMAT_VERSION = 1;
-const EXCLUDED_TABLES = new Set(['schema_migrations', 'backup_runs', 'operational_events']);
+const EXCLUDED_TABLES = new Set([
+  'schema_migrations',
+  'translation_cache',
+  'backup_runs',
+  'operational_events',
+]);
 
 export interface BackupTable {
   name: string;
@@ -146,8 +152,6 @@ export async function createBackupSnapshot(): Promise<DatabaseBackupSnapshot> {
   const client = await pool.connect();
   const tables: BackupTable[] = [];
   try {
-    // Every table is read from the same MVCC snapshot. A transfer/entry cannot
-    // land in one table midway through the backup and disappear from another.
     await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     for (const name of tableNames) {
       const shape = shapes.get(name)!;
@@ -257,6 +261,7 @@ async function markBackupFailure(id: string, message: string) {
 }
 
 export async function createEncryptedDatabaseBackup(destination = 'manual'): Promise<BackupArtifact> {
+  await ensureOperationsSchema();
   const id = newId('bak');
   await markBackupStarted(id, destination);
   try {
