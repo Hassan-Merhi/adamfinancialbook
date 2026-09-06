@@ -62,11 +62,12 @@ describe('with no signal', () => {
     expect(outbox.all()).toHaveLength(2);
   });
 
-  it('preserves the existing terminal refusal behavior until the sync-state phase', async () => {
-    await outbox.add(entry(100, 'One'));
+  it('retains a terminal refusal for Phase 3 review instead of silently deleting it', async () => {
+    const queued = await outbox.add(entry(100, 'One'));
     await expect(flushOutbox(async () => { throw new Error('A transfer needs both accounts.'); }))
-      .rejects.toThrow('A transfer needs both accounts.');
-    expect(outbox.all()).toHaveLength(0);
+      .rejects.toThrow('The server refused this queued entry');
+    expect(outbox.all().map((item) => item.id)).toEqual([queued.id]);
+    expect(outbox.status(queued.id).status).toBe('rejected');
   });
 
   it('knows a lost network from a refusal', () => {
