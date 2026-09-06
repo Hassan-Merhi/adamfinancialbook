@@ -436,7 +436,7 @@ async function runFlush(
           nextAttemptAt: null,
           lastError: info,
         });
-        throw new SyncBlockedError('auth', item.id, 'Your session expired. Sign in again; the queued change is still safely stored.');
+        throw new SyncBlockedError('auth', item.id, 'Your session expired. Sign in again; the queued entry is still safely stored.');
       }
 
       if (err instanceof ApiError) {
@@ -480,10 +480,13 @@ async function runFlush(
         nextAttemptAt: null,
         lastError: info,
       });
+      const revision = revisionFromQueued(item);
       throw new SyncBlockedError(
         'rejected',
         item.id,
-        `The server refused this queued change: ${info.message}. It remains stored and later changes will not overtake it.`,
+        revision
+          ? `The server refused this queued change: ${info.message}. It remains stored and later changes will not overtake it.`
+          : `The server refused this queued entry: ${info.message}. It remains stored and later entries will not overtake it.`,
       );
     }
   }
