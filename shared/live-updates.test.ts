@@ -7,6 +7,8 @@ describe('shared live-update routing', () => {
     expect(classifyLiveMutation('/api/entries/ent_1/void', 'POST')).toEqual({ book: true, dashboard: true });
     expect(classifyLiveMutation('/api/delegation/transfers/tr_1/confirm', 'POST'))
       .toEqual({ book: true, dashboard: true });
+    expect(classifyLiveMutation('/api/delegation/users/u_1/accounts', 'PUT'))
+      .toEqual({ book: true, dashboard: true });
     expect(classifyLiveMutation('/api/delegation/approvals/ap_1/decision', 'POST'))
       .toEqual({ book: false, dashboard: true });
     expect(classifyLiveMutation('/api/users/u_1/role', 'POST')).toEqual({ book: false, dashboard: true });
