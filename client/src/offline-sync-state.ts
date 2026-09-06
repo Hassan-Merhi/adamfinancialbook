@@ -4,11 +4,13 @@ import {
   offlineRepository,
   type Queued,
 } from './offline-db';
+import type { EntryInput } from '../../shared/types';
+import type { OfflineConflictInfo, OfflineEntryInput } from '../../shared/offline-conflict';
 
 const SYNC_META_STORE = 'syncMeta';
 
-export type SyncItemStatus = 'pending' | 'syncing' | 'retry_wait' | 'blocked_auth' | 'rejected';
-export type SyncErrorKind = 'network' | 'server' | 'auth' | 'interrupted';
+export type SyncItemStatus = 'pending' | 'syncing' | 'retry_wait' | 'blocked_auth' | 'conflict' | 'rejected';
+export type SyncErrorKind = 'network' | 'server' | 'auth' | 'interrupted' | 'conflict';
 
 export interface SyncErrorInfo {
   kind: SyncErrorKind;
@@ -26,6 +28,9 @@ export interface SyncItemState {
   lastAttemptAt: string | null;
   nextAttemptAt: string | null;
   lastError: SyncErrorInfo | null;
+  conflict: OfflineConflictInfo | null;
+  /** A reviewed/rebased input stays beside the immutable Phase 1 outbox row. */
+  overrideInput: OfflineEntryInput | null;
 }
 
 export interface SyncSummary {
@@ -33,6 +38,7 @@ export interface SyncSummary {
   syncing: number;
   retrying: number;
   blockedAuth: number;
+  conflicts: number;
   rejected: number;
   blockedByOrder: number;
   nextRetryAt: string | null;
@@ -75,6 +81,8 @@ function defaultItemState(order = 0): SyncItemState {
     lastAttemptAt: null,
     nextAttemptAt: null,
     lastError: null,
+    conflict: null,
+    overrideInput: null,
   };
 }
 
@@ -83,13 +91,14 @@ function validStatus(value: unknown): value is SyncItemStatus {
     || value === 'syncing'
     || value === 'retry_wait'
     || value === 'blocked_auth'
+    || value === 'conflict'
     || value === 'rejected';
 }
 
 function normalizeError(value: unknown): SyncErrorInfo | null {
   if (!value || typeof value !== 'object') return null;
   const item = value as Partial<SyncErrorInfo>;
-  if (!['network', 'server', 'auth', 'interrupted'].includes(String(item.kind))) return null;
+  if (!['network', 'server', 'auth', 'interrupted', 'conflict'].includes(String(item.kind))) return null;
   if (typeof item.message !== 'string' || typeof item.at !== 'string') return null;
   return {
     kind: item.kind as SyncErrorKind,
@@ -98,6 +107,24 @@ function normalizeError(value: unknown): SyncErrorInfo | null {
     code: typeof item.code === 'string' ? item.code : null,
     at: item.at,
   };
+}
+
+function normalizeConflict(value: unknown): OfflineConflictInfo | null {
+  if (!value || typeof value !== 'object') return null;
+  const item = value as Partial<OfflineConflictInfo>;
+  if (typeof item.kind !== 'string' || typeof item.message !== 'string') return null;
+  return {
+    kind: item.kind as OfflineConflictInfo['kind'],
+    message: item.message,
+    targetId: typeof item.targetId === 'string' ? item.targetId : null,
+    expected: item.expected ?? null,
+    current: item.current ?? null,
+    detectedAt: typeof item.detectedAt === 'string' ? item.detectedAt : new Date().toISOString(),
+  };
+}
+
+function normalizeOverride(value: unknown): OfflineEntryInput | null {
+  return value && typeof value === 'object' ? structuredClone(value) as OfflineEntryInput : null;
 }
 
 function normalizeItem(value: unknown): SyncItemState {
@@ -110,6 +137,8 @@ function normalizeItem(value: unknown): SyncItemState {
     lastAttemptAt: typeof item.lastAttemptAt === 'string' ? item.lastAttemptAt : null,
     nextAttemptAt: typeof item.nextAttemptAt === 'string' ? item.nextAttemptAt : null,
     lastError: normalizeError(item.lastError),
+    conflict: normalizeConflict(item.conflict),
+    overrideInput: normalizeOverride(item.overrideInput),
   };
 }
 
@@ -229,11 +258,8 @@ class OfflineSyncState {
   async registerQueued(id: string): Promise<void> {
     if (!this.activeUserId) return;
     const current = this.state.items[id];
-    if (!current) {
-      this.state.items[id] = defaultItemState(this.state.nextOrder++);
-    } else if (current.order <= 0) {
-      current.order = this.state.nextOrder++;
-    }
+    if (!current) this.state.items[id] = defaultItemState(this.state.nextOrder++);
+    else if (current.order <= 0) current.order = this.state.nextOrder++;
     await this.persist();
   }
 
@@ -243,6 +269,8 @@ class OfflineSyncState {
       ...current,
       ...patch,
       lastError: patch.lastError === undefined ? current.lastError : patch.lastError,
+      conflict: patch.conflict === undefined ? current.conflict : patch.conflict,
+      overrideInput: patch.overrideInput === undefined ? current.overrideInput : patch.overrideInput,
     };
     this.state.items[id] = next;
     await this.persist();
@@ -271,6 +299,17 @@ class OfflineSyncState {
       status: 'pending',
       nextAttemptAt: null,
       lastError: null,
+    });
+  }
+
+  /** Review against a fresh server snapshot, optionally editing the original intent. */
+  async rebase(id: string, input: OfflineEntryInput): Promise<void> {
+    await this.updateItem(id, {
+      status: 'pending',
+      nextAttemptAt: null,
+      lastError: null,
+      conflict: null,
+      overrideInput: structuredClone(input),
     });
   }
 
@@ -303,22 +342,32 @@ class OfflineSyncState {
     });
   }
 
+  effective(queue: Queued[]): Queued[] {
+    return this.ordered(queue).map((item) => {
+      const override = this.state.items[item.id]?.overrideInput;
+      return override ? { ...item, input: structuredClone(override) as EntryInput } : item;
+    });
+  }
+
   projectablePrefix(queue: Queued[]): Queued[] {
     const visible: Queued[] = [];
-    for (const item of this.ordered(queue)) {
+    for (const item of this.effective(queue)) {
       const status = this.stateFor(item.id).status;
-      if (status === 'rejected') break;
+      if (status === 'conflict' || status === 'rejected') break;
       visible.push(item);
     }
     return visible;
   }
 
+  conflictRows(queue: Queued[]): Array<{ item: Queued; state: SyncItemState }> {
+    return this.effective(queue)
+      .map((item) => ({ item, state: this.stateFor(item.id) }))
+      .filter(({ state }) => state.status === 'conflict');
+  }
+
   async recoverInterrupted(queue: Queued[], now = new Date()): Promise<void> {
     const ids = new Set(queue.map((item) => item.id));
     let changed = false;
-
-    // Phase 1 rows created before Phase 3 have no sequence metadata. Adopt them
-    // deterministically once, then every new Phase 3 row gets a strict counter.
     const legacyOrder = [...queue].sort((a, b) => a.queuedAt.localeCompare(b.queuedAt) || a.id.localeCompare(b.id));
     for (const item of legacyOrder) {
       const current = this.state.items[item.id];
@@ -380,6 +429,7 @@ class OfflineSyncState {
     let syncing = 0;
     let retrying = 0;
     let blockedAuth = 0;
+    let conflicts = 0;
     let rejected = 0;
     let blockedByOrder = 0;
     let nextRetryAt: string | null = null;
@@ -394,7 +444,10 @@ class OfflineSyncState {
         retrying += 1;
         if (state.nextAttemptAt && (!nextRetryAt || state.nextAttemptAt < nextRetryAt)) nextRetryAt = state.nextAttemptAt;
       } else if (state.status === 'blocked_auth') blockedAuth += 1;
-      else if (state.status === 'rejected') {
+      else if (state.status === 'conflict') {
+        conflicts += 1;
+        orderBlocked = true;
+      } else if (state.status === 'rejected') {
         rejected += 1;
         orderBlocked = true;
       }
@@ -405,6 +458,7 @@ class OfflineSyncState {
       syncing,
       retrying,
       blockedAuth,
+      conflicts,
       rejected,
       blockedByOrder,
       nextRetryAt,

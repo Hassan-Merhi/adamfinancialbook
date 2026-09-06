@@ -48,6 +48,7 @@ describe('unified needs-attention count', () => {
       reminders: 1,
       receiptsWaiting: 1,
       missingEvidence: 2,
+      syncConflicts: 0,
       total: 7,
     });
   });

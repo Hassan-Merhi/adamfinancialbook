@@ -1,6 +1,8 @@
 import { ApiError, NotSignedIn, type LoadedBook } from './api';
 import type { EntryInput } from '../../shared/types';
+import type { OfflineConflictInfo, OfflineConflictKind, OfflineEntryInput } from '../../shared/offline-conflict';
 import { offlineRepository, type OfflineUser, type Queued } from './offline-db';
+import { captureOfflineContext } from './offline-conflict';
 import { projectOfflineBook } from './offline-projection';
 import {
   offlineSyncState,
@@ -19,12 +21,13 @@ export interface OfflineAutoSyncResult {
 }
 
 /**
- * Durable storage + projected-book facade + Phase 3 sync state machine.
+ * Durable storage + projected-book facade + Phase 3/4 sync state machine.
  *
  * The last server-confirmed snapshot is immutable. Unsynced entries stay in the
  * per-user outbox and get durable state from Phase 1's reserved syncMeta store.
  * A server acknowledgement removes an outbox row; no failure path silently
- * drops financial work.
+ * drops financial work. Phase 4 additionally captures the exact financial facts
+ * each queued instruction relied on and keeps server conflicts reviewable.
  */
 let syncActivation: Promise<void> = Promise.resolve();
 
@@ -72,21 +75,10 @@ function looksLikeLoadedBook(value: unknown): value is LoadedBook {
     && typeof candidate.balances.totalCash === 'number';
 }
 
-/**
- * Who was holding the book last time. The repository stores only a global
- * pointer to that user id; the actual profile, snapshot and queued work live in
- * separate user-scoped records.
- *
- * save() is called only after the server has authenticated the user. That is
- * also the safe point to release any durable 401/auth block for that same user.
- */
 export const lastUser = {
   save: async <T extends OfflineUser>(user: T | null): Promise<void> => {
     if (!user) return;
     const profileWrite = offlineRepository.setActiveUser(user);
-    // Both in-memory scopes switch synchronously before either IndexedDB await.
-    // flushOutbox then awaits this activation barrier before reading any queue
-    // state, preventing sign-in from racing durable blocked/rejected metadata.
     syncActivation = (async () => {
       await Promise.all([profileWrite, offlineSyncState.activate(user.id)]);
       const queue = offlineRepository.queueAll();
@@ -104,15 +96,26 @@ export const lastUser = {
   },
 };
 
+function revisedClientRef(): string {
+  const random = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  return `q_review_${random}`;
+}
+
 export const outbox = {
   /** Every durable financial write still waiting for a server acknowledgement. */
   all: (): Queued[] => offlineRepository.queueAll(),
-  records: (): Queued[] => offlineRepository.queueAll(),
+  records: (): Queued[] => offlineSyncState.effective(offlineRepository.queueAll()),
   add: async (input: EntryInput): Promise<Queued> => {
     await syncActivation;
-    const item = await offlineRepository.queueAdd(input);
+    const projected = snapshot.load<LoadedBook>();
+    const prepared: OfflineEntryInput = projected
+      ? { ...input, offlineContext: captureOfflineContext(projected, input) }
+      : { ...input };
+    const item = await offlineRepository.queueAdd(prepared as EntryInput);
     await offlineSyncState.registerQueued(item.id);
-    return item;
+    return offlineSyncState.effective([item])[0] ?? item;
   },
   drop: async (id: string): Promise<void> => {
     await offlineRepository.queueDrop(id);
@@ -126,6 +129,32 @@ export const outbox = {
   retry: (id: string): Promise<void> => offlineSyncState.retry(id),
   status: (id: string): SyncItemState => offlineSyncState.stateFor(id),
   summary: (): SyncSummary => offlineSyncState.summary(offlineRepository.queueAll()),
+  conflicts: () => offlineSyncState.conflictRows(offlineRepository.queueAll()),
+  /**
+   * Re-review one conflicted instruction against a freshly loaded server book.
+   * An optional patch supports a small amount/purpose correction without
+   * destroying the original durable queue row or its audit history.
+   */
+  rebase: async (
+    id: string,
+    book: LoadedBook,
+    patch: Partial<Pick<EntryInput, 'amount' | 'purpose' | 'raw'>> = {},
+  ): Promise<void> => {
+    const item = offlineSyncState.effective(offlineRepository.queueAll()).find((candidate) => candidate.id === id);
+    if (!item) throw new Error('That queued entry is no longer waiting.');
+    const state = offlineSyncState.stateFor(id);
+    const current = item.input as OfflineEntryInput;
+    const clientRef = state.conflict?.kind === 'idempotency_key_reused'
+      ? revisedClientRef()
+      : current.clientRef ?? item.id;
+    const revised: OfflineEntryInput = {
+      ...current,
+      ...patch,
+      clientRef,
+    };
+    revised.offlineContext = captureOfflineContext(book, revised);
+    await offlineSyncState.rebase(id, revised);
+  },
   whenIdle: async (): Promise<void> => {
     await Promise.all([offlineRepository.whenIdle(), offlineSyncState.whenIdle()]);
   },
@@ -137,7 +166,7 @@ export function looksOffline(err: unknown): boolean {
   return browserOffline || err instanceof TypeError;
 }
 
-export type SyncBlockReason = 'rejected' | 'auth';
+export type SyncBlockReason = 'rejected' | 'auth' | 'conflict';
 
 export class SyncBlockedError extends Error {
   reason: SyncBlockReason;
@@ -196,6 +225,22 @@ function scheduleRetry(
   }, Math.max(0, target - now));
 }
 
+function conflictKind(err: ApiError): OfflineConflictKind | null {
+  const prefix = 'OFFLINE_CONFLICT_';
+  if (err.status !== 409 || !err.code?.startsWith(prefix)) return null;
+  const value = err.code.slice(prefix.length).toLowerCase();
+  const known: OfflineConflictKind[] = [
+    'stale_balance',
+    'insufficient_funds',
+    'target_missing',
+    'target_changed',
+    'permission_changed',
+    'receipt_changed',
+    'idempotency_key_reused',
+  ];
+  return known.includes(value as OfflineConflictKind) ? value as OfflineConflictKind : null;
+}
+
 function errorInfo(err: unknown, at: string): SyncErrorInfo {
   if (err instanceof NotSignedIn) {
     return { kind: 'auth', message: err.message, status: 401, code: null, at };
@@ -211,7 +256,7 @@ function errorInfo(err: unknown, at: string): SyncErrorInfo {
   }
   if (err instanceof ApiError) {
     return {
-      kind: 'server',
+      kind: conflictKind(err) ? 'conflict' : 'server',
       message: err.message,
       status: err.status,
       code: err.code ?? null,
@@ -233,12 +278,6 @@ function retryable(err: unknown): boolean {
   return err.status === 408 || err.status === 425 || err.status === 429 || err.status >= 500;
 }
 
-/**
- * Sends durable outbox entries oldest first. Only a confirmed acknowledgement
- * removes an entry. Transient failures wait and retry with the same clientRef;
- * auth failures and permanent server refusals remain stored and stop later
- * financial writes from overtaking them.
- */
 let flushing: Promise<number> | null = null;
 
 export async function flushOutbox(
@@ -255,7 +294,7 @@ async function runFlush(
   options: FlushOptions,
 ): Promise<number> {
   await syncActivation;
-  const rawQueue = offlineSyncState.ordered(offlineRepository.queueAll());
+  const rawQueue = offlineSyncState.effective(offlineRepository.queueAll());
   if (!rawQueue.length) {
     cancelRetryTimer();
     return 0;
@@ -269,6 +308,13 @@ async function runFlush(
   for (const item of rawQueue) {
     let state = offlineSyncState.stateFor(item.id);
 
+    if (state.status === 'conflict') {
+      throw new SyncBlockedError(
+        'conflict',
+        item.id,
+        state.conflict?.message || 'This queued entry conflicts with newer server data and needs review.',
+      );
+    }
     if (state.status === 'rejected') {
       throw new SyncBlockedError(
         'rejected',
@@ -299,12 +345,11 @@ async function runFlush(
       lastAttemptAt: attemptAt,
       nextAttemptAt: null,
       lastError: null,
+      conflict: null,
     });
 
     try {
       await send(item.input);
-      // Acknowledgement first, durable queue removal second. If the browser dies
-      // between them, startup recovery retries the same clientRef safely.
       await offlineRepository.queueDrop(item.id);
       await offlineSyncState.remove(item.id);
       const successAt = new Date(nowMs()).toISOString();
@@ -322,6 +367,29 @@ async function runFlush(
           lastError: info,
         });
         throw new SyncBlockedError('auth', item.id, 'Your session expired. Sign in again; the queued entry is still safely stored.');
+      }
+
+      if (err instanceof ApiError) {
+        const kind = conflictKind(err);
+        if (kind) {
+          const input = item.input as OfflineEntryInput;
+          const targetId = input.accountId ?? input.toAccountId ?? input.projectId ?? input.personId ?? input.linkReceiptId ?? null;
+          const detail: OfflineConflictInfo = {
+            kind,
+            message: err.message,
+            targetId,
+            expected: input.offlineContext ?? null,
+            current: null,
+            detectedAt: failedAt,
+          };
+          await offlineSyncState.updateItem(item.id, {
+            status: 'conflict',
+            nextAttemptAt: null,
+            lastError: info,
+            conflict: detail,
+          });
+          throw new SyncBlockedError('conflict', item.id, `${err.message} The entry is still stored and later entries are blocked until you review it.`);
+        }
       }
 
       if (retryable(err)) {
