@@ -46,7 +46,7 @@ async function upload(entryId: string, attachmentId: string, session: Session, b
       'x-book': '1',
       'x-offline-attachment-id': attachmentId,
     },
-    body: bytes,
+    body: bytes.buffer as ArrayBuffer,
   });
   const text = await response.text();
   let data: any = null;
