@@ -1,0 +1,246 @@
+/* Phase 5 — Access + Setup become true phone navigation, not stacked admin forms. */
+
+.phase5-mobile-head,
+.phase5-mobile-menu {
+  display:none;
+}
+
+@media (max-width:760px) {
+  .phase5-mobile-head {
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+    margin:0 0 10px;
+  }
+
+  .phase5-mobile-head > div {
+    min-width:0;
+  }
+
+  .phase5-mobile-head h2 {
+    margin:0;
+    font-size:24px;
+    line-height:1.15;
+  }
+
+  .phase5-mobile-head p {
+    margin:4px 0 0;
+    color:var(--ink-3);
+    font-size:13px;
+    line-height:1.4;
+  }
+
+  .phase5-mobile-head > .chip {
+    flex:none;
+  }
+
+  .phase5-mobile-menu {
+    display:grid;
+    gap:8px;
+    margin:0 0 12px;
+  }
+
+  .phase5-mobile-menu button {
+    min-width:0;
+    min-height:52px;
+    padding:9px 11px;
+    display:grid;
+    gap:2px;
+    text-align:left;
+    border:1px solid var(--line);
+    border-radius:14px;
+    background:var(--card);
+    color:var(--ink);
+    box-shadow:var(--shadow);
+  }
+
+  .phase5-mobile-menu button > span {
+    font-size:13.5px;
+    font-weight:750;
+    line-height:1.2;
+  }
+
+  .phase5-mobile-menu button > small {
+    color:var(--ink-3);
+    font-size:11px;
+    line-height:1.25;
+  }
+
+  .phase5-mobile-menu button.active {
+    border-color:color-mix(in srgb,var(--accent) 38%,var(--line));
+    background:var(--accent-soft);
+    color:var(--accent);
+  }
+
+  .phase5-mobile-menu button.active > small {
+    color:color-mix(in srgb,var(--accent) 68%,var(--ink-3));
+  }
+
+  html[dir="rtl"] .phase5-mobile-menu button {
+    text-align:right;
+  }
+
+  /* Access: one admin/security area at a time. The underlying AccessBase stays
+     unchanged so MFA, sessions, roles, deletion and account assignments keep
+     their existing behavior. */
+  .phase5-access-menu {
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+
+  .phase5-access-shell .access-head {
+    display:none;
+  }
+
+  .phase5-access-shell .access-page > .card {
+    display:none;
+    margin-bottom:0;
+  }
+
+  .phase5-access-shell[data-mobile-section="security"] .access-page > .card:nth-of-type(2),
+  .phase5-access-shell[data-mobile-section="password"] .access-page > .card:nth-of-type(3),
+  .phase5-access-shell[data-mobile-section="users"] .access-page > .card:nth-of-type(4),
+  .phase5-access-shell[data-mobile-section="add"] .access-page > .card:nth-of-type(5) {
+    display:block;
+  }
+
+  .phase5-access-shell .access-page > .card > h3 {
+    padding:13px 14px;
+  }
+
+  .phase5-access-shell .accountaccesshead {
+    align-items:flex-start;
+  }
+
+  .phase5-access-shell .access-person-toggle {
+    min-height:64px;
+  }
+
+  .phase5-access-shell .access-person-toggle .main small,
+  .phase5-access-shell .accountaccessmain small {
+    font-size:12px;
+    line-height:1.35;
+  }
+
+  .phase5-access-shell .access-person-actions {
+    display:grid;
+    grid-template-columns:1fr;
+  }
+
+  .phase5-access-shell .access-person-actions > .btn {
+    width:100%;
+  }
+
+  /* Setup: a horizontally scrollable category strip keeps the phone on one
+     setup task at a time while desktop continues to show the full setup page. */
+  .phase5-setup-menu {
+    display:flex;
+    overflow-x:auto;
+    overscroll-behavior-x:contain;
+    scroll-snap-type:x proximity;
+    scrollbar-width:none;
+    padding:1px 0 5px;
+  }
+
+  .phase5-setup-menu::-webkit-scrollbar {
+    display:none;
+  }
+
+  .phase5-setup-menu button {
+    flex:0 0 154px;
+    scroll-snap-align:start;
+  }
+
+  .phase5-setup-shell .setup-head,
+  .phase5-setup-shell .setup-intro {
+    display:none;
+  }
+
+  .phase5-setup-shell .setup-page > .setup-card,
+  .phase5-setup-shell .setup-page > .reset-card {
+    display:none;
+    margin-bottom:0;
+  }
+
+  .phase5-setup-shell[data-mobile-section="businesses"] #setup-businesses,
+  .phase5-setup-shell[data-mobile-section="accounts"] #setup-accounts,
+  .phase5-setup-shell[data-mobile-section="projects"] #setup-projects,
+  .phase5-setup-shell[data-mobile-section="people"] #setup-people,
+  .phase5-setup-shell[data-mobile-section="reminders"] #setup-reminders,
+  .phase5-setup-shell[data-mobile-section="openings"] #setup-openings,
+  .phase5-setup-shell[data-mobile-section="recovery"] #setup-recovery,
+  .phase5-setup-shell[data-mobile-section="reset"] .reset-card {
+    display:block;
+  }
+
+  .phase5-setup-shell .setup-card > h3 {
+    padding:13px 14px;
+  }
+
+  .phase5-setup-shell .setup-existing {
+    max-height:min(34vh,260px);
+  }
+
+  .phase5-setup-shell .setup-form {
+    padding:12px;
+  }
+
+  .phase5-setup-shell .setup-form input,
+  .phase5-setup-shell .setup-form select,
+  .phase5-setup-shell .reset-fields input {
+    min-height:48px;
+    font-size:16px;
+  }
+
+  .phase5-setup-shell #setup-recovery .dhead {
+    display:grid;
+    grid-template-columns:1fr;
+    gap:10px;
+  }
+
+  .phase5-setup-shell #setup-recovery .dhead .btn,
+  .phase5-setup-shell #setup-recovery > .btn {
+    width:100%;
+    min-height:46px;
+  }
+
+  .phase5-setup-shell .reset-options {
+    grid-template-columns:1fr;
+  }
+
+  .phase5-setup-shell .reset-option {
+    min-height:0;
+    padding:13px;
+  }
+
+  .phase5-setup-shell .reset-backups {
+    width:100%;
+  }
+
+  .phase5-setup-shell .reset-backups a {
+    min-height:44px;
+    display:flex;
+    align-items:center;
+  }
+}
+
+@media (max-width:390px) {
+  .phase5-access-menu {
+    display:flex;
+    overflow-x:auto;
+    scrollbar-width:none;
+    padding-bottom:4px;
+  }
+
+  .phase5-access-menu::-webkit-scrollbar {
+    display:none;
+  }
+
+  .phase5-access-menu button {
+    flex:0 0 142px;
+  }
+
+  .phase5-mobile-head h2 {
+    font-size:22px;
+  }
+}
