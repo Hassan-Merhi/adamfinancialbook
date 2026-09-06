@@ -1,0 +1,109 @@
+.receipt-picker {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px dashed var(--border, #d7d9df);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card, #fff) 94%, currentColor 6%);
+}
+
+.receipt-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.receipt-picker-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.receipt-picker-copy span,
+.receipt-file small,
+.offline-attachment-status span {
+  color: var(--muted, #6f7480);
+  font-size: .82rem;
+}
+
+.receipt-picker input[type='file'] {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.receipt-files {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.receipt-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface, rgba(127, 127, 127, .08));
+}
+
+.receipt-file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.receipt-file button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  min-width: 44px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.receipt-error {
+  margin-top: 8px;
+  color: var(--danger, #b42318);
+  font-size: .86rem;
+}
+
+.offline-attachment-status {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #d7d9df);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--card, #fff);
+}
+
+.offline-attachment-status > div {
+  display: grid;
+  gap: 2px;
+}
+
+.offline-attachment-status.failed {
+  border-color: color-mix(in srgb, var(--danger, #b42318) 45%, var(--border, #d7d9df));
+}
+
+@media (max-width: 640px) {
+  .receipt-picker-head,
+  .offline-attachment-status {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .receipt-picker-head .btn,
+  .offline-attachment-status .btn {
+    width: 100%;
+    min-height: 44px;
+  }
+}

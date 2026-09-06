@@ -7,6 +7,8 @@
 import { useState } from 'react';
 import { api, type LoadedBook, type Reading } from './api';
 import { looksOffline, outbox } from './offline';
+import { attachmentQueue, MAX_OFFLINE_ATTACHMENTS_PER_ENTRY } from './offline-attachments';
+import OfflineAttachmentStatus from './OfflineAttachmentStatus';
 import { describeEffects, withLoanEffects } from '../../shared/engine';
 import type { Draft, SetupDraft } from '../../shared/parse';
 import { read as readHere } from '../../shared/parse';
@@ -100,6 +102,8 @@ export default function Entry({ book, reload, say, onQueued, onAction }: {
         </div>
       </div>
 
+      <OfflineAttachmentStatus />
+
       {reading && (reading.draft.mode === 'setup'
         ? <SetupCard
             draft={reading.draft}
@@ -138,6 +142,8 @@ function EntryCard({ draft, duplicate, source, book, done, cancel, fail, onQueue
   const [linked, setLinked] = useState(!!duplicate);
   const [busy, setBusy] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(!!draft.input.historical);
+  const [files, setFiles] = useState<File[]>([]);
+  const [fileError, setFileError] = useState('');
   const set = (patch: Partial<EntryInput>) => setInput({ ...input, ...patch });
 
   const withLink: EntryInput = {
@@ -154,27 +160,70 @@ function EntryCard({ draft, duplicate, source, book, done, cancel, fail, onQueue
   const needsProject = input.kind === 'receipt' && !input.projectId;
   const blocked = !input.amount || needsPerson || needsAccount || needsSecond || needsProject;
 
+  const chooseFiles = (chosen: FileList | null) => {
+    if (!chosen) return;
+    try {
+      const combined = [...files, ...Array.from(chosen)];
+      if (combined.length > MAX_OFFLINE_ATTACHMENTS_PER_ENTRY) {
+        throw new Error(`Attach at most ${MAX_OFFLINE_ATTACHMENTS_PER_ENTRY} receipts to one transaction.`);
+      }
+      setFiles(attachmentQueue.validate(combined));
+      setFileError('');
+    } catch (error) {
+      setFileError((error as Error).message);
+    }
+  };
+
   const save = async () => {
     setBusy(true);
     try {
-      const saved = await api.addEntry(withLink);
+      let saved;
+      try {
+        saved = await api.addEntry(withLink);
+      } catch (e) {
+        if (!looksOffline(e)) throw e;
+
+        // The financial outbox chooses the durable clientRef. Store receipts
+        // under that exact reference so they can only bind to this transaction.
+        const queued = await outbox.add(withLink);
+        const queuedRef = queued.input.clientRef ?? queued.id;
+        if (files.length) {
+          try {
+            await attachmentQueue.queue(files, { clientRef: queuedRef });
+          } catch (attachmentError) {
+            onQueued?.();
+            done(`Kept — ${money(input.amount)} ${input.purpose}. The transaction is safe offline, but the receipt could not be stored: ${(attachmentError as Error).message}`);
+            return;
+          }
+        }
+        onQueued?.();
+        done(`Kept — ${money(input.amount)} ${input.purpose}. Its projected effect is shown now and it will be sent when you are back on a network.${files.length ? ` ${files.length === 1 ? 'The receipt is' : `${files.length} receipts are`} stored on this device too.` : ''}`);
+        return;
+      }
+
       const account = book.accounts.find((a) => a.id === input.accountId);
       const toAccount = book.accounts.find((a) => a.id === input.toAccountId);
+      let attachmentNote = '';
+
+      if (!('mode' in saved) && files.length) {
+        try {
+          await attachmentQueue.queue(files, { entryId: saved.id });
+          void attachmentQueue.flush({ force: true });
+          attachmentNote = ` ${files.length === 1 ? 'Receipt' : `${files.length} receipts`} queued for upload.`;
+        } catch (attachmentError) {
+          attachmentNote = ` Transaction saved, but the receipt could not be stored: ${(attachmentError as Error).message}`;
+        }
+      }
 
       if ('mode' in saved && saved.mode === 'pending_transfer') {
         done(`Sent for confirmation — ${money(input.amount)} ${account?.name ?? 'source account'} → ${toAccount?.name ?? 'delegated account'}. It will post only after the recipient confirms receipt.`);
       } else if (input.kind === 'transfer') {
         done(`Moved — ${money(input.amount)} ${account?.name ?? 'source account'} → ${toAccount?.name ?? 'destination account'}.`);
       } else {
-        done(`Logged — ${money(input.amount)} ${input.purpose}${account ? `, ${account.name}` : ''}.`);
+        done(`Logged — ${money(input.amount)} ${input.purpose}${account ? `, ${account.name}` : ''}.${attachmentNote}`);
       }
     } catch (e) {
-      if (looksOffline(e)) {
-        // Only say it is kept after the IndexedDB outbox write is durable.
-        await outbox.add(withLink);
-        onQueued?.();
-        done(`Kept — ${money(input.amount)} ${input.purpose}. Its projected effect is shown now and it will be sent when you are back on a network.`);
-      } else fail((e as Error).message);
+      fail((e as Error).message);
     }
     finally { setBusy(false); }
   };
@@ -195,6 +244,10 @@ function EntryCard({ draft, duplicate, source, book, done, cancel, fail, onQueue
         <Field label="Type">
           <select value={input.kind} onChange={(e) => {
             const kind = e.target.value as EntryKind;
+            if (kind === 'transfer') {
+              setFiles([]);
+              setFileError('');
+            }
             set({ kind, accountId: kind === 'credit_purchase' ? null : input.accountId ?? book.accounts[0]?.id ?? null });
           }}>
             {Object.entries(KINDS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
@@ -316,6 +369,44 @@ function EntryCard({ draft, duplicate, source, book, done, cancel, fail, onQueue
             Same money arriving, not new money
           </label>
         </>
+      )}
+
+      {input.kind !== 'transfer' && (
+        <div className="receipt-picker">
+          <div className="receipt-picker-head">
+            <div className="receipt-picker-copy">
+              <strong>Receipt / evidence</strong>
+              <span>Optional · JPG, PNG, WebP or PDF · up to 6 MB each. Works offline.</span>
+            </div>
+            <label className="btn ghost">
+              Add receipt
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
+                multiple
+                onChange={(event) => {
+                  chooseFiles(event.currentTarget.files);
+                  event.currentTarget.value = '';
+                }}
+              />
+            </label>
+          </div>
+          {files.length > 0 && (
+            <div className="receipt-files">
+              {files.map((file, index) => (
+                <div className="receipt-file" key={`${file.name}-${file.size}-${index}`}>
+                  <div className="receipt-file-name">
+                    <strong>{file.name}</strong>{' '}
+                    <small>{(file.size / 1024 / 1024).toFixed(file.size > 1024 * 1024 ? 1 : 2)} MB · ready</small>
+                  </div>
+                  <button type="button" aria-label={`Remove ${file.name}`}
+                    onClick={() => setFiles(files.filter((_, itemIndex) => itemIndex !== index))}>Remove</button>
+                </div>
+              ))}
+            </div>
+          )}
+          {fileError && <div className="receipt-error" role="alert">{fileError}</div>}
+        </div>
       )}
 
       {lines.length > 0 && (

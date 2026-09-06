@@ -42,6 +42,7 @@ const [
   { publicSecurityRouter, protectedSecurityRouter },
   { offlineSyncRouter },
   { handoffConfirmationSafetyRouter },
+  { offlineAttachmentRouter },
 ] = await Promise.all([
   import('./delegation.js'),
   import('./expense-review.js'),
@@ -52,6 +53,7 @@ const [
   import('./security-gate.js'),
   import('./offline-sync.js'),
   import('./handoff-confirmation-safety.js'),
+  import('./offline-attachments.js'),
 ]);
 
 publicSecurityRouter.use(healthRouter);
@@ -63,6 +65,9 @@ publicSecurityRouter.use(requestTelemetry);
 // delegation route so the balance re-check, ledger posting, transfer status,
 // notifications and audit commit atomically.
 protectedSecurityRouter.use(handoffConfirmationSafetyRouter);
+// Stable Phase 5 attachment ids make uncertain/retried uploads exactly-once and
+// resolve an offline financial clientRef after the entry reaches PostgreSQL.
+protectedSecurityRouter.use(offlineAttachmentRouter);
 // Offline retries carrying a clientRef must reach the idempotent/conflict-safe
 // routes before the legacy delegation route. Requests without an offline marker
 // call next() and preserve existing production behavior unchanged.
