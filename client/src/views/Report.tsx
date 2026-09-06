@@ -1,5 +1,5 @@
 /** The whole day on one screen, with past balances rebuilt by SQL on demand. */
-import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import { api, type LoadedBook } from '../api';
 import { ordered } from '../../../shared/engine';
 import type { Entry } from '../../../shared/types';
@@ -56,6 +56,63 @@ export default function Report({ book, run }: {
   const cashOf = (id: string) => activeBook.balances.businesses[id] ?? 0;
   const total = business ? cashOf(business) : activeBook.balances.totalCash;
 
+  const outstandingLines: ReactElement[] = [];
+  for (const loan of activeBook.loans) {
+    if (business && loan.fromBusiness !== business && loan.toBusiness !== business) continue;
+    const value = activeBook.balances.loans[loan.id] ?? 0;
+    if (!value) continue;
+    const fromBusiness = activeBook.businesses.find((item) => item.id === (value >= 0 ? loan.fromBusiness : loan.toBusiness))?.name;
+    const toBusiness = activeBook.businesses.find((item) => item.id === (value >= 0 ? loan.toBusiness : loan.fromBusiness))?.name;
+    outstandingLines.push(
+      <div className="row" key={loan.id}>
+        <span className="main"><b>{fromBusiness} → {toBusiness}</b><small>between businesses</small></span>
+        <span className="val num">{money(Math.abs(value))}</span>
+      </div>,
+    );
+  }
+  for (const person of activeBook.people) {
+    if (business && person.businessId !== business) continue;
+    const value = activeBook.balances.people[person.id] ?? 0;
+    if (!value) continue;
+    outstandingLines.push(
+      <div className="row" key={person.id}>
+        <span className="main"><b>{person.name}</b><small>{value < 0 ? 'you owe' : 'owes you'}</small></span>
+        <span className={`val num ${tone(value)}`}>{money(value)}</span>
+      </div>,
+    );
+  }
+
+  const cashRows = businesses.map((item) => (
+    <div className="row" key={item.id}>
+      <span className="main">
+        <b>{item.name}</b>
+        <small>{activeBook.accounts.filter((account) => account.businessId === item.id).map((account) => `${account.name} ${money(activeBook.balances.accounts[account.id] ?? 0)}`).join(' · ') || 'no accounts'}</small>
+      </span>
+      <span className="val num">{money(cashOf(item.id))}</span>
+    </div>
+  ));
+
+  const receivedRows = received.map((entry) => (
+    <div className="row" key={entry.id}>
+      <span className="main"><b>{activeBook.projects.find((project) => project.id === entry.projectId)?.name ?? entry.purpose}</b><small>{activeBook.accounts.find((account) => account.id === entry.accountId)?.name}</small></span>
+      <span className="val num pos">{signed(entry.amount)}</span>
+    </div>
+  ));
+
+  const spentRows = spent.map((entry) => (
+    <div className="row" key={entry.id}>
+      <span className="main"><b>{entry.purpose}</b><small>{activeBook.accounts.find((account) => account.id === entry.accountId)?.name}</small></span>
+      <span className="val num neg">{signed(-entry.amount)}</span>
+    </div>
+  ));
+
+  const reminderRows = activeBook.reminders.map((reminder) => (
+    <div className="row" key={reminder.id}>
+      <span className="main"><b>{reminder.what}</b><small>{[activeBook.accounts.find((account) => account.id === reminder.accountId)?.name, reminder.note].filter(Boolean).join(' · ')}</small></span>
+      <span className="val num">{money(reminder.amount)}<small><button className="linkbtn" onClick={() => run(() => api.clearReminder(reminder.id), 'Reminder cleared.')}>clear</button></small></span>
+    </div>
+  ));
+
   return (
     <section className="report-page">
       <div className="dhead report-head">
@@ -69,7 +126,7 @@ export default function Report({ book, run }: {
         <button className="arw" onClick={() => setDate(shiftDay(date, 1))} disabled={isToday} aria-label="Next day">›</button>
         <input className="fi" type="date" value={date} max={today()} onChange={(e) => e.target.value && setDate(e.target.value)} />
         {!isToday && <button className="btn ghost small" onClick={() => setDate(today())}>Today</button>}
-        <select className="fi" value={business} onChange={(e) => setBusiness(e.target.value)}><option value="">All businesses</option>{book.businesses.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select>
+        <select className="fi" value={business} onChange={(e) => setBusiness(e.target.value)}><option value="">All businesses</option>{book.businesses.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
       </div>
 
       {error && <Card title="Could not load this day"><Empty>{error}</Empty></Card>}
@@ -81,61 +138,75 @@ export default function Report({ book, run }: {
         <ReportStat label="Net activity" value={signed(netActivity)} tone={tone(netActivity)} />
       </div>
 
-      <Card title={`Cash at end of ${shortDate(date)}`} aside={`${businesses.length} business${businesses.length === 1 ? '' : 'es'}`}>
-        {businesses.map((b) => (
-          <div className="row" key={b.id}>
-            <span className="main"><b>{b.name}</b><small>{activeBook.accounts.filter((a) => a.businessId === b.id).map((a) => `${a.name} ${money(activeBook.balances.accounts[a.id] ?? 0)}`).join(' · ') || 'no accounts'}</small></span>
-            <span className="val num">{money(cashOf(b.id))}</span>
-          </div>
-        ))}
-      </Card>
-
-      <div className="report-flow-grid">
-        <Card title="Received" aside={received.length ? money(receivedTotal) : undefined}>
-          {received.length === 0 ? <Empty>Nothing received this day.</Empty> : received.map((e) => (
-            <div className="row" key={e.id}><span className="main"><b>{activeBook.projects.find((p) => p.id === e.projectId)?.name ?? e.purpose}</b><small>{activeBook.accounts.find((a) => a.id === e.accountId)?.name}</small></span><span className="val num pos">{signed(e.amount)}</span></div>
-          ))}
+      <div className="report-desktop-details">
+        <Card title={`Cash at end of ${shortDate(date)}`} aside={`${businesses.length} business${businesses.length === 1 ? '' : 'es'}`}>
+          {cashRows}
         </Card>
-        <Card title="Spent" aside={spent.length ? money(spentTotal) : undefined}>
-          {spent.length === 0 ? <Empty>Nothing spent this day.</Empty> : spent.map((e) => (
-            <div className="row" key={e.id}><span className="main"><b>{e.purpose}</b><small>{activeBook.accounts.find((a) => a.id === e.accountId)?.name}</small></span><span className="val num neg">{signed(-e.amount)}</span></div>
-          ))}
+
+        <div className="report-flow-grid">
+          <Card title="Received" aside={received.length ? money(receivedTotal) : undefined}>
+            {received.length === 0 ? <Empty>Nothing received this day.</Empty> : receivedRows}
+          </Card>
+          <Card title="Spent" aside={spent.length ? money(spentTotal) : undefined}>
+            {spent.length === 0 ? <Empty>Nothing spent this day.</Empty> : spentRows}
+          </Card>
+        </div>
+
+        {credit.length > 0 && <Card title="Taken on credit" aside="not paid yet">{credit.map((entry) => <div className="row" key={entry.id}><span className="main"><b>{entry.purpose}</b><small>{activeBook.people.find((person) => person.id === entry.personId)?.name}</small></span><span className="val num neg">{money(-entry.amount)}</span></div>)}</Card>}
+        {moved.length > 0 && <Card title="Moved between accounts" aside="not spending">{moved.map((entry) => <div className="row" key={entry.id}><span className="main"><b>{activeBook.accounts.find((account) => account.id === entry.accountId)?.name} → {activeBook.accounts.find((account) => account.id === entry.toAccountId)?.name}</b><small>{entry.purpose}</small></span><span className="val num">{money(entry.amount)}</span></div>)}</Card>}
+
+        <Card title={`Outstanding at end of ${shortDate(date)}`}>
+          {outstandingLines.length ? outstandingLines : <Empty>Nothing outstanding.</Empty>}
+        </Card>
+
+        <Card title="Reminders" aside="promises, not movements">
+          {activeBook.reminders.length === 0 ? <Empty>Nothing pending.</Empty> : reminderRows}
         </Card>
       </div>
 
-      {credit.length > 0 && <Card title="Taken on credit" aside="not paid yet">{credit.map((e) => <div className="row" key={e.id}><span className="main"><b>{e.purpose}</b><small>{activeBook.people.find((p) => p.id === e.personId)?.name}</small></span><span className="val num neg">{money(-e.amount)}</span></div>)}</Card>}
-      {moved.length > 0 && <Card title="Moved between accounts" aside="not spending">{moved.map((e) => <div className="row" key={e.id}><span className="main"><b>{activeBook.accounts.find((a) => a.id === e.accountId)?.name} → {activeBook.accounts.find((a) => a.id === e.toAccountId)?.name}</b><small>{e.purpose}</small></span><span className="val num">{money(e.amount)}</span></div>)}</Card>}
+      <div className="report-mobile-details" aria-label="Day report details">
+        <ReportDisclosure title="Cash by business" aside={`${businesses.length}`}>
+          {cashRows}
+        </ReportDisclosure>
 
-      <Card title={`Outstanding at end of ${shortDate(date)}`}>
-        {(() => {
-          const lines: ReactElement[] = [];
-          for (const l of activeBook.loans) {
-            if (business && l.fromBusiness !== business && l.toBusiness !== business) continue;
-            const v = activeBook.balances.loans[l.id] ?? 0;
-            if (!v) continue;
-            const from = activeBook.businesses.find((b) => b.id === (v >= 0 ? l.fromBusiness : l.toBusiness))?.name;
-            const to = activeBook.businesses.find((b) => b.id === (v >= 0 ? l.toBusiness : l.fromBusiness))?.name;
-            lines.push(<div className="row" key={l.id}><span className="main"><b>{from} → {to}</b><small>between businesses</small></span><span className="val num">{money(Math.abs(v))}</span></div>);
-          }
-          for (const p of activeBook.people) {
-            if (business && p.businessId !== business) continue;
-            const v = activeBook.balances.people[p.id] ?? 0;
-            if (!v) continue;
-            lines.push(<div className="row" key={p.id}><span className="main"><b>{p.name}</b><small>{v < 0 ? 'you owe' : 'owes you'}</small></span><span className={`val num ${tone(v)}`}>{money(v)}</span></div>);
-          }
-          return lines.length ? lines : <Empty>Nothing outstanding.</Empty>;
-        })()}
-      </Card>
+        <ReportDisclosure title="Money in & out" aside={`${received.length + spent.length} entries`}>
+          <div className="report-mobile-subsection"><b>Received · {money(receivedTotal)}</b>{received.length ? receivedRows : <Empty>Nothing received this day.</Empty>}</div>
+          <div className="report-mobile-subsection"><b>Spent · {money(spentTotal)}</b>{spent.length ? spentRows : <Empty>Nothing spent this day.</Empty>}</div>
+        </ReportDisclosure>
 
-      <Card title="Reminders" aside="promises, not movements">
-        {activeBook.reminders.length === 0 ? <Empty>Nothing pending.</Empty> : activeBook.reminders.map((r) => (
-          <div className="row" key={r.id}><span className="main"><b>{r.what}</b><small>{[activeBook.accounts.find((a) => a.id === r.accountId)?.name, r.note].filter(Boolean).join(' · ')}</small></span><span className="val num">{money(r.amount)}<small><button className="linkbtn" onClick={() => run(() => api.clearReminder(r.id), 'Reminder cleared.')}>clear</button></small></span></div>
-        ))}
-      </Card>
+        {credit.length > 0 && (
+          <ReportDisclosure title="Taken on credit" aside={`${credit.length}`}>
+            {credit.map((entry) => <div className="row" key={entry.id}><span className="main"><b>{entry.purpose}</b><small>{activeBook.people.find((person) => person.id === entry.personId)?.name}</small></span><span className="val num neg">{money(-entry.amount)}</span></div>)}
+          </ReportDisclosure>
+        )}
+
+        {moved.length > 0 && (
+          <ReportDisclosure title="Account transfers" aside={`${moved.length}`}>
+            {moved.map((entry) => <div className="row" key={entry.id}><span className="main"><b>{activeBook.accounts.find((account) => account.id === entry.accountId)?.name} → {activeBook.accounts.find((account) => account.id === entry.toAccountId)?.name}</b><small>{entry.purpose}</small></span><span className="val num">{money(entry.amount)}</span></div>)}
+          </ReportDisclosure>
+        )}
+
+        <ReportDisclosure title="Outstanding" aside={`${outstandingLines.length}`}>
+          {outstandingLines.length ? outstandingLines : <Empty>Nothing outstanding.</Empty>}
+        </ReportDisclosure>
+
+        <ReportDisclosure title="Reminders" aside={`${activeBook.reminders.length}`}>
+          {activeBook.reminders.length ? reminderRows : <Empty>Nothing pending.</Empty>}
+        </ReportDisclosure>
+      </div>
     </section>
   );
 }
 
 function ReportStat({ label, value, tone: valueTone = '', strong }: { label: string; value: string; tone?: string; strong?: boolean }) {
   return <div className={`report-stat${strong ? ' strong' : ''}`}><span>{label}</span><b className={`num ${valueTone}`}>{value}</b></div>;
+}
+
+function ReportDisclosure({ title, aside, children }: { title: string; aside?: string; children: ReactNode }) {
+  return (
+    <details className="report-disclosure">
+      <summary><span>{title}</span>{aside && <small className="num">{aside}</small>}</summary>
+      <div className="report-disclosure-body">{children}</div>
+    </details>
+  );
 }
