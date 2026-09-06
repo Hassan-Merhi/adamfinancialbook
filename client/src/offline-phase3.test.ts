@@ -57,11 +57,14 @@ describe('Advanced offline Phase 3 contract', () => {
     expect(state).toContain("if (status === 'rejected') break;");
   });
 
-  it('passes one idempotency key through delegated handoff fallback and creates it once server-side', () => {
+  it('passes one idempotency key through delegated handoff fallback, throttles writes, and creates it once server-side', () => {
     const api = read('client/src/api.ts');
     const server = read('server/offline-sync.ts');
     const start = read('server/start.ts');
     expect(api).toContain('clientRef: input.clientRef ?? null');
+    expect(server).toContain("import { rateLimit } from 'express-rate-limit';");
+    expect(server).toContain('const offlineHandoffLimit = rateLimit({');
+    expect(server).toContain("router.post('/delegation/transfers', offlineHandoffLimit");
     expect(server).toContain('deterministicHandoffId(req.user.id, body.clientRef)');
     expect(server).toContain('ON CONFLICT (id) DO NOTHING');
     expect(server).toContain("code: 'IDEMPOTENCY_KEY_REUSED'");
