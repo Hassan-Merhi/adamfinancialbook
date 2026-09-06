@@ -2,7 +2,8 @@ import type { LoadedBook } from './api';
 import type { Queued } from './offline-db';
 import { offlineSyncState } from './offline-sync-state';
 import { round, withLoanEffects } from '../../shared/engine';
-import type { Effect, Entry, Person } from '../../shared/types';
+import { isOfflineCorrectionInput, isOfflineRevisionInput } from '../../shared/offline-conflict';
+import type { Effect, Entry, EntryInput, Person } from '../../shared/types';
 
 const PROJECTED_PREFIX = 'offline:';
 
@@ -14,10 +15,10 @@ export function isProjectedEntry(entry: Pick<Entry, 'id'>): boolean {
  * Build the view the user should see while writes are waiting to sync.
  *
  * The confirmed server snapshot is never mutated or rewritten. Queued entries
- * are materialized as synthetic ledger rows and their effects are applied only
- * to a cloned balance snapshot. A permanently rejected row stops the projected
- * prefix: later financial writes cannot pretend they sit on a server state that
- * was never accepted.
+ * are materialized as synthetic ledger rows. Queued corrections replace the
+ * target row's active effects in the projection; queued voids reverse them and
+ * mark the row void. A permanently blocked row stops the projected prefix so
+ * later writes cannot pretend they sit on a server state that was never accepted.
  */
 export function projectOfflineBook(confirmed: LoadedBook, queue: Queued[]): LoadedBook {
   const projectable = offlineSyncState.projectablePrefix(queue);
@@ -29,15 +30,6 @@ export function projectOfflineBook(confirmed: LoadedBook, queue: Queued[]): Load
       .filter((ref): ref is string => typeof ref === 'string' && !!ref),
   );
 
-  const pending = [...projectable]
-    .sort((a, b) => a.queuedAt.localeCompare(b.queuedAt) || a.id.localeCompare(b.id))
-    .filter((item) => {
-      const ref = item.input.clientRef ?? item.id;
-      return !alreadyConfirmed.has(ref);
-    });
-
-  if (!pending.length) return confirmed;
-
   const balances = {
     totalCash: confirmed.balances.totalCash,
     accounts: { ...confirmed.balances.accounts },
@@ -46,28 +38,107 @@ export function projectOfflineBook(confirmed: LoadedBook, queue: Queued[]): Load
     loans: { ...confirmed.balances.loans },
     projects: { ...confirmed.balances.projects },
   };
-
+  const entries = confirmed.entries.map((entry) => ({ ...entry, effects: entry.effects.map((effect) => ({ ...effect })) }));
+  let receipts = confirmed.receipts.map((receipt) => ({ ...receipt }));
   const projectedEntries: Entry[] = [];
 
-  for (const item of pending) {
-    const input = { ...item.input, clientRef: item.input.clientRef ?? item.id };
+  for (const item of [...projectable].sort((a, b) => a.queuedAt.localeCompare(b.queuedAt) || a.id.localeCompare(b.id))) {
+    if (isOfflineRevisionInput(item.input)) {
+      const revision = item.input;
+      const index = entries.findIndex((entry) => entry.id === revision.entryId);
+      if (index < 0) continue;
+      const target = entries[index];
+
+      if (isOfflineCorrectionInput(revision)) {
+        // If an uncertain response actually committed and a fresh snapshot was
+        // loaded before the outbox acknowledgement, do not project it twice.
+        if (target.correctedAt && target.correctedFrom != null && Math.abs(target.amount - revision.amount) < 0.005) {
+          entries[index] = {
+            ...target,
+            offlinePendingRevision: 'correction',
+            offlineQueueId: item.id,
+          };
+          continue;
+        }
+        if (target.voided) continue;
+        applyEffects(balances, reverseEffects(target.effects), confirmed);
+        const nextInput: EntryInput = { ...target, amount: revision.amount };
+        const effects = withLoanEffects(nextInput, confirmed);
+        entries[index] = {
+          ...target,
+          amount: revision.amount,
+          effects,
+          correctedFrom: target.correctedFrom ?? target.amount,
+          correctedAt: item.queuedAt,
+          correctionReason: `Amount correction waiting to sync`,
+          offlinePendingRevision: 'correction',
+          offlineQueueId: item.id,
+        };
+        applyEffects(balances, effects, confirmed);
+        if (target.kind === 'receipt' && !target.linkReceiptId) {
+          receipts = receipts.map((receipt) => receipt.entryId === target.id
+            ? { ...receipt, amount: revision.amount }
+            : receipt);
+        }
+        continue;
+      }
+
+      if (target.voided) {
+        entries[index] = {
+          ...target,
+          offlinePendingRevision: 'void',
+          offlineQueueId: item.id,
+        };
+        continue;
+      }
+      applyEffects(balances, reverseEffects(target.effects), confirmed);
+      entries[index] = {
+        ...target,
+        effects: [],
+        voided: true,
+        voidReason: revision.reason,
+        voidedAt: item.queuedAt,
+        offlinePendingRevision: 'void',
+        offlineQueueId: item.id,
+      };
+      if (target.kind === 'receipt') {
+        if (target.linkReceiptId) {
+          receipts = receipts.map((receipt) => receipt.id === target.linkReceiptId
+            ? { ...receipt, inCash: false }
+            : receipt);
+        } else {
+          receipts = receipts.filter((receipt) => receipt.entryId !== target.id);
+        }
+      }
+      continue;
+    }
+
+    const ref = item.input.clientRef ?? item.id;
+    if (alreadyConfirmed.has(ref)) continue;
+    const input = { ...item.input, clientRef: ref };
     const effects = withLoanEffects(input, confirmed);
-    projectedEntries.push({
+    const projected: Entry = {
       ...input,
       id: `${PROJECTED_PREFIX}${item.id}`,
       effects,
       correctedFrom: null,
       transactionId: null,
       createdAt: item.queuedAt,
-    });
+    };
+    projectedEntries.push(projected);
     applyEffects(balances, effects, confirmed);
   }
 
   return {
     ...confirmed,
-    entries: [...confirmed.entries, ...projectedEntries],
+    receipts,
+    entries: [...entries, ...projectedEntries],
     balances,
   };
+}
+
+function reverseEffects(effects: Effect[]): Effect[] {
+  return effects.map((effect) => ({ ...effect, delta: -effect.delta }));
 }
 
 function applyEffects(
