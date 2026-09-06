@@ -33,6 +33,11 @@ import {
 } from '../shared/engine.js';
 
 const app = express();
+// Render terminates public HTTP traffic at its reverse proxy before forwarding to
+// this process. Trust exactly that immediate proxy hop so Express and
+// express-rate-limit use the real client IP from X-Forwarded-For without
+// accepting an arbitrary left-most forwarded address.
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '256kb' }));
 app.disable('x-powered-by');
 
