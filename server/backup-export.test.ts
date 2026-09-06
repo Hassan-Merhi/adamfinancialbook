@@ -31,4 +31,9 @@ describe('durable backup export security boundary', () => {
     expect(source).toContain("backupExportRouter.post('/operations/backups/ack', backupMachineLimiter");
     expect(authSource).not.toContain('/^Bearer\\s+(.+)$/i');
   });
+
+  it('accepts RFC 3339 retention timestamps with an explicit UTC offset', () => {
+    const source = readFileSync(new URL('./backup-export.ts', import.meta.url), 'utf8');
+    expect(source).toContain('retentionUntil: z.string().datetime({ offset: true })');
+  });
 });
