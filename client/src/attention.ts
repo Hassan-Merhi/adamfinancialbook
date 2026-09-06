@@ -1,5 +1,6 @@
 import type { EvidenceDashboard, LoadedBook } from './api';
 import { receiptsNotInCash } from '../../shared/engine';
+import { outbox } from './offline';
 
 export interface AttentionCounts {
   reviews: number;
@@ -8,13 +9,15 @@ export interface AttentionCounts {
   reminders: number;
   receiptsWaiting: number;
   missingEvidence: number;
+  syncConflicts: number;
   total: number;
 }
 
 /**
  * One definition of "needs attention" used by Today, More, and the hub itself.
  * Unread notifications are deliberately not counted: they are updates, while
- * this count is reserved for unresolved work.
+ * this count is reserved for unresolved work. Phase 4 sync conflicts are real
+ * unresolved financial work, so they are included even while offline.
  */
 export function attentionCounts(
   book: LoadedBook,
@@ -29,6 +32,7 @@ export function attentionCounts(
     (sum, project) => sum + receiptsNotInCash(book, project.id).length,
     0,
   );
+  const syncConflicts = outbox.summary().conflicts;
 
   return {
     reviews,
@@ -37,6 +41,7 @@ export function attentionCounts(
     reminders,
     receiptsWaiting,
     missingEvidence,
-    total: reviews + approvals + transfers + reminders + receiptsWaiting + missingEvidence,
+    syncConflicts,
+    total: reviews + approvals + transfers + reminders + receiptsWaiting + missingEvidence + syncConflicts,
   };
 }
