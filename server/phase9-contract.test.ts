@@ -33,6 +33,8 @@ describe('Phase 9 backup, recovery and observability contract', () => {
     expect(recovery).toContain("execFileSync(npx, ['tsx', 'server/restore.ts', file]");
     expect(recovery).toContain('for (const table of snapshot.tables)');
     expect(recovery).toContain('authentication failed');
+    expect(recovery).toContain("Buffer.compare(binary.rows[0].data, evidenceBytes)");
+    expect(recovery).toContain('toBeGreaterThan(sourceAuditId)');
     expect(pkg).toContain('server/recovery.integration.test.ts');
   });
 
@@ -47,12 +49,13 @@ describe('Phase 9 backup, recovery and observability contract', () => {
     expect(render).toContain('envVarKey: RENDER_EXTERNAL_URL');
   });
 
-  it('keeps operations detail owner-only while exposing minimal readiness', () => {
+  it('keeps operations detail owner-only without blocking unrelated delegated routes', () => {
     const operations = read('server/operations.ts');
     const health = read('server/health.ts');
-    expect(operations).toContain('operationsRouter.use(ownerOnly)');
-    expect(operations).toContain("'/operations/status'");
-    expect(operations).toContain("'/operations/backup'");
+    expect(operations).not.toContain('operationsRouter.use(ownerOnly)');
+    expect(operations).toContain("operationsRouter.get('/operations/status', ownerOnly");
+    expect(operations).toContain("operationsRouter.get('/operations/events', ownerOnly");
+    expect(operations).toContain("operationsRouter.post('/operations/backup', ownerOnly");
     expect(health).toContain("'/health/live'");
     expect(health).toContain("'/health/ready'");
     expect(health).toContain('res.status(state.ok ? 200 : 503)');
