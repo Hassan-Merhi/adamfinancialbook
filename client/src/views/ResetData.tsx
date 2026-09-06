@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { outbox, snapshot } from '../offline';
+import { clearCurrentUserOfflineAttachments } from '../offline-reset-storage';
 import { PINNED_ACCOUNTS_KEY } from '../favorites';
 import { RESET_CONFIRMATIONS, RESET_LABELS, type ResetScope } from '../../../shared/reset';
 import './ResetData.css';
@@ -120,9 +121,10 @@ export default function ResetData() {
       await request('/', 'POST', { scope, password, confirmation });
 
       // A successful server reset must also remove stale offline state. Await
-      // both IndexedDB writes before reloading so an old queued entry cannot
-      // survive the reset because the page closed before the transaction landed.
+      // every IndexedDB write before reloading so an old transaction or receipt
+      // cannot survive the reset and later bind to the new book.
       await outbox.clear();
+      await clearCurrentUserOfflineAttachments();
       await snapshot.save(null);
       if (scope !== 'activity') {
         try { localStorage.removeItem(PINNED_ACCOUNTS_KEY); } catch { /* private mode */ }
