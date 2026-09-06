@@ -98,7 +98,7 @@ describe.skipIf(!sourceUrl)('Phase 9 backup and recovery drill', () => {
 
     const snapshot = decryptBackupBuffer(artifact.buffer);
     expect(snapshot.tables.length).toBeGreaterThan(5);
-    expect(snapshot.migrationVersion).toBe(7);
+    expect(snapshot.migrationVersion).toBe(8);
     expect(snapshot.tables.map((table) => table.name)).not.toContain('backup_runs');
     expect(snapshot.tables.map((table) => table.name)).not.toContain('operational_events');
     expect(snapshot.tables.map((table) => table.name)).not.toContain('translation_cache');
@@ -141,7 +141,7 @@ describe.skipIf(!sourceUrl)('Phase 9 backup and recovery drill', () => {
       const migration = await target.query<{ version: string | number }>(
         'SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1',
       );
-      expect(Number(migration.rows[0]?.version)).toBe(7);
+      expect(Number(migration.rows[0]?.version)).toBe(8);
 
       const nextAudit = await target.query<{ id: string | number }>(
         `INSERT INTO audit (actor, action, subject, detail)
