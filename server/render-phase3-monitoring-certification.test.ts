@@ -17,9 +17,9 @@ describe('Render Phase 3 production monitoring and alerting contract', () => {
 
   it('validates database and migration readiness rather than only HTTP status', () => {
     const monitor = read('server/monitor.ts');
-    expect(monitor).toContain("payload?.database === 'ok'");
-    expect(monitor).toContain("payload?.migrations === 'current'");
-    expect(monitor).toContain('Number(payload?.pendingMigrations ?? -1) === 0');
+    expect(monitor).toContain("payload.database !== 'ok'");
+    expect(monitor).toContain("payload.migrations !== 'current'");
+    expect(monitor).toContain('Number(payload.pendingMigrations ?? -1) !== 0');
     expect(monitor).toContain("sendOperationalAlert(\n    'production.health.failed'");
     expect(monitor).toContain('process.exitCode = 1');
   });
