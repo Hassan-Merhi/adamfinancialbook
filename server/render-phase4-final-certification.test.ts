@@ -19,6 +19,19 @@ describe('Render Phase 4 final production certification contract', () => {
     expect(monitor).toContain("payload.get('pendingMigrations') == 0");
   });
 
+  it('proves which exact main revision reached healthy production', () => {
+    const health = read('server/health.ts');
+    const deploy = read('.github/workflows/production-deploy-certification.yml');
+
+    expect(health).toContain("release: process.env.RENDER_GIT_COMMIT ?? process.env.GIT_COMMIT ?? 'unknown'");
+    expect(deploy).toContain('name: Production Deploy Certification');
+    expect(deploy).toContain('EXPECTED_RELEASE: ${{ github.sha }}');
+    expect(deploy).toContain("payload.get('release') == expected_release");
+    expect(deploy).toContain("'event': 'production.release.certified'");
+    expect(deploy).toContain('cancel-in-progress: true');
+    expect(deploy).toContain('[Production Deploy] Adam Financial Book release certification failure');
+  });
+
   it('keeps the encrypted production backup contract recoverable', () => {
     const render = read('render.yaml');
     const backup = read('server/backup-service.ts');
