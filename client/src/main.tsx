@@ -4,6 +4,15 @@ import App from './App';
 import { LanguageProvider } from './i18n';
 import './multilingual-offline';
 
+// Apply an explicit appearance before React renders so returning users do not
+// get a flash of the opposite theme. System preference remains the default.
+try {
+  const savedTheme = localStorage.getItem('book.theme');
+  if (savedTheme === 'light' || savedTheme === 'dark') {
+    document.documentElement.setAttribute('data-theme', savedTheme);
+  }
+} catch { /* private mode */ }
+
 // Installed to the home screen, the app must still open with no signal.
 // This lives here rather than inline in the page: the Content-Security-Policy
 // allows scripts from this origin only, and an inline one would be refused.
