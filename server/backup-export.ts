@@ -5,35 +5,10 @@ import { createEncryptedDatabaseBackup } from './backup-service.js';
 import { markBackupOffsiteDelivered } from './backup-delivery.js';
 import { logOperationalEvent } from './alerts.js';
 import { verifyGitHubActionsOidcToken } from './github-actions-oidc.js';
+import { bearerTokenFromAuthorization } from './backup-export-auth.js';
 
 const wrap = (fn: RequestHandler): RequestHandler =>
   (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
-
-const MAX_AUTHORIZATION_BYTES = 20 * 1024;
-const MAX_BEARER_BYTES = 16 * 1024;
-
-export function bearerTokenFromAuthorization(authorization: string | undefined): string {
-  const value = authorization ?? '';
-  if (
-    value.length < 8
-    || Buffer.byteLength(value, 'utf8') > MAX_AUTHORIZATION_BYTES
-    || value.slice(0, 7).toLowerCase() !== 'bearer '
-  ) {
-    throw Object.assign(new Error('GitHub Actions OIDC bearer token is required.'), { status: 401 });
-  }
-  const token = value.slice(7);
-  if (
-    !token
-    || Buffer.byteLength(token, 'utf8') > MAX_BEARER_BYTES
-    || token.includes(' ')
-    || token.includes('\t')
-    || token.includes('\r')
-    || token.includes('\n')
-  ) {
-    throw Object.assign(new Error('GitHub Actions OIDC bearer token is invalid.'), { status: 401 });
-  }
-  return token;
-}
 
 function bearer(req: Parameters<RequestHandler>[0]) {
   return bearerTokenFromAuthorization(req.get('authorization'));
