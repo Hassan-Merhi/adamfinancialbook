@@ -16,11 +16,15 @@ export default function SignIn({ needsFirstOwner, done }: {
 
   const go = async () => {
     if (!username.trim() || !password || busy) return;
-    setBusy(true); setError('');
+    setBusy(true);
+    setError('');
     try {
       done(needsFirstOwner ? await api.firstOwner(username, password) : await api.login(username, password));
-    } catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -28,15 +32,18 @@ export default function SignIn({ needsFirstOwner, done }: {
       <div className="door-tools"><LanguageControl compact /></div>
       <div className="card door-card">
         <div className="door-heading">
-          <span className="door-mark">FB</span>
+          <span className="door-mark" aria-hidden="true">FB</span>
           <div>
-            <h3>{needsFirstOwner ? 'Set up your book' : 'Financial Book'}</h3>
+            <h1>{needsFirstOwner ? 'Set up your book' : 'Financial Book'}</h1>
             <p>{needsFirstOwner ? 'Create the first owner account.' : 'Sign in to continue.'}</p>
           </div>
         </div>
-        <div className="form door-form">
+        <form className="form door-form" aria-busy={busy} onSubmit={(event) => {
+          event.preventDefault();
+          void go();
+        }}>
           {needsFirstOwner && (
-            <p className="muted door-help">
+            <p className="muted door-help" id="username-help">
               Choose a username and password. Usernames ignore spaces and capital letters when signing in.
             </p>
           )}
@@ -44,8 +51,9 @@ export default function SignIn({ needsFirstOwner, done }: {
             <label htmlFor="book-username">Username</label>
             <input id="book-username" type="text" autoComplete="username" autoCapitalize="none" spellCheck={false}
               value={username} onChange={(e) => setUsername(e.target.value)}
-              placeholder="Hassan Dakik" onKeyDown={(e) => e.key === 'Enter' && void go()} />
-            <small className="field-help">Spaces and uppercase/lowercase do not matter.</small>
+              aria-describedby="username-normalization-help"
+              placeholder="Hassan Dakik" required autoFocus />
+            <small className="field-help" id="username-normalization-help">Spaces and uppercase/lowercase do not matter.</small>
           </div>
           <div className="f">
             <label htmlFor="book-password">Password</label>
@@ -53,18 +61,20 @@ export default function SignIn({ needsFirstOwner, done }: {
               <input id="book-password" type={showPassword ? 'text' : 'password'}
                 autoComplete={needsFirstOwner ? 'new-password' : 'current-password'}
                 value={password} onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && void go()} />
+                minLength={needsFirstOwner ? 8 : undefined} required />
               <button type="button" className="password-toggle" aria-label={showPassword ? 'Hide password' : 'Show password'}
-                onClick={() => setShowPassword((shown) => !shown)}>{showPassword ? 'Hide' : 'Show'}</button>
+                aria-pressed={showPassword} onClick={() => setShowPassword((shown) => !shown)}>
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
             </div>
           </div>
-          {error && <div className="note err door-error" role="alert">{error}</div>}
-          <button className="btn door-submit" onClick={() => void go()}
+          {error && <div className="note err door-error" role="alert" aria-live="assertive">{error}</div>}
+          <button type="submit" className="btn door-submit"
             disabled={busy || !username.trim() || password.length < (needsFirstOwner ? 8 : 1)}>
             {busy ? 'Opening…' : needsFirstOwner ? 'Create the book' : 'Sign in'}
           </button>
           {needsFirstOwner && <p className="muted door-footnote">Password must be at least 8 characters.</p>}
-        </div>
+        </form>
       </div>
     </div>
   );
