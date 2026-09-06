@@ -37,7 +37,10 @@ describe('Advanced offline Phase 2 contract', () => {
     expect(app).toContain('const refreshProjection = () => {');
     expect(app).toContain('const projected = snapshot.load<LoadedBook>();');
     expect(app).toContain('onQueued={refreshProjection}');
-    const flush = app.slice(app.indexOf('const flush = async () => {'), app.indexOf('useEffect(() => {', app.indexOf('const flush = async () => {'));
+    const flush = app.slice(
+      app.indexOf('const flush = async () => {'),
+      app.indexOf('useEffect(() => {', app.indexOf('const flush = async () => {')),
+    );
     expect(flush.match(/refreshProjection\(\);/g)?.length).toBe(2);
     expect(app).toContain('await snapshot.save(fresh);');
     expect(app).toContain('setBook(snapshot.load<LoadedBook>() ?? fresh);');
