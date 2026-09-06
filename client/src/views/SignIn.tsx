@@ -52,7 +52,7 @@ export default function SignIn({ needsFirstOwner, done }: {
             <input id="book-username" type="text" autoComplete="username" autoCapitalize="none" spellCheck={false}
               value={username} onChange={(e) => setUsername(e.target.value)}
               aria-describedby="username-normalization-help"
-              placeholder="Hassan Dakik" required autoFocus />
+              required autoFocus />
             <small className="field-help" id="username-normalization-help">Spaces and uppercase/lowercase do not matter.</small>
           </div>
           <div className="f">
