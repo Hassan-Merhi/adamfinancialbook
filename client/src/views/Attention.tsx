@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { api, type EvidenceActivity, type EvidenceDashboard, type LoadedBook } from '../api';
+import { outbox } from '../offline';
 import { receiptsNotInCash } from '../../../shared/engine';
 import { Card, Empty, money, shortDate } from '../ui';
 import type { Focus } from './Statement';
 import ExpenseReviewQueue from './ExpenseReviewQueue';
+import SyncConflictQueue from './SyncConflictQueue';
 import './Attention.css';
 
 const RECEIPT_BATCH = 30;
@@ -31,10 +33,8 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
   const reminders = book.reminders.filter((item) => !item.settled);
   const receiptsWaiting = book.projects.flatMap((project) => receiptsNotInCash(book, project.id));
   const unread = dashboard?.notifications.filter((item) => !item.read_at) ?? [];
+  const syncConflicts = outbox.summary().conflicts;
 
-  // Receipt evidence is checked only while this hub is open. Start with a small
-  // batch for speed, then let the user expand the scan without a background
-  // polling storm. This covers owner-entered and delegated cash activity alike.
   const allEvidenceCandidates = useMemo(() => {
     const recentById = new Map((dashboard?.recentActivity ?? []).map((item) => [item.id, item]));
     return [...book.entries]
@@ -77,7 +77,6 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
         const evidence = await api.evidenceForEntry(item.id);
         return evidence.files.length === 0 ? item : null;
       } catch {
-        // A temporary evidence lookup failure is not proof that a receipt is missing.
         return null;
       }
     })).then((items) => {
@@ -91,7 +90,8 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
 
   useEffect(() => onMissingCount(missingEvidence.length), [missingEvidence.length, onMissingCount]);
 
-  const total = expenseReviews.length + pendingApprovals.length + transfers.length + reminders.length + receiptsWaiting.length + missingEvidence.length;
+  const total = syncConflicts + expenseReviews.length + pendingApprovals.length + transfers.length
+    + reminders.length + receiptsWaiting.length + missingEvidence.length;
   const checkedEvidence = Math.min(evidenceLimit, allEvidenceCandidates.length);
   const hasOlderEvidence = checkedEvidence < allEvidenceCandidates.length;
 
@@ -147,7 +147,7 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
       <div className="dhead attention-head">
         <div>
           <h2>Needs attention</h2>
-          <p className="muted">One place for expense assignment, decisions, handoffs, missing proof, reminders, and money still in limbo.</p>
+          <p className="muted">One place for sync conflicts, expense assignment, decisions, handoffs, missing proof, reminders, and money still in limbo.</p>
         </div>
         <button className="btn ghost small" disabled={busy === 'refresh'} onClick={() => void refreshHub()}>
           {busy === 'refresh' ? 'Refreshing…' : 'Refresh'}
@@ -156,6 +156,7 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
 
       <div className="attention-summary" aria-label="Attention summary">
         <Summary label="Open" value={total} strong />
+        <Summary label="Sync conflicts" value={syncConflicts} />
         <Summary label="To assign" value={expenseReviews.length} />
         <Summary label="Approvals" value={pendingApprovals.length} />
         <Summary label="Transfers" value={transfers.length} />
@@ -166,6 +167,8 @@ export default function Attention({ book, dashboard, role, open, goto, refresh, 
       {total === 0 && !checkingEvidence && (
         <Card><div className="attention-clear"><b>All clear.</b><span>Nothing currently needs a decision or follow-up.</span></div></Card>
       )}
+
+      <SyncConflictQueue book={book} refresh={refresh} say={say} />
 
       {role === 'owner' && expenseReviews.length > 0 && (
         <ExpenseReviewQueue items={expenseReviews} book={book} refresh={refresh} say={say} />
