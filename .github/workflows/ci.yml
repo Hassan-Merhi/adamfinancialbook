@@ -136,6 +136,7 @@ jobs:
       NODE_ENV: test
       PORT: 43192
       P1_MOBILE_BASE_URL: http://127.0.0.1:43192
+      P1_PLAYWRIGHT_MODULE: file:///tmp/p1-playwright/node_modules/playwright/index.mjs
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -147,8 +148,10 @@ jobs:
       - run: npm ci
       - name: Install pinned WebKit mobile test runtime
         run: |
-          npm install --no-save --package-lock=false --ignore-scripts playwright@1.55.0
-          npx playwright install --with-deps webkit
+          rm -rf /tmp/p1-playwright
+          mkdir -p /tmp/p1-playwright
+          npm install --prefix /tmp/p1-playwright --no-save --package-lock=false --ignore-scripts playwright@1.55.0
+          /tmp/p1-playwright/node_modules/.bin/playwright install --with-deps webkit
       - name: Build production client
         run: npm run build
       - name: Prepare mobile test database
