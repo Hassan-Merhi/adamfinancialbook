@@ -87,7 +87,7 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 async function openDb(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === 'undefined') return null;
   if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject) => {
+  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(OFFLINE_DB_NAME);
     request.onupgradeneeded = () => {
       request.transaction?.abort();
@@ -317,8 +317,8 @@ export async function queueEntryAttachments(
     const record: OfflineAttachmentRecord = {
       id: newAttachmentId(),
       userId,
-      entryId: 'entryId' in target ? target.entryId : null,
-      entryClientRef: 'clientRef' in target ? target.clientRef : null,
+      entryId: typeof target.entryId === 'string' ? target.entryId : null,
+      entryClientRef: typeof target.clientRef === 'string' ? target.clientRef : null,
       filename: file.name || 'receipt',
       mimeType: file.type,
       byteSize: file.size,
@@ -334,7 +334,9 @@ export async function queueEntryAttachments(
     await put(record);
     records.push(record);
   }
-  if (typeof navigator === 'undefined' || navigator.onLine !== false) void flushOfflineAttachments();
+  if (typeof window !== 'undefined' && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
+    void flushOfflineAttachments();
+  }
   return records;
 }
 
