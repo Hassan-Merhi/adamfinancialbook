@@ -11,6 +11,14 @@
 .searchdialog:focus,
 #main-content:focus { outline:none; }
 
+.phase4-door .door-heading h1 {
+  margin:0;
+  padding:0;
+  border:0;
+  font-size:21px;
+  line-height:1.2;
+}
+
 /* This is the actual clickable backdrop rendered by App.tsx. Keeping it real
    rather than a pseudo-element makes pointer dismissal deterministic. */
 .morebackdrop {
@@ -27,28 +35,6 @@
   backdrop-filter:blur(3px);
   -webkit-backdrop-filter:blur(3px);
   cursor:default;
-}
-
-/* aria-current uses the standards-based "page" token. */
-.moreitem[aria-current="page"] {
-  background:var(--accent-soft);
-  color:var(--accent);
-  border-color:color-mix(in srgb,var(--accent) 14%,var(--line));
-  font-weight:700;
-}
-
-@media (min-width:761px) {
-  .navbtn[aria-current="page"] {
-    color:var(--accent);
-    border-color:color-mix(in srgb,var(--accent) 12%,var(--line));
-  }
-}
-
-@media (max-width:760px) {
-  .rail .navbtn[aria-current="page"] {
-    background:var(--accent-soft) !important;
-    color:var(--accent) !important;
-  }
 }
 
 /* WCAG-friendly minimum pointer targets on coarse/touch input without forcing
