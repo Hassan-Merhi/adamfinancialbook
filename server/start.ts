@@ -40,6 +40,7 @@ const [
   { requestTelemetry },
   { healthRouter },
   { publicSecurityRouter, protectedSecurityRouter },
+  { liveUpdatesRouter, liveMutationObserver },
   { offlineSyncRouter },
   { offlineRevisionRouter },
   { handoffConfirmationSafetyRouter },
@@ -52,6 +53,7 @@ const [
   import('./observability.js'),
   import('./health.js'),
   import('./security-gate.js'),
+  import('./live-updates.js'),
   import('./offline-sync.js'),
   import('./offline-revisions.js'),
   import('./handoff-confirmation-safety.js'),
@@ -63,6 +65,10 @@ publicSecurityRouter.use(healthRouter);
 // public routes finish first; this fallthrough therefore observes every other
 // /api request before protected/delegated/core routing can finish it.
 publicSecurityRouter.use(requestTelemetry);
+// Cross-device updates are authenticated. The SSE route terminates here, while
+// the observer falls through and reports successful downstream mutations only.
+protectedSecurityRouter.use(liveUpdatesRouter);
+protectedSecurityRouter.use(liveMutationObserver);
 // Confirmation is a financial write too: intercept it before the legacy
 // delegation route so the balance re-check, ledger posting, transfer status,
 // notifications and audit commit atomically.
