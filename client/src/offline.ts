@@ -15,26 +15,33 @@ export type { SyncErrorInfo, SyncItemState, SyncSummary } from './offline-sync-s
 /**
  * Durable storage + projected-book facade + Phase 3 sync state machine.
  *
- * The last server-confirmed snapshot is immutable.  Unsynced entries stay in
- * the per-user outbox and get their durable state from the already-reserved
- * syncMeta IndexedDB store.  A server acknowledgement removes an outbox row;
- * no failure path silently drops financial work.
+ * The last server-confirmed snapshot is immutable. Unsynced entries stay in the
+ * per-user outbox and get durable state from Phase 1's reserved syncMeta store.
+ * A server acknowledgement removes an outbox row; no failure path silently
+ * drops financial work.
  */
+let syncActivation: Promise<void> = Promise.resolve();
+
 export async function initializeOfflineStorage(): Promise<void> {
   await offlineRepository.initialize();
   const user = offlineRepository.getActiveUser<OfflineUser>();
-  if (user?.id) {
-    await offlineSyncState.activate(user.id);
-    await offlineSyncState.recoverInterrupted(offlineRepository.queueAll());
-  } else {
-    offlineSyncState.deactivate();
-  }
+  syncActivation = (async () => {
+    if (user?.id) {
+      await offlineSyncState.activate(user.id);
+      await offlineSyncState.recoverInterrupted(offlineRepository.queueAll());
+    } else {
+      offlineSyncState.deactivate();
+    }
+  })();
+  await syncActivation;
 }
 
 export async function resetOfflineStorageForTests(): Promise<void> {
   cancelRetryTimer();
+  await syncActivation.catch(() => undefined);
   await offlineSyncState.resetForTests();
   await offlineRepository.resetForTests();
+  syncActivation = Promise.resolve();
   flushing = null;
 }
 
@@ -67,24 +74,31 @@ function looksLikeLoadedBook(value: unknown): value is LoadedBook {
 export const lastUser = {
   save: async <T extends OfflineUser>(user: T | null): Promise<void> => {
     if (!user) return;
-    await offlineRepository.setActiveUser(user);
-    await offlineSyncState.activate(user.id);
-    await offlineSyncState.recoverInterrupted(offlineRepository.queueAll());
+    const profileWrite = offlineRepository.setActiveUser(user);
+    // Both in-memory scopes switch synchronously before either IndexedDB await.
+    // flushOutbox then awaits this activation barrier before reading any queue
+    // state, preventing sign-in from racing durable blocked/rejected metadata.
+    syncActivation = (async () => {
+      await Promise.all([profileWrite, offlineSyncState.activate(user.id)]);
+      await offlineSyncState.recoverInterrupted(offlineRepository.queueAll());
+    })();
+    await syncActivation;
   },
   load: <T>(): T | null => offlineRepository.getActiveUser<T>(),
   clear: (): Promise<void> => {
     offlineSyncState.deactivate();
+    syncActivation = Promise.resolve();
     cancelRetryTimer();
     return offlineRepository.clearSession();
   },
 };
 
 export const outbox = {
-  /** Entries still eligible to influence the projected book. */
-  all: (): Queued[] => offlineSyncState.projectablePrefix(offlineRepository.queueAll()),
-  /** All durable rows, including a rejected row and anything blocked behind it. */
+  /** Every durable financial write still waiting for a server acknowledgement. */
+  all: (): Queued[] => offlineRepository.queueAll(),
   records: (): Queued[] => offlineRepository.queueAll(),
   add: async (input: EntryInput): Promise<Queued> => {
+    await syncActivation;
     const item = await offlineRepository.queueAdd(input);
     await offlineSyncState.registerQueued(item.id);
     return item;
@@ -161,7 +175,7 @@ function scheduleRetry(
     retryTimer = null;
     retryAtMs = null;
     void flushOutbox(send, options).catch(() => {
-      // Durable item state already contains the actionable error.  The next
+      // Durable item state already contains the actionable error. The next
       // reconnect/sign-in/manual retry will resume without losing the item.
     });
   }, Math.max(0, target - now));
@@ -205,8 +219,8 @@ function retryable(err: unknown): boolean {
 }
 
 /**
- * Sends durable outbox entries oldest first.  Only a confirmed acknowledgement
- * removes an entry.  Transient failures wait and retry with the same clientRef;
+ * Sends durable outbox entries oldest first. Only a confirmed acknowledgement
+ * removes an entry. Transient failures wait and retry with the same clientRef;
  * auth failures and permanent server refusals remain stored and stop later
  * financial writes from overtaking them.
  */
@@ -225,6 +239,7 @@ async function runFlush(
   send: (input: EntryInput) => Promise<unknown>,
   options: FlushOptions,
 ): Promise<number> {
+  await syncActivation;
   const rawQueue = offlineRepository.queueAll()
     .sort((a, b) => a.queuedAt.localeCompare(b.queuedAt) || a.id.localeCompare(b.id));
   if (!rawQueue.length) {
