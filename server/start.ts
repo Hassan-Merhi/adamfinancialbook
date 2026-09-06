@@ -41,6 +41,7 @@ const [
   { healthRouter },
   { publicSecurityRouter, protectedSecurityRouter },
   { offlineSyncRouter },
+  { handoffConfirmationSafetyRouter },
 ] = await Promise.all([
   import('./delegation.js'),
   import('./expense-review.js'),
@@ -50,6 +51,7 @@ const [
   import('./health.js'),
   import('./security-gate.js'),
   import('./offline-sync.js'),
+  import('./handoff-confirmation-safety.js'),
 ]);
 
 publicSecurityRouter.use(healthRouter);
@@ -57,9 +59,13 @@ publicSecurityRouter.use(healthRouter);
 // public routes finish first; this fallthrough therefore observes every other
 // /api request before protected/delegated/core routing can finish it.
 publicSecurityRouter.use(requestTelemetry);
-// Offline retries carrying a clientRef must reach the idempotent handoff route
-// before the legacy delegation route. Requests without a clientRef call next()
-// and preserve the existing production behavior unchanged.
+// Confirmation is a financial write too: intercept it before the legacy
+// delegation route so the balance re-check, ledger posting, transfer status,
+// notifications and audit commit atomically.
+protectedSecurityRouter.use(handoffConfirmationSafetyRouter);
+// Offline retries carrying a clientRef must reach the idempotent/conflict-safe
+// routes before the legacy delegation route. Requests without an offline marker
+// call next() and preserve existing production behavior unchanged.
 protectedSecurityRouter.use(offlineSyncRouter);
 delegationGate.use(expenseReviewRouter);
 delegationGate.use(resetRouter);
