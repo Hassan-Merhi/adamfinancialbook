@@ -57,7 +57,10 @@ async function resetDatabase() {
 }
 
 async function waitUntilHealthy(): Promise<void> {
-  for (let i = 0; i < 150; i += 1) {
+  // The API can be fully migrated and listening while a loaded hosted runner
+  // delays the first loopback health response. Keep health strict, but avoid a
+  // false failure from the legacy 15-second startup watchdog.
+  for (let i = 0; i < 300; i += 1) {
     if (child && child.exitCode !== null) throw new Error(`Server exited before health check:\n${serverLog}`);
     try {
       if ((await fetch(`${BASE}/api/health`)).ok) return;
