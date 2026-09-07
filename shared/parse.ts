@@ -105,15 +105,19 @@ const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july',
 
 function readDate(text: string, today: string): { date: string; historical: boolean } {
   const t = text.toLowerCase();
+  const explicitlyHistorical = /\bback in\b|\bpreviously\b|\blast month\b|\bearlier\b|\bhistorical\b|\bopening\b|\bbefore (?:the )?(?:cut[- ]?off|opening)\b|\bwas received\b/.test(t);
 
   const slash = t.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/);
   if (slash) {
     const year = slash[3].length === 2 ? `20${slash[3]}` : slash[3];
-    return { date: `${year}-${slash[2].padStart(2, '0')}-${slash[1].padStart(2, '0')}`, historical: true };
+    return {
+      date: `${year}-${slash[2].padStart(2, '0')}-${slash[1].padStart(2, '0')}`,
+      historical: explicitlyHistorical,
+    };
   }
 
-  if (/\byesterday\b/.test(t)) return { date: shift(today, -1), historical: false };
-  if (/\bday before yesterday\b/.test(t)) return { date: shift(today, -2), historical: false };
+  if (/\bday before yesterday\b/.test(t)) return { date: shift(today, -2), historical: explicitlyHistorical };
+  if (/\byesterday\b/.test(t)) return { date: shift(today, -1), historical: explicitlyHistorical };
 
   const month = MONTHS.findIndex((m) => new RegExp(`\\b${m}\\b`).test(t));
   if (month >= 0) {
@@ -122,11 +126,13 @@ function readDate(text: string, today: string): { date: string; historical: bool
     const year = Number(today.slice(0, 4));
     // a month later in the year than today means last year
     const candidate = `${year}-${String(month + 1).padStart(2, '0')}-${dd.padStart(2, '0')}`;
-    return { date: candidate > today ? `${year - 1}${candidate.slice(4)}` : candidate, historical: true };
+    return {
+      date: candidate > today ? `${year - 1}${candidate.slice(4)}` : candidate,
+      historical: explicitlyHistorical,
+    };
   }
 
-  const past = /\bback in\b|\bpreviously\b|\blast month\b|\bearlier\b|\bhistorical\b|\bwas received\b/.test(t);
-  return { date: today, historical: past };
+  return { date: today, historical: explicitlyHistorical };
 }
 
 function shift(iso: string, days: number): string {
