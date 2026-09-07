@@ -4,6 +4,13 @@ import { ensureOperationsSchema } from './operations-schema.js';
 
 const processStartedAt = Date.now();
 
+export interface DatabasePoolReadiness {
+  max: number;
+  total: number;
+  idle: number;
+  waiting: number;
+}
+
 export interface ReadinessResult {
   ok: boolean;
   database: 'ok' | 'error';
@@ -14,7 +21,17 @@ export interface ReadinessResult {
   backups: 'current' | 'bootstrap' | 'missing' | 'stale' | 'error';
   latestBackupAt: string | null;
   backupAgeHours: number | null;
+  pool: DatabasePoolReadiness;
   detail?: string;
+}
+
+function databasePoolReadiness(): DatabasePoolReadiness {
+  return {
+    max: pool.options.max,
+    total: pool.totalCount,
+    idle: pool.idleCount,
+    waiting: pool.waitingCount,
+  };
 }
 
 async function backupReadiness() {
@@ -52,6 +69,7 @@ export async function readiness(): Promise<ReadinessResult> {
   try {
     await pool.query('SELECT 1');
     const [status, backup] = await Promise.all([getMigrationStatus(), backupReadiness()]);
+    const poolState = databasePoolReadiness();
     if (status.pending.length > 0) {
       return {
         ok: false,
@@ -61,6 +79,7 @@ export async function readiness(): Promise<ReadinessResult> {
         currentMigration: status.current,
         latestMigration: status.latest,
         ...backup,
+        pool: poolState,
       };
     }
     const backupOk = backup.backups === 'current' || backup.backups === 'bootstrap';
@@ -72,6 +91,7 @@ export async function readiness(): Promise<ReadinessResult> {
       currentMigration: status.current,
       latestMigration: status.latest,
       ...backup,
+      pool: poolState,
       ...(!backupOk ? { detail: `Off-site encrypted backup status is ${backup.backups}.` } : {}),
     };
   } catch (error) {
@@ -85,6 +105,7 @@ export async function readiness(): Promise<ReadinessResult> {
       backups: 'error',
       latestBackupAt: null,
       backupAgeHours: null,
+      pool: databasePoolReadiness(),
       detail: error instanceof Error ? error.message : 'Unknown readiness failure',
     };
   }
