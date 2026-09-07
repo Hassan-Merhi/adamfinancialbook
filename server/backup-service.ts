@@ -191,7 +191,7 @@ export function encryptBackupSnapshot(snapshot: DatabaseBackupSnapshot): Buffer 
   const salt = randomBytes(16);
   const iv = randomBytes(12);
   const key = scryptSync(secret(), salt, 32);
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const cipher = createCipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
   const encrypted = Buffer.concat([cipher.update(compressed), cipher.final()]);
   const tag = cipher.getAuthTag();
   return Buffer.concat([MAGIC, Buffer.from([FORMAT_VERSION]), salt, iv, tag, encrypted]);
@@ -210,7 +210,7 @@ export function decryptBackupBuffer(buffer: Buffer): DatabaseBackupSnapshot {
   const tag = buffer.subarray(offset, offset + 16); offset += 16;
   const encrypted = buffer.subarray(offset);
   const key = scryptSync(secret(), salt, 32);
-  const decipher = createDecipheriv('aes-256-gcm', key, iv);
+  const decipher = createDecipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
   decipher.setAuthTag(tag);
   let plaintext: Buffer;
   try {
