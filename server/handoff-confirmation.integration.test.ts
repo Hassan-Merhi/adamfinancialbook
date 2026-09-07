@@ -63,7 +63,10 @@ async function resetToLegacyShape(): Promise<void> {
 }
 
 async function waitUntilHealthy(): Promise<void> {
-  for (let i = 0; i < 150; i += 1) {
+  // Hosted CI may delay a freshly spawned Node process while other PostgreSQL
+  // jobs run in parallel. Keep the health check strict, but allow 30 seconds
+  // instead of turning a healthy listening server into a false timeout.
+  for (let i = 0; i < 300; i += 1) {
     if (child && child.exitCode !== null) throw new Error(`Server exited before health check:\n${serverLog}`);
     try {
       if ((await fetch(`${BASE}/api/health`)).ok) return;
@@ -131,7 +134,7 @@ describe.skipIf(!DATABASE_URL)('Phase 4 delegated handoff confirmation safety', 
     });
     expect(login.response.status).toBe(200);
     delegate.cookie = sessionCookie(login.response);
-  }, 30_000);
+  }, 40_000);
 
   afterAll(async () => {
     const running = child;

@@ -170,6 +170,8 @@ jobs:
           exit 1
       - name: P1 WebKit touch/mobile certification
         run: npm run test:p1-mobile
+      - name: P2 final UI consistency certification
+        run: npm run test:p2-ui
       - name: Show mobile server log on failure
         if: failure()
         run: cat /tmp/p1-mobile-server.log || true

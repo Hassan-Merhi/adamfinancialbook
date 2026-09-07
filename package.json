@@ -21,6 +21,7 @@
     "test:offline-chaos": "vitest run --no-file-parallelism server/offline-chaos.integration.test.ts",
     "test:p1-scale": "vitest run --no-file-parallelism server/p1-scale-certification.integration.test.ts",
     "test:p1-mobile": "node scripts/p1-mobile-browser-certification.mjs",
+    "test:p2-ui": "node scripts/p2-ui-certification.mjs",
     "test:financial-e2e": "vitest run server/financial-e2e.integration.test.ts",
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm test -- --passWithNoTests && npm run build",

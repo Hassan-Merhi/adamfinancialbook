@@ -7,6 +7,7 @@ import { installOfflineExitGuards } from './offline-exit-guard';
 import { installOfflineLiveRecovery } from './offline-live-recovery';
 import { installLiveMutationBridge } from './live-refresh';
 import { installSessionQuarantine } from './session-quarantine';
+import { installFormAccessibility } from './form-a11y';
 import './multilingual-offline';
 
 // Apply an explicit appearance before React renders so returning users do not
@@ -22,6 +23,11 @@ try {
 // revalidate only the affected snapshots, so older screens that own their own
 // request helper still update the rest of the app without polling or reloading.
 installLiveMutationBridge();
+
+// Older forms consistently render visible labels, but some predate explicit
+// htmlFor/id wiring. Keep those controls screen-reader named even when lazy
+// views or conditional admin sections mount later.
+installFormAccessibility();
 
 // Installed to the home screen, the app must still open with no signal.
 // This lives here rather than inline in the page: the Content-Security-Policy

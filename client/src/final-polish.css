@@ -96,3 +96,194 @@
 @media (prefers-reduced-motion:reduce) {
   html:focus-within { scroll-behavior:auto; }
 }
+
+/* --------------------------------------------------------------------------
+   P2 — final consistency, simplification, and release polish.
+   These rules deliberately stay presentation-only: accounting, permissions,
+   offline state, and API semantics are untouched.
+   -------------------------------------------------------------------------- */
+
+:root {
+  --p2-control-h:40px;
+  --p2-touch-h:44px;
+  --p2-page-gap:18px;
+  --p2-section-gap:14px;
+}
+
+/* One control rhythm everywhere. A user should not have to relearn button or
+   field sizing when moving from daily work to setup/admin pages. */
+.btn,
+.fi,
+.f input,
+.f select,
+.f textarea,
+.search-trigger,
+.moreutility,
+.moremenu-close,
+.password-toggle,
+.search-close {
+  min-height:var(--p2-control-h);
+}
+
+.f textarea {
+  width:100%;
+  resize:vertical;
+  min-height:96px;
+  background:var(--sunk);
+  border:1px solid var(--line);
+  border-radius:var(--r-ctl);
+  padding:9px 11px;
+  font:inherit;
+  color:inherit;
+}
+
+button:disabled,
+[aria-disabled="true"] {
+  cursor:not-allowed;
+}
+
+/* Shared cards, notices, tiles, and forms now use one radius/spacing language.
+   Existing component-specific colors remain intact. */
+.card,
+.tile {
+  border-radius:var(--r-card);
+}
+
+.rule,
+.note {
+  border-radius:var(--r-ctl);
+}
+
+.card > .card-title,
+.card > h3 {
+  min-height:44px;
+  align-items:center;
+}
+
+.form {
+  row-gap:var(--p2-section-gap);
+}
+
+.f label {
+  line-height:1.35;
+}
+
+/* Remove the last inline-style empty-state exception from shared UI. */
+.empty-state {
+  min-height:56px;
+  align-items:center;
+  font-size:13.5px;
+  line-height:1.45;
+}
+
+/* Destructive actions must look destructive everywhere, not like a normal
+   primary CTA. ResetData already uses reset-danger; sign out follows the same
+   visual language without changing its behavior. */
+.reset-danger,
+.more-signout {
+  border:1px solid color-mix(in srgb,var(--neg) 34%,var(--line));
+  background:color-mix(in srgb,var(--neg) 10%,var(--card));
+  color:var(--neg);
+}
+
+.reset-danger:hover,
+.more-signout:hover {
+  background:color-mix(in srgb,var(--neg) 15%,var(--card));
+}
+
+/* Loading/error/confirmation states remain legible even when content around
+   them is dense. */
+.note[role="alert"] {
+  font-weight:600;
+}
+
+.view-loading,
+.note[role="status"],
+.empty-state {
+  contain:layout paint;
+}
+
+/* Avoid accidental clipping of long account, project, filename, or translated
+   labels. Values stay aligned, but descriptive copy may wrap naturally. */
+.row .main,
+.moreitem-main,
+.phase5-mobile-menu button span,
+.phase5-mobile-menu button small {
+  overflow-wrap:anywhere;
+}
+
+.row .val {
+  flex:0 0 auto;
+}
+
+/* Drawers are sheets, not full-page traps: contain their scroll and always
+   respect device safe areas. */
+.moremenu,
+.searchdialog {
+  overscroll-behavior:contain;
+}
+
+@media (max-width:760px) {
+  .wrap {
+    padding-bottom:calc(92px + env(safe-area-inset-bottom));
+  }
+
+  /* mobile-core already anchors More above the bottom navigation. Preserve
+     that available-height calculation here instead of replacing it with a
+     near-full-screen max-height, which can push the sticky close control above
+     the physical viewport on short phones such as 320x568. */
+  .moremenu {
+    max-height:calc(100dvh - var(--mobile-nav-height) - 34px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    padding-bottom:max(12px, env(safe-area-inset-bottom));
+  }
+
+  .searchdialog {
+    max-height:100dvh;
+    padding-bottom:max(12px, env(safe-area-inset-bottom));
+  }
+
+  .moremenu-head {
+    position:sticky;
+    top:-10px;
+    z-index:3;
+  }
+
+  .btn,
+  .fi,
+  .f input,
+  .f select,
+  .f textarea,
+  .search-trigger,
+  .moreitem,
+  .moremenu-close,
+  .more-signout,
+  .moreutility,
+  .password-toggle,
+  .search-close,
+  .phase5-mobile-menu button,
+  .reset-option {
+    min-height:var(--p2-touch-h);
+  }
+
+  /* Dense action rows become easy thumb targets instead of tiny adjacent text
+     links. This only affects phone layout. */
+  .form > .btn,
+  .reset-actions .btn {
+    min-height:48px;
+  }
+}
+
+/* Explicit high-contrast behavior prevents focus/destructive-state meaning
+   from depending on subtle colors alone. */
+@media (forced-colors:active) {
+  :where(a,button,input,select,textarea,[tabindex]):focus-visible {
+    outline:3px solid Highlight;
+  }
+
+  .reset-danger,
+  .more-signout,
+  .note.err,
+  .note.ok {
+    border:1px solid CanvasText;
+  }
+}

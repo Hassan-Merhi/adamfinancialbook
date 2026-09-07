@@ -180,7 +180,7 @@ html[dir="rtl"] .approval-launcher { right:auto; left:144px; }
   .approvals-head { align-items:flex-start; gap:8px; margin-bottom:10px; }
   .approvals-head h2 { font-size:21px; }
   .approvals-head p { margin-top:2px; font-size:11.5px; line-height:1.35; }
-  .approvals-head > .btn { flex:none; min-height:40px; padding-inline:11px; }
+  .approvals-head > .btn { flex:none; min-height:44px; padding-inline:11px; }
 
   .approval-card-note { padding:0 12px 9px; font-size:11.5px; }
   .approval-user-list { gap:8px; padding:0 8px 8px; }
@@ -189,7 +189,7 @@ html[dir="rtl"] .approval-launcher { right:auto; left:144px; }
   .approval-avatar { width:32px; height:32px; flex-basis:32px; }
   .approval-user-copy b { font-size:12.5px; }
   .approval-user-copy small { font-size:10.5px; }
-  .approval-user-head .btn { min-height:40px; padding-inline:11px; }
+  .approval-user-head .btn { min-height:44px; padding-inline:11px; }
   .approval-checks {
     grid-template-columns:1fr;
     gap:6px;
