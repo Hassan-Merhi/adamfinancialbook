@@ -6,6 +6,7 @@ import { initializeOfflineStorage } from './offline';
 import { installOfflineExitGuards } from './offline-exit-guard';
 import { installOfflineLiveRecovery } from './offline-live-recovery';
 import { installLiveMutationBridge } from './live-refresh';
+import { installIosPullToRefresh } from './ios-pull-refresh';
 import { installSessionQuarantine } from './session-quarantine';
 import { installFormAccessibility } from './form-a11y';
 import './multilingual-offline';
@@ -23,6 +24,11 @@ try {
 // revalidate only the affected snapshots, so older screens that own their own
 // request helper still update the rest of the app without polling or reloading.
 installLiveMutationBridge();
+
+// On touch phones, a downward pull from the very top refreshes the same book +
+// dashboard snapshots in the background instead of forcing a full Safari page
+// reload. This also works when the site is installed to the iOS home screen.
+installIosPullToRefresh();
 
 // Older forms consistently render visible labels, but some predate explicit
 // htmlFor/id wiring. Keep those controls screen-reader named even when lazy
