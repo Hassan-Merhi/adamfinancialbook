@@ -3,7 +3,7 @@ import { extname, join, relative } from 'node:path';
 
 const root = process.cwd();
 const ignoredDirs = new Set(['.git', 'node_modules', 'dist', 'coverage', 'backups']);
-const ignoredFiles = new Set(['.env.example', 'scripts/security-check.mjs']);
+const ignoredFiles = new Set(['.env.example', 'scripts/security-check.mjs', 'scripts/security-history-check.mjs']);
 const textExtensions = new Set([
   '', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.yml', '.yaml', '.md', '.sql', '.html', '.css', '.txt', '.sh', '.toml', '.ini', '.conf',
 ]);
@@ -14,6 +14,9 @@ const detectors = [
   ['AWS access key', /\bAKIA[0-9A-Z]{16}\b/],
   ['Google API key', /\bAIza[0-9A-Za-z_-]{35}\b/],
   ['Slack token', /\bxox[baprs]-[0-9A-Za-z-]{20,}\b/],
+  ['Anthropic API key', /\bsk-ant-[A-Za-z0-9_-]{20,}\b/],
+  ['OpenAI API key', /\bsk-(?:proj|svcacct)-[A-Za-z0-9_-]{20,}\b/],
+  ['Stripe live secret', /\bsk_live_[0-9A-Za-z]{16,}\b/],
 ];
 
 const databaseUrlPattern = /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s'"`<>]+/gi;

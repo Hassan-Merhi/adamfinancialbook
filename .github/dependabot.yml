@@ -7,6 +7,8 @@ updates:
       day: monday
       time: '04:00'
       timezone: Africa/Johannesburg
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 10
     labels:
       - dependencies
@@ -20,6 +22,8 @@ updates:
       day: monday
       time: '04:30'
       timezone: Africa/Johannesburg
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 10
     labels:
       - dependencies

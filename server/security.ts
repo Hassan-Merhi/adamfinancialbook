@@ -275,7 +275,7 @@ function mfaKey(): Buffer {
 }
 export function encryptMfaSecret(secretValue: string): string {
   const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', mfaKey(), iv);
+  const cipher = createCipheriv('aes-256-gcm', mfaKey(), iv, { authTagLength: 16 });
   const ciphertext = Buffer.concat([cipher.update(secretValue, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
   return `v1.${iv.toString('base64url')}.${tag.toString('base64url')}.${ciphertext.toString('base64url')}`;
@@ -283,7 +283,11 @@ export function encryptMfaSecret(secretValue: string): string {
 export function decryptMfaSecret(value: string): string {
   const [version, ivValue, tagValue, ciphertextValue] = String(value ?? '').split('.');
   if (version !== 'v1' || !ivValue || !tagValue || !ciphertextValue) throw new Error('Stored MFA secret is invalid.');
-  const decipher = createDecipheriv('aes-256-gcm', mfaKey(), Buffer.from(ivValue, 'base64url'));
-  decipher.setAuthTag(Buffer.from(tagValue, 'base64url'));
-  return Buffer.concat([decipher.update(Buffer.from(ciphertextValue, 'base64url')), decipher.final()]).toString('utf8');
+  const iv = Buffer.from(ivValue, 'base64url');
+  const tag = Buffer.from(tagValue, 'base64url');
+  const ciphertext = Buffer.from(ciphertextValue, 'base64url');
+  if (iv.length !== 12 || tag.length !== 16 || ciphertext.length === 0) throw new Error('Stored MFA secret is invalid.');
+  const decipher = createDecipheriv('aes-256-gcm', mfaKey(), iv, { authTagLength: 16 });
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
 }

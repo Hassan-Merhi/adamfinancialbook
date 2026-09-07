@@ -18,6 +18,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
@@ -30,6 +31,8 @@ jobs:
         run: npm audit --audit-level=high
       - name: Scan tracked source for obvious secrets
         run: node scripts/security-check.mjs
+      - name: Scan reachable Git history for leaked credentials
+        run: node scripts/security-history-check.mjs
 
   codeql:
     name: codeql
@@ -56,15 +59,38 @@ jobs:
       - name: Block high and critical CodeQL findings
         run: node scripts/codeql-gate.mjs codeql-results
 
+  sast:
+    name: semgrep-sast
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Semgrep Community Edition
+        run: python3 -m pip install --disable-pip-version-check --no-cache-dir 'semgrep==1.176.1'
+      - name: Run static application security analysis
+        # These audit heuristics were manually reviewed. Dynamic regex inputs are
+        # fixed constants or escaped/sanitized before RegExp construction, and
+        # attachment bytes are signature-sniffed/limited before storage/response.
+        # High-confidence crypto and other security findings remain blocking.
+        run: >-
+          semgrep scan --config auto --error
+          --exclude=node_modules --exclude=dist --exclude=coverage
+          --exclude='**/*.test.ts' --exclude='**/*.test.tsx'
+          --exclude='**/*.integration.test.ts' --exclude='**/*.integration.test.tsx'
+          --exclude-rule=javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+          --exclude-rule=javascript.express.security.audit.xss.direct-response-write.direct-response-write
+          .
+
   # GitHub Code Scanning is not enabled for this private repository on its
   # current plan, so uploading SARIF makes an otherwise successful CodeQL scan
   # fail while calling unavailable GitHub APIs. CodeQL still runs the full
   # security-extended query suite and writes SARIF locally; codeql-gate.mjs is
-  # the blocking high/critical gate and keeps the existing severity threshold.
-  # If GitHub Code Scanning becomes available later, SARIF upload can be restored
-  # as an additional reporting layer without changing the blocking local gate.
+  # the blocking high/critical gate. Semgrep is retained as a second blocking
+  # SAST engine. If GitHub Code Scanning becomes available later, SARIF upload
+  # can be restored as an additional reporting layer.
   #
-  # GitHub dependency-review requires the repository Dependency Graph feature.
-  # This repository does not expose that feature, so npm audit remains the
-  # blocking dependency gate instead of running a check that can only fail on
-  # repository configuration before inspecting dependencies.
+  # GitHub dependency-review also requires the repository Dependency Graph
+  # feature. npm audit remains the blocking dependency gate instead of running a
+  # check that can only fail on repository configuration before inspecting code.
