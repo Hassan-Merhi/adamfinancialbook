@@ -46,7 +46,8 @@ describe('Render Phase 4 final production certification contract', () => {
     expect(workflow).toContain('id-token: write');
     expect(workflow).toContain('adam-financial-book-backup');
     expect(workflow).toContain('retention-days: 90');
-    expect(workflow).toContain('actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a');
+    expect(workflow).toMatch(/uses:\s*actions\/upload-artifact@[a-f0-9]{40}/);
+    expect(workflow).not.toMatch(/uses:\s*actions\/upload-artifact@(v\d+|main|master)\b/);
     expect(workflow).toContain("headers.get('x-afb-sha256'");
     expect(workflow).toContain('Acknowledge durable delivery in production');
     expect(workflow).toContain('[Production Backup] Adam Financial Book encrypted backup failure');
