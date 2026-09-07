@@ -48,6 +48,7 @@ const [
   { handoffConfirmationSafetyRouter },
   { offlineAttachmentRouter },
   { accountManagementRouter },
+  { currentOverviewRouter },
 ] = await Promise.all([
   import('./delegation.js'),
   import('./expense-review.js'),
@@ -64,6 +65,7 @@ const [
   import('./handoff-confirmation-safety.js'),
   import('./offline-attachments.js'),
   import('./account-management.js'),
+  import('./current-overview.js'),
 ]);
 
 publicSecurityRouter.use(healthRouter);
@@ -82,6 +84,10 @@ publicSecurityRouter.use(liveSecuritySessionObserver);
 // above that gate only so they can attach before protected routes finish; failed
 // or unauthenticated responses never publish because their status is >= 400.
 protectedSecurityRouter.use(liveUpdatesRouter);
+// Current owner overviews can use active effects directly: corrections and voids
+// already supersede/deactivate old effects. Mount this before the legacy
+// performance router; delegated and historical requests deliberately fall through.
+protectedSecurityRouter.use(currentOverviewRouter);
 // Confirmation is a financial write too: intercept it before the legacy
 // delegation route so the balance re-check, ledger posting, transfer status,
 // notifications and audit commit atomically.
