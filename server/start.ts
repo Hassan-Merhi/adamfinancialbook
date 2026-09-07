@@ -47,6 +47,7 @@ const [
   { offlineSetupRouter },
   { handoffConfirmationSafetyRouter },
   { offlineAttachmentRouter },
+  { accountManagementRouter },
 ] = await Promise.all([
   import('./delegation.js'),
   import('./expense-review.js'),
@@ -62,6 +63,7 @@ const [
   import('./offline-setup.js'),
   import('./handoff-confirmation-safety.js'),
   import('./offline-attachments.js'),
+  import('./account-management.js'),
 ]);
 
 publicSecurityRouter.use(healthRouter);
@@ -94,6 +96,9 @@ protectedSecurityRouter.use(offlineRevisionRouter);
 // setup/admin operations stay authoritative-server-only. Intercept only the explicit
 // offline setup marker; legacy online setup continues to fall through unchanged.
 protectedSecurityRouter.use(offlineSetupRouter);
+// Account renames, opening-balance edits, and safe deletion are authoritative
+// owner-only setup operations and must never be queued offline.
+protectedSecurityRouter.use(accountManagementRouter);
 // Offline retries carrying a clientRef must reach the idempotent/conflict-safe
 // routes before the legacy delegation route. Requests without an offline marker
 // call next() and preserve existing production behavior unchanged.
