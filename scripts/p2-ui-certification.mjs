@@ -85,8 +85,9 @@ async function assertNamedVisibleFields(page, label) {
       const aria = node.getAttribute('aria-label')?.trim();
       const labelledBy = node.getAttribute('aria-labelledby')?.trim();
       const id = node.id;
-      const nativeLabel = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`) : null;
-      return !aria && !labelledBy && !nativeLabel;
+      const explicitLabel = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`) : null;
+      const implicitLabel = node.closest('label');
+      return !aria && !labelledBy && !explicitLabel && !implicitLabel;
     })
     .map((node) => ({
       tag: node.tagName,
