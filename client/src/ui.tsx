@@ -44,10 +44,10 @@ export const KINDS: Record<string, string> = {
 
 export function Card({ title, aside, children }: { title?: ReactNode; aside?: ReactNode; children: ReactNode }) {
   return (
-    <div className="card">
-      {title && <h3>{title}{aside && <span className="muted">{aside}</span>}</h3>}
+    <section className="card">
+      {title && <h3 className="card-title">{title}{aside && <span className="muted">{aside}</span>}</h3>}
       {children}
-    </div>
+    </section>
   );
 }
 
@@ -68,11 +68,11 @@ export function Row({ title, sub, value, valueTone, valueSub, onOpen }: {
           {valueSub && <small>{valueSub}</small>}
         </span>
       )}
-      {onOpen && <span className="chev">›</span>}
+      {onOpen && <span className="chev" aria-hidden="true">›</span>}
     </>
   );
   return onOpen
-    ? <button className="row link" onClick={onOpen}>{inner}</button>
+    ? <button type="button" className="row link" onClick={onOpen}>{inner}</button>
     : <div className="row">{inner}</div>;
 }
 
@@ -89,5 +89,5 @@ export function Tile({ label, value, note, tone: t, wide }: {
 }
 
 export function Empty({ children }: { children: ReactNode }) {
-  return <div className="row muted" style={{ fontSize: 13.5 }}>{children}</div>;
+  return <div className="row muted empty-state" role="status">{children}</div>;
 }
