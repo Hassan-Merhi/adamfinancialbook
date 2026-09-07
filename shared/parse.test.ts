@@ -129,19 +129,36 @@ describe('dates', () => {
     expect(entry('$100 airtime construction cash').input.occurredOn).toBe(TODAY);
   });
 
-  it('reads a written date as history', () => {
+  it('reads a written date without silently suppressing cash', () => {
     const d = entry('$50000 from Kin Severe 17/03/26');
     expect(d.input.occurredOn).toBe('2026-03-17');
-    expect(d.input.historical).toBe(true);
+    expect(d.input.historical).toBe(false);
+  });
+
+  it('keeps a dated supplier payment as a real cash movement', () => {
+    const d = entry('$700 Dani Hardware paid from Construction Cash 17/03/26');
+    expect(d.input.kind).toBe('supplier_payment');
+    expect(d.input.accountId).toBe('con_cash');
+    expect(d.input.personId).toBe('dani');
+    expect(d.input.occurredOn).toBe('2026-03-17');
+    expect(d.input.historical).toBe(false);
   });
 
   it('understands yesterday', () => {
-    expect(entry('$300 DGM construction cash yesterday').input.occurredOn).toBe('2026-08-20');
+    const d = entry('$300 DGM construction cash yesterday');
+    expect(d.input.occurredOn).toBe('2026-08-20');
+    expect(d.input.historical).toBe(false);
   });
 
   it('"back in March" is history, not today\'s cash', () => {
     const d = entry('back in March we received $33000 from Kin Severe');
     expect(d.input.occurredOn.slice(0, 7)).toBe('2026-03');
+    expect(d.input.historical).toBe(true);
+  });
+
+  it('allows an explicit written date to be intentionally historical', () => {
+    const d = entry('historical $700 Dani Hardware paid from Construction Cash 17/03/26');
+    expect(d.input.occurredOn).toBe('2026-03-17');
     expect(d.input.historical).toBe(true);
   });
 });
