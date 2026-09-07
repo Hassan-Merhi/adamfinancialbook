@@ -18,7 +18,8 @@ describe('Render Phase 2 encrypted production backup contract', () => {
     expect(workflow).toContain('id-token: write');
     expect(workflow).toContain('OIDC_AUDIENCE: adam-financial-book-backup');
     expect(workflow).toContain('retention-days: 90');
-    expect(workflow).toContain('actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a');
+    expect(workflow).toMatch(/uses:\s*actions\/upload-artifact@[a-f0-9]{40}/);
+    expect(workflow).not.toMatch(/uses:\s*actions\/upload-artifact@(v\d+|main|master)\b/);
     expect(workflow).not.toContain('DATABASE_URL:');
     expect(workflow).not.toContain('BACKUP_ENCRYPTION_KEY:');
     expect(exportRoute).toContain("createEncryptedDatabaseBackup('github-actions-export')");
