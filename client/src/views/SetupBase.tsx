@@ -1,6 +1,7 @@
 /** Opening balances, organization setup, and owner-only book reset. */
 import { useState } from 'react';
 import { api, type LoadedBook } from '../api';
+import { deleteAccount, updateAccount } from '../account-management-api';
 import { flushOutbox, looksOffline, outbox, sendOfflineQueued, SyncBlockedError } from '../offline';
 import { money, tone } from '../ui';
 import OperationsPanel from './OperationsPanel';
@@ -15,6 +16,7 @@ export default function SetupBase({ book, run, reload, say, onQueued }: {
 }) {
   const [biz, setBiz] = useState('');
   const [acc, setAcc] = useState({ name: '', businessId: '', opening: '' });
+  const [editingAccount, setEditingAccount] = useState<{ id: string; name: string; opening: string } | null>(null);
   const [prj, setPrj] = useState({ name: '', businessId: '', opening: '' });
   const [per, setPer] = useState({ name: '', businessId: '', kind: 'payable', role: '', opening: '', salary: '' });
   const [loan, setLoan] = useState({ fromBusiness: '', toBusiness: '', opening: '' });
@@ -56,6 +58,38 @@ export default function SetupBase({ book, run, reload, say, onQueued }: {
     }
   };
 
+  const startAccountEdit = (id: string, name: string, opening: number) => {
+    setEditingAccount({ id, name, opening: String(opening ?? 0) });
+  };
+
+  const saveAccountEdit = () => {
+    if (!editingAccount?.name.trim()) return;
+    const opening = Number(editingAccount.opening);
+    if (!Number.isFinite(opening)) {
+      say('Opening balance must be a valid number.', true);
+      return;
+    }
+    const draft = editingAccount;
+    run(
+      async () => {
+        await updateAccount(draft.id, { name: draft.name.trim(), opening });
+        setEditingAccount(null);
+      },
+      'Account updated.',
+    );
+  };
+
+  const removeAccount = (id: string, name: string) => {
+    if (!window.confirm(`Delete account “${name}”? This only works when the account has no ledger activity or assignments.`)) return;
+    run(
+      async () => {
+        await deleteAccount(id);
+        if (editingAccount?.id === id) setEditingAccount(null);
+      },
+      'Account deleted.',
+    );
+  };
+
   return (
     <section className="setup-page">
       <div className="dhead setup-head">
@@ -87,10 +121,58 @@ export default function SetupBase({ book, run, reload, say, onQueued }: {
       <div className="card setup-card" id="setup-accounts">
         <h3>Accounts <span className="muted">money</span></h3>
         <div className="setup-existing">
-          {book.accounts.map((a) => <div className="row" key={a.id}>
-            <span className="main"><b>{a.name}</b>{a.businessId && <small>{book.businesses.find((b) => b.id === a.businessId)?.name}</small>}{pendingIds.has(a.id) && <small className="flag">pending sync</small>}</span>
-            <span className="val num">{money(book.balances.accounts[a.id] ?? 0)}</span>
-          </div>)}
+          {book.accounts.map((a) => {
+            const editing = editingAccount?.id === a.id;
+            return <div className="row" key={a.id}>
+              <span className="main">
+                {editing ? (
+                  <>
+                    <label className="f">
+                      <span>Name</span>
+                      <input
+                        value={editingAccount.name}
+                        onChange={(e) => setEditingAccount({ ...editingAccount, name: e.target.value })}
+                        autoFocus
+                      />
+                    </label>
+                    <label className="f">
+                      <span>Opening balance</span>
+                      <input
+                        inputMode="decimal"
+                        value={editingAccount.opening}
+                        onChange={(e) => setEditingAccount({ ...editingAccount, opening: e.target.value })}
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    <b>{a.name}</b>
+                    {a.businessId && <small>{book.businesses.find((b) => b.id === a.businessId)?.name}</small>}
+                    <small>Opening: {money(Number(a.opening) || 0)}</small>
+                    {pendingIds.has(a.id) && <small className="flag">pending sync</small>}
+                  </>
+                )}
+              </span>
+              <span className="val num">
+                {money(book.balances.accounts[a.id] ?? 0)}
+                {!pendingIds.has(a.id) && <small>
+                  {editing ? (
+                    <>
+                      <button className="linkbtn" type="button" onClick={saveAccountEdit}>save</button>
+                      {' · '}
+                      <button className="linkbtn" type="button" onClick={() => setEditingAccount(null)}>cancel</button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="linkbtn" type="button" onClick={() => startAccountEdit(a.id, a.name, Number(a.opening) || 0)}>edit</button>
+                      {' · '}
+                      <button className="linkbtn" type="button" onClick={() => removeAccount(a.id, a.name)}>delete</button>
+                    </>
+                  )}
+                </small>}
+              </span>
+            </div>;
+          })}
         </div>
         <div className="form setup-form">
           <div className="f"><label>Name</label><input value={acc.name} onChange={(e) => setAcc({ ...acc, name: e.target.value })} placeholder="Cash / bank / wallet" /></div>
