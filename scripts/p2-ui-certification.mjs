@@ -178,6 +178,7 @@ async function certifyMainFlows(page, label) {
   const more = page.getByRole('dialog', { name: 'More' });
   const appearance = more.getByRole('button', { name: /Appearance/i });
   await appearance.click();
+  await more.getByRole('button', { name: 'Close More' }).click();
   await page.getByRole('button', { name: 'Today' }).click();
   await assertNoHorizontalOverflow(page, `${label}:dark-mode`);
   await assertCoreTouchTargets(page, `${label}:dark-mode`);
