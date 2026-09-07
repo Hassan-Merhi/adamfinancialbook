@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -52,10 +52,18 @@ jobs:
         with:
           category: '/language:javascript-typescript'
           output: codeql-results
-          upload: always
+          upload: never
       - name: Block high and critical CodeQL findings
         run: node scripts/codeql-gate.mjs codeql-results
 
+  # GitHub Code Scanning is not enabled for this private repository on its
+  # current plan, so uploading SARIF makes an otherwise successful CodeQL scan
+  # fail while calling unavailable GitHub APIs. CodeQL still runs the full
+  # security-extended query suite and writes SARIF locally; codeql-gate.mjs is
+  # the blocking high/critical gate and keeps the existing severity threshold.
+  # If GitHub Code Scanning becomes available later, SARIF upload can be restored
+  # as an additional reporting layer without changing the blocking local gate.
+  #
   # GitHub dependency-review requires the repository Dependency Graph feature.
   # This repository does not expose that feature, so npm audit remains the
   # blocking dependency gate instead of running a check that can only fail on
