@@ -24,20 +24,23 @@ export interface LiveMutationDetail extends LiveMutationImpact {
 }
 
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-const CLIENT_KEY = 'book.live-client';
+const LIVE_TAB_CHANNEL = 'book:live-tab-mutations';
 
-function liveClientId(target: Window): string {
-  try {
-    const kept = target.sessionStorage.getItem(CLIENT_KEY);
-    if (kept) return kept;
-    const made = typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `live_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    target.sessionStorage.setItem(CLIENT_KEY, made);
-    return made;
-  } catch {
-    return `live_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  }
+/**
+ * One id per loaded page, never per browser session.
+ *
+ * sessionStorage is intentionally not used here. Browsers can clone
+ * sessionStorage when a tab is duplicated/opened from another tab, which used
+ * to make several tabs share one live id. The server correctly suppresses the
+ * initiating client's SSE echo; with a cloned id it could therefore suppress
+ * that same transaction for sibling tabs too, leaving them stale until a
+ * manual refresh. A fresh id per page means only the actual source tab is
+ * skipped while every other open client receives the background update.
+ */
+export function createLiveClientId(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `live_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
 function topicsFromRemote(payload: LiveMutationImpact & { topics?: unknown }): LiveTopic[] {
@@ -48,6 +51,19 @@ function topicsFromRemote(payload: LiveMutationImpact & { topics?: unknown }): L
   // Compatibility with a Phase 3 server during a rolling deploy. Correctness
   // wins over a few temporary extra reads; Phase 4+ servers send precise topics.
   return [...ALL_LIVE_TOPICS];
+}
+
+function validTabMutation(value: unknown): value is LiveMutationDetail {
+  if (!value || typeof value !== 'object') return false;
+  const detail = value as Partial<LiveMutationDetail>;
+  return typeof detail.book === 'boolean'
+    && typeof detail.dashboard === 'boolean'
+    && typeof detail.path === 'string'
+    && typeof detail.method === 'string'
+    && typeof detail.at === 'number'
+    && Number.isFinite(detail.at)
+    && Array.isArray(detail.topics)
+    && detail.topics.every((topic) => ALL_LIVE_TOPICS.includes(topic as LiveTopic));
 }
 
 /** Parse the value-free Phase 6 session-control event. */
@@ -67,6 +83,11 @@ export function parseLiveSessionRefresh(data: string, fallbackAt = Date.now()): 
  * reaches this tab without polling. This tab's id is attached to its writes so
  * its own server echo can be skipped.
  *
+ * A BroadcastChannel mirrors successful writes to sibling tabs in the same
+ * browser as an immediate second path. That keeps every visible statement and
+ * balance current even while one tab's SSE connection is briefly reconnecting;
+ * cross-device updates continue to come from PostgreSQL NOTIFY + SSE.
+ *
  * Phase 5 adds gap recovery. PostgreSQL NOTIFY is deliberately ephemeral, so a
  * device that was offline, background-suspended, or temporarily disconnected
  * does one authoritative revalidation after the gap instead of pretending it
@@ -79,12 +100,32 @@ export function parseLiveSessionRefresh(data: string, fallbackAt = Date.now()): 
  */
 export function installLiveMutationBridge(target: Window = window): () => void {
   const originalFetch = target.fetch.bind(target);
-  const clientId = liveClientId(target);
+  const clientId = createLiveClientId();
   const gaps = new LiveGapTracker();
   let source: EventSource | null = null;
+  let tabChannel: BroadcastChannel | null = null;
 
   const dispatch = (detail: LiveMutationDetail) => {
     target.dispatchEvent(new CustomEvent<LiveMutationDetail>(LIVE_MUTATION_EVENT, { detail }));
+  };
+
+  // Same-browser tabs should not have to wait for the server round trip to know
+  // their own authorized snapshots are stale. Do not rebroadcast messages
+  // received here, otherwise tabs would echo them in a loop.
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      tabChannel = new BroadcastChannel(LIVE_TAB_CHANNEL);
+      tabChannel.addEventListener('message', (event: MessageEvent<unknown>) => {
+        if (validTabMutation(event.data)) dispatch(event.data);
+      });
+    } catch {
+      tabChannel = null;
+    }
+  }
+
+  const dispatchLocal = (detail: LiveMutationDetail) => {
+    dispatch(detail);
+    try { tabChannel?.postMessage(detail); } catch { /* SSE remains authoritative */ }
   };
 
   const recover = (reason: LiveRecoveryReason, at = Date.now()) => {
@@ -207,7 +248,7 @@ export function installLiveMutationBridge(target: Window = window): () => void {
     if (READ_METHODS.has(method)) return response;
     const impact = classifyLiveMutation(url.pathname, method);
     if (impact) {
-      dispatch({
+      dispatchLocal({
         ...impact,
         topics: classifyLiveTopics(url.pathname, method),
         path: url.pathname,
@@ -249,6 +290,8 @@ export function installLiveMutationBridge(target: Window = window): () => void {
 
   return () => {
     stopRealtime();
+    tabChannel?.close();
+    tabChannel = null;
     target.removeEventListener('online', online);
     target.removeEventListener('offline', offline);
     target.document.removeEventListener('visibilitychange', visibility);
