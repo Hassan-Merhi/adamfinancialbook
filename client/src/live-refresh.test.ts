@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ALL_LIVE_TOPICS,
   classifyLiveMutation,
+  createLiveClientId,
   parseLiveSessionRefresh,
 } from './live-refresh';
 
@@ -40,6 +41,14 @@ describe('live mutation refresh classification', () => {
       .toEqual({ book: false, dashboard: true });
     expect(classifyLiveMutation('/api/delegation/users/usr_1/accounts', 'PUT'))
       .toEqual({ book: true, dashboard: true });
+  });
+
+  it('gives every loaded tab its own realtime client id', () => {
+    const first = createLiveClientId();
+    const second = createLiveClientId();
+    expect(first).toBeTruthy();
+    expect(second).toBeTruthy();
+    expect(first).not.toBe(second);
   });
 
   it('covers every independently loaded Phase 4 dataset during gap recovery', () => {
