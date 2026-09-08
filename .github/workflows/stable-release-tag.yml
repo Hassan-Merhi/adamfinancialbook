@@ -7,6 +7,7 @@ on:
       - '.github/workflows/stable-release-tag.yml'
       - '.github/workflows/encrypted-production-backup.yml'
       - '.github/workflows/disaster-recovery.yml'
+      - '.github/workflows/real-device-mobile-certification.yml'
 
 permissions:
   actions: read
@@ -49,6 +50,7 @@ jobs:
               'Production Deploy Certification',
               'Encrypted Production Backup',
               'Disaster Recovery Certification',
+              'Real Device Mobile Certification',
           }
 
           headers = {
@@ -121,6 +123,18 @@ jobs:
           if not valid_artifacts:
               raise SystemExit('Encrypted backup workflow is green but no retained exact-SHA backup artifact was found.')
 
+          mobile_run = chosen['Real Device Mobile Certification']
+          _, mobile_artifact_payload = call(f"/actions/runs/{mobile_run['id']}/artifacts?per_page=100")
+          mobile_artifacts = mobile_artifact_payload.get('artifacts', []) if isinstance(mobile_artifact_payload, dict) else []
+          valid_mobile_artifacts = [
+              artifact for artifact in mobile_artifacts
+              if artifact.get('name') == f'real-device-mobile-certification-{expected_sha}'
+              and artifact.get('expired') is False
+              and artifact.get('workflow_run', {}).get('head_sha') == expected_sha
+          ]
+          if not valid_mobile_artifacts:
+              raise SystemExit('Real-device workflow is green but no retained exact-SHA mobile certification artifact was found.')
+
           encoded_tag = urllib.parse.quote(tag_name, safe='')
           status, existing = call(f'/git/ref/tags/{encoded_tag}', allow_404=True)
           if status == 200:
@@ -147,5 +161,7 @@ jobs:
               'evidenceRuns': {name: chosen[name]['id'] for name in sorted(required)},
               'backupArtifactId': valid_artifacts[0].get('id'),
               'backupArtifactDigest': valid_artifacts[0].get('digest'),
+              'realDeviceArtifactId': valid_mobile_artifacts[0].get('id'),
+              'realDeviceArtifactDigest': valid_mobile_artifacts[0].get('digest'),
           }))
           PY
