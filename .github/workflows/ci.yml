@@ -65,8 +65,6 @@ jobs:
         run: npm run test:integration
       - name: Offline chaos and multi-device certification
         run: npm run test:offline-chaos
-      # The financial E2E test runs db:integrity against its populated realistic
-      # ledger before intentionally dropping public during test cleanup.
       - name: Financial end-to-end reconciliation
         run: npm run test:financial-e2e
       - name: Re-establish clean certification schema
@@ -113,7 +111,7 @@ jobs:
 
   p1-mobile-webkit:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:16
@@ -137,6 +135,8 @@ jobs:
       PORT: 43192
       P1_MOBILE_BASE_URL: http://127.0.0.1:43192
       P1_PLAYWRIGHT_MODULE: file:///tmp/p1-playwright/node_modules/playwright/index.mjs
+      PHASE3_MOBILE_USERNAME: p1-mobile-owner
+      PHASE3_MOBILE_PASSWORD: P1MobileOwner!2026
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -172,6 +172,8 @@ jobs:
         run: npm run test:p1-mobile
       - name: P2 final UI consistency certification
         run: npm run test:p2-ui
+      - name: Phase 3 real-device mobile hardening certification
+        run: npm run test:p3-mobile
       - name: Show mobile server log on failure
         if: failure()
         run: cat /tmp/p1-mobile-server.log || true
