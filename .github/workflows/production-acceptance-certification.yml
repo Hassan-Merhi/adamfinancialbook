@@ -44,6 +44,7 @@ jobs:
           python - <<'PY'
           import json
           import os
+          import socket
           import time
           import urllib.error
           import urllib.request
@@ -52,7 +53,7 @@ jobs:
           base = os.environ['BASE_URL'].rstrip('/')
           expected = os.environ['EXPECTED_RELEASE']
 
-          def get(path):
+          def get(path, tolerate_transport=False):
               req = urllib.request.Request(
                   base + path,
                   method='GET',
@@ -69,10 +70,14 @@ jobs:
               except urllib.error.HTTPError as exc:
                   raw = exc.read().decode('utf-8', errors='replace')
                   return exc.code, {k.lower(): v for k, v in exc.headers.items()}, raw
+              except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
+                  if tolerate_transport:
+                      return 0, {}, f'transport error: {type(exc).__name__}: {exc}'
+                  raise SystemExit(f'Production acceptance transport failure for {path}: {type(exc).__name__}: {exc}')
 
           observed = None
           for attempt in range(1, 61):
-              status, headers, body = get('/api/health/ready')
+              status, headers, body = get('/api/health/ready', tolerate_transport=True)
               try:
                   payload = json.loads(body)
               except Exception:
