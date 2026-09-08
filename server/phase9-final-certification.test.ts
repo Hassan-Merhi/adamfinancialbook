@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 const read = (path: string) => readFileSync(join(process.cwd(), path), 'utf8');
 const stable = read('.github/workflows/stable-release-tag.yml');
 const finalWorkflow = read('.github/workflows/final-production-certification.yml');
+const backupWorkflow = read('.github/workflows/encrypted-production-backup.yml');
 
 const REQUIRED = [
   'CI',
@@ -52,5 +53,11 @@ describe('Phase 9 final production certification', () => {
     expect(finalWorkflow).toContain('final-production-certification-${{ github.sha }}');
     expect(finalWorkflow).toContain('retention-days: 90');
     expect(finalWorkflow).toContain('github.sha');
+  });
+
+  it('forces a fresh exact-release encrypted backup when Phase 9 release governance changes', () => {
+    expect(backupWorkflow).toContain("'.github/workflows/stable-release-tag.yml'");
+    expect(backupWorkflow).toContain("'.github/workflows/final-production-certification.yml'");
+    expect(backupWorkflow).toContain('EXPECTED_RELEASE: ${{ github.sha }}');
   });
 });
