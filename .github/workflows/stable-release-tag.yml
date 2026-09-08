@@ -10,6 +10,7 @@ on:
       - '.github/workflows/real-device-mobile-certification.yml'
       - '.github/workflows/production-scale-certification.yml'
       - '.github/workflows/accounting-chaos-certification.yml'
+      - '.github/workflows/production-observability-certification.yml'
 
 permissions:
   actions: read
@@ -55,6 +56,7 @@ jobs:
               'Real Device Mobile Certification',
               'Production Scale Certification',
               'Accounting Chaos Certification',
+              'Production Observability Certification',
           }
 
           headers = {

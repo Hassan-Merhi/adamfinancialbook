@@ -1,0 +1,42 @@
+name: Production Observability Certification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - 'server/observability.ts'
+      - 'server/production-observability.ts'
+      - 'server/operations.ts'
+      - 'server/db.ts'
+      - 'server/health.ts'
+      - 'server/monitor.ts'
+      - 'server/phase8-observability-certification.test.ts'
+      - '.github/workflows/production-observability-certification.yml'
+      - 'package.json'
+      - 'package-lock.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-observability-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  certify-production-observability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Certify production observability architecture
+        run: npm run test:phase8-observability
+      - name: Typecheck observability changes
+        run: npm run typecheck
