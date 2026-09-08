@@ -78,7 +78,13 @@ async function certifyPullRefresh(page) {
   const indicator = page.locator('#ios-pull-refresh-indicator');
   await indicator.waitFor({ state: 'visible' });
   assert.ok((await indicator.textContent())?.includes('Release to refresh'), 'release state not shown');
+
+  const overviewRead = page.waitForRequest((request) => request.method() === 'GET' && new URL(request.url()).pathname === '/api/overview');
+  const dashboardRead = page.waitForRequest((request) => request.method() === 'GET' && new URL(request.url()).pathname === '/api/delegation/dashboard');
+  const reviewsRead = page.waitForRequest((request) => request.method() === 'GET' && new URL(request.url()).pathname === '/api/delegation/expense-reviews');
   await dispatchTouch(page, 'touchend', 260);
+  await Promise.all([overviewRead, dashboardRead, reviewsRead]);
+
   await page.waitForFunction(() => (window.__phase3Pull ?? []).some((x) => x?.path === '/app/pull-to-refresh'));
   const detail = await page.evaluate(() => window.__phase3Pull[0]);
   assert.equal(detail.book, true);
@@ -86,6 +92,29 @@ async function certifyPullRefresh(page) {
   assert.deepEqual([...detail.topics].sort(), ['access', 'approvals', 'files', 'history']);
   await page.waitForTimeout(1200);
   assert.ok(!(await indicator.getAttribute('class'))?.includes('refreshing'), 'refresh indicator remained stuck');
+}
+
+async function certifyScrolledPullStaysNative(page) {
+  await page.evaluate(() => {
+    const spacer = document.createElement('div');
+    spacer.id = 'phase3-scroll-spacer';
+    spacer.style.height = '2200px';
+    spacer.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(spacer);
+    scrollTo(0, 240);
+    window.__phase3ScrolledPull = [];
+    window.addEventListener('book:live-mutation', (event) => window.__phase3ScrolledPull.push(event.detail));
+  });
+  assert.ok(await page.evaluate(() => scrollY > 0), 'could not create a nonzero mobile scroll position');
+  await dispatchTouch(page, 'touchstart', 80);
+  assert.equal(await dispatchTouch(page, 'touchmove', 260), false, 'pull-to-refresh hijacked a gesture away from scroll top');
+  await dispatchTouch(page, 'touchend', 260);
+  await page.waitForTimeout(300);
+  assert.equal(await page.evaluate(() => window.__phase3ScrolledPull.length), 0, 'scrolled pull incorrectly triggered refresh');
+  await page.evaluate(() => {
+    document.getElementById('phase3-scroll-spacer')?.remove();
+    scrollTo(0, 0);
+  });
 }
 
 const browser = await webkit.launch({ headless: true });
@@ -107,6 +136,7 @@ try {
   await prompt.fill('');
 
   await certifyPullRefresh(page);
+  await certifyScrolledPullStaysNative(page);
   await page.setViewportSize({ width: 852, height: 393 });
   await page.waitForTimeout(120);
   await assertContained(page, 'landscape');
@@ -115,7 +145,7 @@ try {
   await assertContained(page, 'portrait-after-rotation');
 
   assert.deepEqual(errors, [], `Phase 3 WebKit errors:\n${errors.join('\n')}`);
-  console.log(JSON.stringify({ event: 'phase3.mobile.device.certified', checks: ['pull-to-refresh', 'background revalidation', 'rotation', 'prompt focus', 'viewport containment', 'horizontal overflow'] }));
+  console.log(JSON.stringify({ event: 'phase3.mobile.device.certified', checks: ['pull-to-refresh', 'real background API revalidation', 'scroll-top-only gesture ownership', 'rotation', 'prompt focus', 'viewport containment', 'horizontal overflow'] }));
   await context.close();
 } finally {
   await browser.close();
