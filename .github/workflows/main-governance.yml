@@ -32,7 +32,8 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          git fetch --no-tags origin "$BASE_SHA" "$HEAD_SHA"
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$HEAD_SHA^{commit}"
           if ! git merge-base --is-ancestor "$BASE_SHA" "$HEAD_SHA"; then
             echo "PR branch is behind main. Update the branch before merge." >&2
             exit 1
