@@ -1,0 +1,207 @@
+name: Real Device Mobile Certification
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact main SHA tested on physical devices
+        required: true
+        type: string
+      tester:
+        description: Person who performed the physical-device test
+        required: true
+        type: string
+      iphone_model:
+        description: Physical iPhone model tested
+        required: true
+        type: string
+      ios_version:
+        description: iOS version tested
+        required: true
+        type: string
+      android_model:
+        description: Physical Android model tested
+        required: true
+        type: string
+      android_version:
+        description: Android version tested
+        required: true
+        type: string
+      evidence_url:
+        description: URL to screenshots/video/test evidence
+        required: true
+        type: string
+      login_logout:
+        description: Login and logout passed on both devices
+        required: true
+        type: boolean
+      create_transaction:
+        description: Create transaction passed on both devices
+        required: true
+        type: boolean
+      transfer_money:
+        description: Transfer flow passed on both devices
+        required: true
+        type: boolean
+      correct_entry:
+        description: Correction flow passed on both devices
+        required: true
+        type: boolean
+      void_entry:
+        description: Void and accounting reversal passed on both devices
+        required: true
+        type: boolean
+      offline_reconnect:
+        description: Offline queue and reconnect sync passed on both devices
+        required: true
+        type: boolean
+      receipt_upload:
+        description: Receipt upload/retry passed on both devices
+        required: true
+        type: boolean
+      realtime_refresh:
+        description: Background realtime refresh passed across two devices
+        required: true
+        type: boolean
+      pull_to_refresh:
+        description: Native pull-to-refresh passed on iPhone and Android
+        required: true
+        type: boolean
+      rotation_keyboard:
+        description: Rotation plus keyboard open/close passed
+        required: true
+        type: boolean
+      navigation_layout:
+        description: Bottom navigation, drawers and dialogs remained usable
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  EXPECTED_SHA: ${{ github.sha }}
+
+jobs:
+  certify:
+    name: certify-real-device-mobile
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require certification to run on exact target SHA
+        shell: bash
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$TARGET_SHA" != "$EXPECTED_SHA" ]; then
+            echo "Certification target $TARGET_SHA does not match workflow SHA $EXPECTED_SHA." >&2
+            echo "Run this workflow from the exact main revision that was physically tested." >&2
+            exit 1
+          fi
+
+      - name: Require every physical-device scenario to pass
+        shell: bash
+        env:
+          LOGIN_LOGOUT: ${{ inputs.login_logout }}
+          CREATE_TRANSACTION: ${{ inputs.create_transaction }}
+          TRANSFER_MONEY: ${{ inputs.transfer_money }}
+          CORRECT_ENTRY: ${{ inputs.correct_entry }}
+          VOID_ENTRY: ${{ inputs.void_entry }}
+          OFFLINE_RECONNECT: ${{ inputs.offline_reconnect }}
+          RECEIPT_UPLOAD: ${{ inputs.receipt_upload }}
+          REALTIME_REFRESH: ${{ inputs.realtime_refresh }}
+          PULL_TO_REFRESH: ${{ inputs.pull_to_refresh }}
+          ROTATION_KEYBOARD: ${{ inputs.rotation_keyboard }}
+          NAVIGATION_LAYOUT: ${{ inputs.navigation_layout }}
+        run: |
+          set -euo pipefail
+          for value in \
+            "$LOGIN_LOGOUT" "$CREATE_TRANSACTION" "$TRANSFER_MONEY" \
+            "$CORRECT_ENTRY" "$VOID_ENTRY" "$OFFLINE_RECONNECT" \
+            "$RECEIPT_UPLOAD" "$REALTIME_REFRESH" "$PULL_TO_REFRESH" \
+            "$ROTATION_KEYBOARD" "$NAVIGATION_LAYOUT"; do
+            if [ "$value" != "true" ]; then
+              echo "Every real-device scenario must be explicitly confirmed true." >&2
+              exit 1
+            fi
+          done
+
+      - name: Validate evidence metadata
+        shell: bash
+        env:
+          TESTER: ${{ inputs.tester }}
+          IPHONE_MODEL: ${{ inputs.iphone_model }}
+          IOS_VERSION: ${{ inputs.ios_version }}
+          ANDROID_MODEL: ${{ inputs.android_model }}
+          ANDROID_VERSION: ${{ inputs.android_version }}
+          EVIDENCE_URL: ${{ inputs.evidence_url }}
+        run: |
+          set -euo pipefail
+          for value in "$TESTER" "$IPHONE_MODEL" "$IOS_VERSION" "$ANDROID_MODEL" "$ANDROID_VERSION"; do
+            [ -n "$value" ] || { echo "Device/tester metadata may not be blank." >&2; exit 1; }
+          done
+          case "$EVIDENCE_URL" in
+            https://*) ;;
+            *) echo "Evidence must be an https URL." >&2; exit 1 ;;
+          esac
+
+      - name: Write exact-SHA certification evidence
+        shell: bash
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+          TESTER: ${{ inputs.tester }}
+          IPHONE_MODEL: ${{ inputs.iphone_model }}
+          IOS_VERSION: ${{ inputs.ios_version }}
+          ANDROID_MODEL: ${{ inputs.android_model }}
+          ANDROID_VERSION: ${{ inputs.android_version }}
+          EVIDENCE_URL: ${{ inputs.evidence_url }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+
+          evidence = {
+              'schema': 1,
+              'event': 'real-device-mobile.certified',
+              'sha': os.environ['TARGET_SHA'],
+              'tester': os.environ['TESTER'],
+              'certifiedAt': datetime.now(timezone.utc).isoformat(),
+              'devices': {
+                  'ios': {
+                      'model': os.environ['IPHONE_MODEL'],
+                      'os': os.environ['IOS_VERSION'],
+                  },
+                  'android': {
+                      'model': os.environ['ANDROID_MODEL'],
+                      'os': os.environ['ANDROID_VERSION'],
+                  },
+              },
+              'evidenceUrl': os.environ['EVIDENCE_URL'],
+              'scenarios': [
+                  'login_logout',
+                  'create_transaction',
+                  'transfer_money',
+                  'correct_entry',
+                  'void_entry',
+                  'offline_reconnect',
+                  'receipt_upload',
+                  'realtime_refresh',
+                  'pull_to_refresh',
+                  'rotation_keyboard',
+                  'navigation_layout',
+              ],
+          }
+          with open('real-device-mobile-certification.json', 'w', encoding='utf-8') as handle:
+              json.dump(evidence, handle, indent=2, sort_keys=True)
+          print(json.dumps(evidence))
+          PY
+
+      - name: Retain certification evidence
+        uses: actions/upload-artifact@043fb46e7f5080e8e1f3cc696e2d5fc9c1fe4c15 # v7.0.1
+        with:
+          name: real-device-mobile-certification-${{ inputs.target_sha }}
+          path: real-device-mobile-certification.json
+          if-no-files-found: error
+          retention-days: 90
