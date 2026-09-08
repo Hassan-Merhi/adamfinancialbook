@@ -1,16 +1,17 @@
 name: Stable Release Tag
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/stable-release-tag.yml'
-      - '.github/workflows/encrypted-production-backup.yml'
-      - '.github/workflows/disaster-recovery.yml'
-      - '.github/workflows/real-device-mobile-certification.yml'
-      - '.github/workflows/production-scale-certification.yml'
-      - '.github/workflows/accounting-chaos-certification.yml'
-      - '.github/workflows/production-observability-certification.yml'
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact current main SHA to certify and tag
+        required: true
+        type: string
+      tag_name:
+        description: Stable tag to create
+        required: true
+        default: p9-99-stable
+        type: string
 
 permissions:
   actions: read
@@ -22,16 +23,15 @@ concurrency:
 
 jobs:
   tag:
-    if: contains(github.event.head_commit.message, 'P2 stable release tagging gate')
     runs-on: ubuntu-latest
     timeout-minutes: 18
     env:
-      EXPECTED_SHA: ${{ github.sha }}
-      TAG_NAME: p2-99-stable
+      EXPECTED_SHA: ${{ inputs.target_sha }}
+      TAG_NAME: ${{ inputs.tag_name }}
       REPOSITORY: ${{ github.repository }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Wait for exact release evidence and create stable tag
+      - name: Require exact current-main release evidence and create stable tag
         shell: bash
         run: |
           python - <<'PY'
@@ -56,7 +56,9 @@ jobs:
               'Real Device Mobile Certification',
               'Production Scale Certification',
               'Accounting Chaos Certification',
+              'Performance Architecture Certification',
               'Production Observability Certification',
+              'Final Production Certification',
           }
 
           headers = {
@@ -79,6 +81,11 @@ jobs:
                       return 404, None
                   body_text = exc.read().decode('utf-8', errors='replace')[:800]
                   raise SystemExit(f'GitHub API {method} {path} failed: {exc.code} {body_text}')
+
+          _, main = call('/branches/main')
+          current_main = main.get('commit', {}).get('sha') if isinstance(main, dict) else None
+          if current_main != expected_sha:
+              raise SystemExit(f'Refusing to certify stale/non-main SHA {expected_sha}; current main is {current_main}.')
 
           chosen = {}
           for attempt in range(1, 73):
@@ -117,29 +124,35 @@ jobs:
                   raise SystemExit(f'Timed out waiting for exact-release evidence: {state}')
               time.sleep(15)
 
-          backup_run = chosen['Encrypted Production Backup']
-          _, artifact_payload = call(f"/actions/runs/{backup_run['id']}/artifacts?per_page=100")
-          artifacts = artifact_payload.get('artifacts', []) if isinstance(artifact_payload, dict) else []
-          valid_artifacts = [
-              artifact for artifact in artifacts
-              if artifact.get('name', '').startswith('adam-financial-book-backup-')
-              and artifact.get('expired') is False
-              and artifact.get('workflow_run', {}).get('head_sha') == expected_sha
-          ]
-          if not valid_artifacts:
-              raise SystemExit('Encrypted backup workflow is green but no retained exact-SHA backup artifact was found.')
+          def exact_artifact(workflow_name, predicate, missing_message):
+              run = chosen[workflow_name]
+              _, payload = call(f"/actions/runs/{run['id']}/artifacts?per_page=100")
+              artifacts = payload.get('artifacts', []) if isinstance(payload, dict) else []
+              valid = [
+                  artifact for artifact in artifacts
+                  if predicate(artifact)
+                  and artifact.get('expired') is False
+                  and artifact.get('workflow_run', {}).get('head_sha') == expected_sha
+              ]
+              if not valid:
+                  raise SystemExit(missing_message)
+              return valid[0]
 
-          mobile_run = chosen['Real Device Mobile Certification']
-          _, mobile_artifact_payload = call(f"/actions/runs/{mobile_run['id']}/artifacts?per_page=100")
-          mobile_artifacts = mobile_artifact_payload.get('artifacts', []) if isinstance(mobile_artifact_payload, dict) else []
-          valid_mobile_artifacts = [
-              artifact for artifact in mobile_artifacts
-              if artifact.get('name') == f'real-device-mobile-certification-{expected_sha}'
-              and artifact.get('expired') is False
-              and artifact.get('workflow_run', {}).get('head_sha') == expected_sha
-          ]
-          if not valid_mobile_artifacts:
-              raise SystemExit('Real-device workflow is green but no retained exact-SHA mobile certification artifact was found.')
+          backup = exact_artifact(
+              'Encrypted Production Backup',
+              lambda artifact: artifact.get('name', '').startswith('adam-financial-book-backup-'),
+              'Encrypted backup workflow is green but no retained exact-SHA backup artifact was found.',
+          )
+          mobile = exact_artifact(
+              'Real Device Mobile Certification',
+              lambda artifact: artifact.get('name') == f'real-device-mobile-certification-{expected_sha}',
+              'Real-device workflow is green but no retained exact-SHA mobile certification artifact was found.',
+          )
+          final = exact_artifact(
+              'Final Production Certification',
+              lambda artifact: artifact.get('name') == f'final-production-certification-{expected_sha}',
+              'Final certification workflow is green but no retained exact-SHA final certification artifact was found.',
+          )
 
           encoded_tag = urllib.parse.quote(tag_name, safe='')
           status, existing = call(f'/git/ref/tags/{encoded_tag}', allow_404=True)
@@ -147,11 +160,7 @@ jobs:
               observed = existing.get('object', {}).get('sha') if isinstance(existing, dict) else None
               if observed != expected_sha:
                   raise SystemExit(f'Tag {tag_name} already exists at {observed}, expected {expected_sha}.')
-              print(json.dumps({
-                  'event': 'stable.release.tag.already_correct',
-                  'tag': tag_name,
-                  'sha': expected_sha,
-              }))
+              print(json.dumps({'event': 'stable.release.tag.already_correct', 'tag': tag_name, 'sha': expected_sha}))
               raise SystemExit(0)
 
           call('/git/refs', 'POST', {'ref': f'refs/tags/{tag_name}', 'sha': expected_sha})
@@ -165,9 +174,8 @@ jobs:
               'tag': tag_name,
               'sha': expected_sha,
               'evidenceRuns': {name: chosen[name]['id'] for name in sorted(required)},
-              'backupArtifactId': valid_artifacts[0].get('id'),
-              'backupArtifactDigest': valid_artifacts[0].get('digest'),
-              'realDeviceArtifactId': valid_mobile_artifacts[0].get('id'),
-              'realDeviceArtifactDigest': valid_mobile_artifacts[0].get('digest'),
+              'backupArtifactId': backup.get('id'),
+              'mobileArtifactId': mobile.get('id'),
+              'finalCertificationArtifactId': final.get('id'),
           }))
           PY
