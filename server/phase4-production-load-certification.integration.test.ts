@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import pg from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 const DATABASE_URL = process.env.TEST_DATABASE_URL;
 const PORT = 43194;
@@ -241,8 +241,13 @@ describe.skipIf(!DATABASE_URL)('Phase 4 production-scale load certification', ()
       [ownerId],
     );
 
-    await db('ANALYZE businesses; ANALYZE accounts; ANALYZE entries; ANALYZE effects; ANALYZE audit; ANALYZE attachments;');
+    await db('ANALYZE businesses; ANALYZE accounts; ANALYZE entries; ANALYZE effects; ANALYZE audit; ANALYZE attachments; CHECKPOINT;');
   }, 180_000);
+
+  beforeEach(async () => {
+    await stopServer();
+    await startServer();
+  }, 15_000);
 
   afterAll(async () => {
     await stopServer();
