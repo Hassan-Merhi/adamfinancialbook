@@ -12,7 +12,7 @@ describe('Phase 5 offline + reconnect certification', () => {
     expect(chaos).toContain("count(*) AS n FROM entries WHERE client_ref = $1");
     expect(chaos).toContain('OFFLINE_CONFLICT_STALE_BALANCE');
     expect(chaos).toContain('OFFLINE_CONFLICT_INSUFFICIENT_FUNDS');
-    expect(chaos).toContain('sourceBalance + aBalance + bBalance').toBeTruthy;
+    expect(chaos).toContain('sourceBalance + aBalance + bBalance');
   });
 
   it('keeps revoked and disabled offline sessions unable to post queued money', () => {
