@@ -35,6 +35,14 @@ describe('Phase 8 production observability', () => {
     expect(production).toContain("level !== 'critical'");
   });
 
+  it('actively evaluates degradation with low-frequency cooldown-protected alerts', () => {
+    expect(production).toContain('startProductionObservabilityMonitor');
+    expect(production).toContain('OBS_MONITOR_INTERVAL_MS');
+    expect(production).toContain("production.observability.critical");
+    expect(production).toContain("production.observability.degraded");
+    expect(operations).toContain('startProductionObservabilityMonitor();');
+  });
+
   it('covers offline/reconnect, attachments, live updates, backup and migrations', () => {
     expect(production).toContain("'offline_sync'");
     expect(production).toContain("'attachments'");
