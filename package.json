@@ -18,6 +18,7 @@
     "db:setup": "tsx server/setup-db.ts",
     "test": "vitest run",
     "test:integration": "vitest run --no-file-parallelism server/api.integration.test.ts server/security.integration.test.ts server/performance-scale.integration.test.ts server/translation.integration.test.ts server/recovery.integration.test.ts server/offline-sync.integration.test.ts server/offline-revisions.integration.test.ts server/offline-setup.integration.test.ts server/handoff-confirmation.integration.test.ts server/offline-attachments.integration.test.ts server/live-security.integration.test.ts",
+    "test:dr": "vitest run --no-file-parallelism server/recovery.integration.test.ts server/recovery-boot.integration.test.ts",
     "test:offline-chaos": "vitest run --no-file-parallelism server/offline-chaos.integration.test.ts",
     "test:p1-scale": "vitest run --no-file-parallelism server/p1-scale-certification.integration.test.ts",
     "test:p1-mobile": "node scripts/p1-mobile-browser-certification.mjs",
