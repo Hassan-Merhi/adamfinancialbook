@@ -1,5 +1,5 @@
 name: Encrypted Production Backup
-# P2 stable-release trigger: this comment intentionally forces one fresh exact-release backup for the tagged release.
+# Phase 9 release trigger: changes to final release governance force one fresh exact-release backup.
 
 on:
   schedule:
@@ -9,6 +9,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/encrypted-production-backup.yml'
+      - '.github/workflows/stable-release-tag.yml'
+      - '.github/workflows/final-production-certification.yml'
       - 'server/backup-export.ts'
       - 'server/backup-delivery.ts'
       - 'server/github-actions-oidc.ts'
