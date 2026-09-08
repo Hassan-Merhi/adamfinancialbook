@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { newId, pool, query } from './db.js';
 import { record, recordRequired } from './audit.js';
@@ -113,6 +114,19 @@ async function findByClientRef(clientRef: string): Promise<Entry | null> {
   return entryFromRow(row, effects.map(effectFromRow));
 }
 
+/** Reuse the already-held connection after a duplicate INSERT rolls back. */
+async function findByClientRefOn(client: PoolClient, clientRef: string): Promise<Entry | null> {
+  const entries = await client.query<DbRow>('SELECT * FROM entries WHERE client_ref = $1 LIMIT 1', [clientRef]);
+  const row = entries.rows[0];
+  if (!row) return null;
+  const effects = await client.query<DbRow>(
+    `SELECT type, target_id, from_business, to_business, delta
+       FROM effects WHERE entry_id = $1 AND active = true ORDER BY id`,
+    [row.id],
+  );
+  return entryFromRow(row, effects.rows.map(effectFromRow));
+}
+
 export async function savePostedEntry(
   input: EntryInput,
   catalog: Catalog,
@@ -174,7 +188,7 @@ export async function savePostedEntry(
   } catch (error) {
     await client.query('ROLLBACK');
     if ((error as { code?: string }).code === '23505' && input.clientRef) {
-      const seen = await findByClientRef(input.clientRef);
+      const seen = await findByClientRefOn(client, input.clientRef);
       if (seen) return seen;
     }
     throw error;
