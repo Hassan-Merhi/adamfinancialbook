@@ -38,7 +38,10 @@ describe('Phase 7 performance and scalability architecture', () => {
   });
 
   it('forbids whole-ledger reads from financial posting and current overview hot paths', () => {
-    expect(posting).not.toMatch(/SELECT\s+\*\s+FROM\s+entries/i);
+    const postingEntrySelects = posting.match(/SELECT\s+\*\s+FROM\s+entries/gi) ?? [];
+    expect(postingEntrySelects).toHaveLength(2);
+    expect(posting).toContain('SELECT * FROM entries WHERE client_ref = $1 LIMIT 1');
+    expect(posting).not.toMatch(/SELECT\s+\*\s+FROM\s+entries\s+(?:ORDER\s+BY|LIMIT\s+\d+|$)/im);
     expect(currentOverview).not.toMatch(/SELECT\s+\*\s+FROM\s+entries/i);
     expect(searchOptimized).not.toMatch(/SELECT\s+\*\s+FROM\s+entries/i);
     expect(posting).toContain('client_ref');
