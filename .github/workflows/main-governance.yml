@@ -1,0 +1,87 @@
+name: Main Governance
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  govern:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require PR branch to contain latest main
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          if ! git merge-base --is-ancestor "$BASE_SHA" "$HEAD_SHA"; then
+            echo "PR branch is behind main. Update the branch before merge." >&2
+            exit 1
+          fi
+
+      - name: Require main update to originate from merged PR
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+          FORCED_PUSH: ${{ github.event.forced }}
+        run: |
+          set -euo pipefail
+          if [ "$FORCED_PUSH" = "true" ]; then
+            echo "Forced updates to main are not certifiable." >&2
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          repository = os.environ['REPOSITORY']
+          sha = os.environ['COMMIT_SHA']
+          token = os.environ['GH_TOKEN']
+          request = urllib.request.Request(
+              f'https://api.github.com/repos/{repository}/commits/{sha}/pulls',
+              headers={
+                  'Authorization': f'Bearer {token}',
+                  'Accept': 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+                  'User-Agent': 'adam-financial-book-main-governance',
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              pulls = json.loads(response.read().decode('utf-8'))
+
+          merged_to_main = [
+              pr for pr in pulls
+              if pr.get('merged_at')
+              and pr.get('base', {}).get('ref') == 'main'
+          ]
+          if not merged_to_main:
+              raise SystemExit('main update is not associated with a merged PR targeting main')
+
+          print(json.dumps({
+              'event': 'main.governance.certified',
+              'sha': sha,
+              'pullRequests': [pr.get('number') for pr in merged_to_main],
+          }))
+          PY
