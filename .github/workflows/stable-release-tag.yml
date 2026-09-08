@@ -8,6 +8,7 @@ on:
       - '.github/workflows/encrypted-production-backup.yml'
       - '.github/workflows/disaster-recovery.yml'
       - '.github/workflows/real-device-mobile-certification.yml'
+      - '.github/workflows/production-scale-certification.yml'
 
 permissions:
   actions: read
@@ -51,6 +52,7 @@ jobs:
               'Encrypted Production Backup',
               'Disaster Recovery Certification',
               'Real Device Mobile Certification',
+              'Production Scale Certification',
           }
 
           headers = {
