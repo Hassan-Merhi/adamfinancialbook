@@ -1,5 +1,6 @@
 import { pool, query } from './db.js';
 import { operationsStatus } from './observability.js';
+import { fireOperationalAlert, logOperationalEvent } from './alerts.js';
 
 type HealthLevel = 'ok' | 'warn' | 'critical';
 
@@ -121,4 +122,39 @@ export async function productionObservabilitySnapshot() {
     events24h: base.events24h,
     poolCapacity: { max: Number(process.env.PGPOOL_MAX ?? 8), total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount },
   };
+}
+
+let productionMonitorStarted = false;
+
+export function startProductionObservabilityMonitor() {
+  if (productionMonitorStarted || process.env.NODE_ENV === 'test') return;
+  productionMonitorStarted = true;
+  const intervalMs = Math.max(60_000, Number(process.env.OBS_MONITOR_INTERVAL_MS ?? 300_000));
+
+  const check = async () => {
+    try {
+      const snapshot = await productionObservabilitySnapshot();
+      if (snapshot.level === 'ok') return;
+      const critical = snapshot.signals.filter((item) => item.level === 'critical');
+      const warnings = snapshot.signals.filter((item) => item.level === 'warn');
+      const detail = {
+        level: snapshot.level,
+        critical: critical.map((item) => ({ metric: item.metric, value: item.value, threshold: item.threshold })),
+        warnings: warnings.map((item) => ({ metric: item.metric, value: item.value, threshold: item.threshold })),
+      };
+      if (snapshot.level === 'critical') {
+        fireOperationalAlert('production.observability.critical', detail, 'critical', 15 * 60_000);
+      } else {
+        fireOperationalAlert('production.observability.degraded', detail, 'warn', 30 * 60_000);
+      }
+    } catch (error) {
+      logOperationalEvent('production.observability.check_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      }, 'error');
+    }
+  };
+
+  const timer = setInterval(() => { void check(); }, intervalMs);
+  timer.unref?.();
+  setTimeout(() => { void check(); }, Math.min(intervalMs, 30_000)).unref?.();
 }
