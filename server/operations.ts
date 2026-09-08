@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ownerOnly } from './auth.js';
 import { createEncryptedDatabaseBackup } from './backup-service.js';
 import { operationsStatus, recentOperationalEvents } from './observability.js';
+import { productionObservabilitySnapshot } from './production-observability.js';
 import { record } from './audit.js';
 
 const wrap = (fn: RequestHandler): RequestHandler =>
@@ -12,6 +13,11 @@ export const operationsRouter = Router();
 
 operationsRouter.get('/operations/status', ownerOnly, wrap(async (_req, res) => {
   res.json(await operationsStatus());
+}));
+
+operationsRouter.get('/operations/observability', ownerOnly, wrap(async (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(await productionObservabilitySnapshot());
 }));
 
 operationsRouter.get('/operations/events', ownerOnly, wrap(async (req, res) => {
