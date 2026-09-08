@@ -20,6 +20,17 @@ describe('Phase 1 main governance certification', () => {
     expect(workflow).toContain('Forced updates to main are not certifiable');
   });
 
+  it('couples governance to the Security workflow required by stable release', () => {
+    const security = read('.github/workflows/security.yml');
+    const release = read('.github/workflows/stable-release-tag.yml');
+
+    expect(security).toContain('main-governance:');
+    expect(security).toContain('name: main-governance');
+    expect(security).toContain('Reject uncertified direct or forced main updates');
+    expect(security).toContain("pr.get('merged_at')");
+    expect(release).toContain("'Security'");
+  });
+
   it('keeps critical repository paths under code ownership', () => {
     const owners = read('.github/CODEOWNERS');
 
