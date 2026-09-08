@@ -10,7 +10,7 @@ on:
       tag_name:
         description: Stable tag to create
         required: true
-        default: p10-99-stable
+        default: p11-100-stable
         type: string
 
 permissions:
@@ -60,6 +60,7 @@ jobs:
               'Production Observability Certification',
               'Final Production Certification',
               'Production Acceptance Certification',
+              'System Closure Certification',
           }
 
           headers = {
@@ -159,6 +160,11 @@ jobs:
               lambda artifact: artifact.get('name') == f'production-acceptance-certification-{expected_sha}',
               'Production acceptance workflow is green but no retained exact-SHA production acceptance artifact was found.',
           )
+          closure = exact_artifact(
+              'System Closure Certification',
+              lambda artifact: artifact.get('name') == f'system-closure-certification-{expected_sha}',
+              'System closure workflow is green but no retained exact-SHA closure artifact was found.',
+          )
 
           encoded_tag = urllib.parse.quote(tag_name, safe='')
           status, existing = call(f'/git/ref/tags/{encoded_tag}', allow_404=True)
@@ -184,5 +190,6 @@ jobs:
               'mobileArtifactId': mobile.get('id'),
               'finalCertificationArtifactId': final.get('id'),
               'productionAcceptanceArtifactId': acceptance.get('id'),
+              'systemClosureArtifactId': closure.get('id'),
           }))
           PY
