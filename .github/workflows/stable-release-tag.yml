@@ -9,6 +9,7 @@ on:
       - '.github/workflows/disaster-recovery.yml'
       - '.github/workflows/real-device-mobile-certification.yml'
       - '.github/workflows/production-scale-certification.yml'
+      - '.github/workflows/accounting-chaos-certification.yml'
 
 permissions:
   actions: read
@@ -53,6 +54,7 @@ jobs:
               'Disaster Recovery Certification',
               'Real Device Mobile Certification',
               'Production Scale Certification',
+              'Accounting Chaos Certification',
           }
 
           headers = {
