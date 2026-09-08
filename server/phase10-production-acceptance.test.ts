@@ -17,6 +17,17 @@ describe('Phase 10 production acceptance', () => {
     expect(workflow).toContain("release == expected");
   });
 
+  it('retries transient transport failures while waiting for the exact release', () => {
+    expect(workflow).toContain('import socket');
+    expect(workflow).toContain('urllib.error.URLError');
+    expect(workflow).toContain('TimeoutError');
+    expect(workflow).toContain('socket.timeout');
+    expect(workflow).toContain('def get(path, tolerate_transport=False):');
+    expect(workflow).toContain("get('/api/health/ready', tolerate_transport=True)");
+    expect(workflow).toContain("return 0, {}, f'transport error:");
+    expect(workflow).toContain('Production acceptance transport failure for {path}');
+  });
+
   it('requires production readiness, current migrations, current backups and zero DB waiters', () => {
     for (const required of [
       "ready.get('database') != 'ok'",
