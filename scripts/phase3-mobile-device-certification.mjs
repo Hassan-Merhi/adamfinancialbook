@@ -42,14 +42,25 @@ async function assertContained(page, label) {
 
 async function dispatchTouch(page, type, y) {
   return page.evaluate(({ type, y }) => {
-    const target = document.body;
-    const touch = new Touch({ identifier: 1, target, clientX: 120, clientY: y, screenX: 120, screenY: y, pageX: 120, pageY: y, radiusX: 8, radiusY: 8, force: 1 });
-    const event = new TouchEvent(type, {
-      bubbles: true,
-      cancelable: true,
-      touches: type === 'touchend' ? [] : [touch],
-      targetTouches: type === 'touchend' ? [] : [touch],
-      changedTouches: [touch],
+    // WebKit's Touch constructor is not constructible in Playwright's Linux
+    // runtime. The app only consumes touches.length/clientY and preventDefault,
+    // so use a normal cancelable Event with TouchEvent-compatible properties.
+    const point = {
+      identifier: 1,
+      target: document.body,
+      clientX: 120,
+      clientY: y,
+      screenX: 120,
+      screenY: y,
+      pageX: 120,
+      pageY: y,
+    };
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    const active = type === 'touchend' ? [] : [point];
+    Object.defineProperties(event, {
+      touches: { value: active },
+      targetTouches: { value: active },
+      changedTouches: { value: [point] },
     });
     document.dispatchEvent(event);
     return event.defaultPrevented;
