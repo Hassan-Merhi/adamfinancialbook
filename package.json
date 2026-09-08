@@ -25,6 +25,7 @@
     "test:phase5-chaos": "vitest run --no-file-parallelism server/phase5-accounting-chaos.integration.test.ts",
     "test:phase7-architecture": "vitest run server/phase7-performance-architecture.test.ts",
     "test:phase8-observability": "vitest run server/phase8-observability-certification.test.ts",
+    "test:phase9-final": "vitest run server/phase9-final-certification.test.ts",
     "test:p1-mobile": "node scripts/p1-mobile-browser-certification.mjs",
     "test:p2-ui": "node scripts/p2-ui-certification.mjs",
     "test:p3-mobile": "node scripts/phase3-mobile-device-certification.mjs",

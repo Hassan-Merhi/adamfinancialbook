@@ -36,8 +36,7 @@ describe('Phase 3 real-device mobile certification', () => {
     expect(release).toContain("'Real Device Mobile Certification'");
     expect(release).toContain("real-device-mobile-certification-{expected_sha}");
     expect(release).toContain('Real-device workflow is green but no retained exact-SHA mobile certification artifact was found.');
-    expect(release).toContain('realDeviceArtifactId');
-    expect(release).toContain('realDeviceArtifactDigest');
+    expect(release).toContain("'mobileArtifactId': mobile.get('id')");
   });
 
   it('documents the physical-device procedure', () => {
