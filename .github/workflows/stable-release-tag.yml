@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/stable-release-tag.yml'
       - '.github/workflows/encrypted-production-backup.yml'
+      - '.github/workflows/disaster-recovery.yml'
 
 permissions:
   actions: read
@@ -47,6 +48,7 @@ jobs:
               'Security',
               'Production Deploy Certification',
               'Encrypted Production Backup',
+              'Disaster Recovery Certification',
           }
 
           headers = {
