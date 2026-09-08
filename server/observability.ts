@@ -9,13 +9,14 @@ interface RequestMetricState {
   requests: number;
   responses4xx: number;
   responses5xx: number;
+  clientAborts: number;
   totalDurationMs: number;
   maxDurationMs: number;
   recentDurations: number[];
 }
 
 const requestMetrics: RequestMetricState = {
-  startedAt: Date.now(), requests: 0, responses4xx: 0, responses5xx: 0,
+  startedAt: Date.now(), requests: 0, responses4xx: 0, responses5xx: 0, clientAborts: 0,
   totalDurationMs: 0, maxDurationMs: 0, recentDurations: [],
 };
 const RECENT_DURATION_LIMIT = 500;
@@ -34,8 +35,10 @@ function routeName(path: string) {
 export const requestTelemetry: RequestHandler = (req, res, next) => {
   const started = process.hrtime.bigint();
   const requestId = req.get('x-request-id')?.slice(0, 80) || newId('req');
+  let finished = false;
   res.setHeader('X-Request-Id', requestId);
   res.on('finish', () => {
+    finished = true;
     const durationMs = Number(process.hrtime.bigint() - started) / 1_000_000;
     requestMetrics.requests += 1;
     requestMetrics.totalDurationMs += durationMs;
@@ -60,6 +63,19 @@ export const requestTelemetry: RequestHandler = (req, res, next) => {
     } else if (durationMs >= Number(process.env.SLOW_REQUEST_MS ?? 2_000)) {
       logOperationalEvent('http.request.slow', detail, 'warn');
     }
+  });
+  res.on('close', () => {
+    if (finished || res.writableEnded) return;
+    requestMetrics.clientAborts += 1;
+    const durationMs = Number(process.hrtime.bigint() - started) / 1_000_000;
+    logOperationalEvent('http.client_aborted', {
+      requestId,
+      method: req.method,
+      path: routeName(req.path),
+      internalStatus: 499,
+      durationMs: Math.round(durationMs * 10) / 10,
+      clientAbortsSinceStart: requestMetrics.clientAborts,
+    }, 'warn');
   });
   next();
 };
@@ -162,6 +178,7 @@ export async function operationsStatus() {
     requests: {
       since: new Date(requestMetrics.startedAt).toISOString(), total: requestMetrics.requests,
       responses4xx: requestMetrics.responses4xx, responses5xx: requestMetrics.responses5xx,
+      clientAborts: requestMetrics.clientAborts,
       averageMs: requestMetrics.requests ? Math.round((requestMetrics.totalDurationMs / requestMetrics.requests) * 10) / 10 : 0,
       p95Ms: percentile(requestMetrics.recentDurations, 0.95),
       maxMs: Math.round(requestMetrics.maxDurationMs * 10) / 10,
