@@ -97,14 +97,13 @@ jobs:
           if ready.get('currentMigration') != ready.get('latestMigration'):
               raise SystemExit(f'Current/latest migration mismatch: {ready}')
           if ready.get('backups') != 'current':
-              raise SystemExit(f'Exact-release production backup is not current: {ready}')
+              raise SystemExit(f'Production backup is not current: {ready}')
           pool = ready.get('pool') or {}
           if int(pool.get('waiting', -1)) != 0:
               raise SystemExit(f'Database pool has waiting clients: {pool}')
           if int(pool.get('total', 0)) > int(pool.get('max', 0)):
               raise SystemExit(f'Database pool exceeds configured max: {pool}')
 
-          # Prove the public liveness surface is healthy and uncached.
           live_status, live_headers, live_body = get('/api/health/live')
           try:
               live = json.loads(live_body)
@@ -115,7 +114,6 @@ jobs:
           if 'no-store' not in live_headers.get('cache-control', '').lower():
               raise SystemExit('Liveness response is missing Cache-Control: no-store.')
 
-          # Owner/accounting surfaces must remain closed to anonymous traffic.
           protected = {}
           for path in ('/api/overview', '/api/operations/observability'):
               status, _, body = get(path)
@@ -123,7 +121,6 @@ jobs:
               if status not in (401, 403):
                   raise SystemExit(f'Protected production surface {path} unexpectedly returned {status}: {body[:300]}')
 
-          # Require the exact release to remain healthy across repeated probes.
           stable_samples = []
           for _ in range(3):
               status, _, body = get('/api/health/ready')
@@ -166,7 +163,7 @@ jobs:
           PY
 
       - name: Retain exact-SHA production acceptance evidence
-        uses: actions/upload-artifact@043fb46e7f5080e8e1f3cc696e2d5fc9c1fe4c15
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: production-acceptance-certification-${{ github.sha }}
           path: production-acceptance-certification.json
