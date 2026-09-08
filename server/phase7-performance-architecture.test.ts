@@ -55,15 +55,15 @@ describe('Phase 7 performance and scalability architecture', () => {
     ]) expect(indexes).toContain(required);
   });
 
-  it('mounts optimized current-overview and search routers before legacy performance fallbacks', () => {
-    const current = start.indexOf('currentOverviewRouter');
-    const search = start.indexOf('optimizedSearchRouter');
-    const legacy = start.indexOf('performanceRouter');
-    expect(current).toBeGreaterThan(-1);
-    expect(search).toBeGreaterThan(-1);
-    expect(legacy).toBeGreaterThan(-1);
-    expect(current).toBeLessThan(legacy);
-    expect(search).toBeLessThan(legacy);
+  it('mounts optimized current-overview and search routers before the legacy server is imported', () => {
+    const currentMount = start.indexOf('protectedSecurityRouter.use(currentOverviewRouter)');
+    const searchMount = start.indexOf('protectedSecurityRouter.use(optimizedSearchRouter)');
+    const legacyImport = start.indexOf("await import('./index.js')");
+    expect(currentMount).toBeGreaterThan(-1);
+    expect(searchMount).toBeGreaterThan(-1);
+    expect(legacyImport).toBeGreaterThan(-1);
+    expect(currentMount).toBeLessThan(legacyImport);
+    expect(searchMount).toBeLessThan(legacyImport);
   });
 
   it('does not reintroduce interval polling in the main application data layer', () => {
