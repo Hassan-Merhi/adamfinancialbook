@@ -52,6 +52,9 @@ function emit(target: Window, detail: OfflineAutoSyncResult): void {
  * retry timer is already scheduled. Normal browser `online` handling remains
  * owned by App.tsx/offline-attachments.ts so one outage does not get duplicate
  * explicit recovery work from this bridge.
+ *
+ * The two queues intentionally recover independently: a receipt-storage error
+ * must never make a successfully posted financial entry look like it failed.
  */
 export function installOfflineLiveRecovery(target: Window = window): () => void {
   const recover = (event: Event) => {
@@ -61,17 +64,23 @@ export function installOfflineLiveRecovery(target: Window = window): () => void 
     const work = durableRecoveryWork(detail.reason, outbox.all().length, target.navigator.onLine);
     if (!work.ledger && !work.attachments) return;
 
-    const ledger = work.ledger ? flushOutbox(sendOfflineQueued) : Promise.resolve(0);
-    const attachments = work.attachments ? flushOfflineAttachments() : Promise.resolve(0);
+    if (work.ledger) {
+      void flushOutbox(sendOfflineQueued)
+        .then((sent) => {
+          if (sent) emit(target, { sent, error: null });
+        })
+        .catch((error) => emit(target, {
+          sent: 0,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+    }
 
-    void Promise.all([ledger, attachments])
-      .then(([sent]) => {
-        if (sent) emit(target, { sent, error: null });
-      })
-      .catch((error) => emit(target, {
-        sent: 0,
-        error: error instanceof Error ? error.message : String(error),
-      }));
+    if (work.attachments) {
+      // Attachment attempt() persists retry/failure state itself. Catch the
+      // outer storage failure here so it cannot become an unhandled rejection
+      // or contaminate the ledger sync result.
+      void flushOfflineAttachments().catch(() => undefined);
+    }
   };
 
   target.addEventListener(LIVE_RECOVERY_EVENT, recover);
