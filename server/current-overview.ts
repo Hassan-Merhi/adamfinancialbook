@@ -1,18 +1,12 @@
 import { Router, type RequestHandler } from 'express';
 import { query } from './db.js';
+import { getCurrentBalanceEffects, type CachedAggregatedEffect } from './current-balance-cache.js';
 import type { Effect, Entry } from '../shared/types.js';
 
 const router = Router();
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 type DbRow = Record<string, any>;
-
-type AggregatedEffect = {
-  type: string;
-  target_id: string | null;
-  from_business: string | null;
-  to_business: string | null;
-  delta: number;
-};
+type AggregatedEffect = CachedAggregatedEffect;
 
 const wrap = (fn: RequestHandler): RequestHandler =>
   (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -185,13 +179,7 @@ router.get('/overview', wrap(async (req, res, next) => {
     query<DbRow>('SELECT id, name, scope, business_id FROM projects ORDER BY created_at'),
     query<DbRow>('SELECT id, name, role, business_id, kind, opening, salary FROM people ORDER BY created_at'),
     query<DbRow>('SELECT id, from_business, to_business, opening FROM loans'),
-    query<AggregatedEffect>(
-      `SELECT type, target_id, from_business, to_business,
-              SUM(delta)::double precision AS delta
-         FROM effects
-        WHERE active = true
-        GROUP BY type, target_id, from_business, to_business`,
-    ),
+    getCurrentBalanceEffects(),
     query<{ project_id: string; amount: number }>(
       `SELECT project_id, COALESCE(SUM(amount), 0)::double precision AS amount
          FROM project_receipts

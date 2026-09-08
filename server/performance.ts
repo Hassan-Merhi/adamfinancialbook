@@ -154,35 +154,85 @@ interface AggregatedEffect {
   delta: number;
 }
 
-async function loadBalanceSnapshot(on: string | null, allowedAccounts: string[] | null, catalogs: {
-  accounts: DbRow[];
-  projects: DbRow[];
-  people: DbRow[];
-  loans: DbRow[];
-}) {
-  const effectRows: AggregatedEffect[] = allowedAccounts === null
-    ? await query<AggregatedEffect>(
+// Coalesce only requests that are simultaneously calculating the exact same
+// balance snapshot. The promise is removed as soon as it settles, so a later
+// financial mutation can never be hidden behind a stale cached balance.
+const inFlightBalanceEffects = new Map<string, Promise<AggregatedEffect[]>>();
+
+async function aggregateBalanceEffects(on: string | null, allowedAccounts: string[] | null): Promise<AggregatedEffect[]> {
+  if (allowedAccounts !== null && allowedAccounts.length === 0) return [];
+  const key = `${on ?? 'current'}|${allowedAccounts === null ? 'owner' : allowedAccounts.join(',')}`;
+  const existing = inFlightBalanceEffects.get(key);
+  if (existing) return existing;
+
+  let pending: Promise<AggregatedEffect[]>;
+  if (on === null && allowedAccounts === null) {
+    // Active effects are the canonical current ledger. Void/correction paths
+    // supersede their effects transactionally, so current balances do not need
+    // to rejoin every effect to every entry merely to rediscover that fact.
+    pending = query<AggregatedEffect>(
+      `SELECT type, target_id, from_business, to_business,
+              SUM(delta)::double precision AS delta
+         FROM effects
+        WHERE active = true
+        GROUP BY type, target_id, from_business, to_business`,
+    );
+  } else if (on === null && allowedAccounts !== null) {
+    pending = query<AggregatedEffect>(
+      `SELECT type, target_id, from_business, to_business,
+              SUM(delta)::double precision AS delta
+         FROM effects
+        WHERE active = true
+          AND type = 'account'
+          AND target_id = ANY($1::text[])
+        GROUP BY type, target_id, from_business, to_business`,
+      [allowedAccounts],
+    );
+  } else if (allowedAccounts === null) {
+    // Historical snapshots still require the entry date, so preserve the
+    // dated join exactly for as-of reporting.
+    pending = query<AggregatedEffect>(
       `SELECT ef.type, ef.target_id, ef.from_business, ef.to_business,
               SUM(ef.delta)::double precision AS delta
          FROM effects ef
          JOIN entries e ON e.id = ef.entry_id
         WHERE ef.active = true
           AND e.voided = false
-          AND ($1::date IS NULL OR e.occurred_on <= $1::date)
-        GROUP BY ef.type, ef.target_id, ef.from_business, ef.to_business`, [on])
-    : allowedAccounts.length
-      ? await query<AggregatedEffect>(
-        `SELECT ef.type, ef.target_id, ef.from_business, ef.to_business,
-                SUM(ef.delta)::double precision AS delta
-           FROM effects ef
-           JOIN entries e ON e.id = ef.entry_id
-          WHERE ef.active = true
-            AND e.voided = false
-            AND ef.type = 'account'
-            AND ef.target_id = ANY($2::text[])
-            AND ($1::date IS NULL OR e.occurred_on <= $1::date)
-          GROUP BY ef.type, ef.target_id, ef.from_business, ef.to_business`, [on, allowedAccounts])
-      : [];
+          AND e.occurred_on <= $1::date
+        GROUP BY ef.type, ef.target_id, ef.from_business, ef.to_business`,
+      [on],
+    );
+  } else {
+    pending = query<AggregatedEffect>(
+      `SELECT ef.type, ef.target_id, ef.from_business, ef.to_business,
+              SUM(ef.delta)::double precision AS delta
+         FROM effects ef
+         JOIN entries e ON e.id = ef.entry_id
+        WHERE ef.active = true
+          AND e.voided = false
+          AND ef.type = 'account'
+          AND ef.target_id = ANY($2::text[])
+          AND e.occurred_on <= $1::date
+        GROUP BY ef.type, ef.target_id, ef.from_business, ef.to_business`,
+      [on, allowedAccounts],
+    );
+  }
+
+  inFlightBalanceEffects.set(key, pending);
+  try {
+    return await pending;
+  } finally {
+    if (inFlightBalanceEffects.get(key) === pending) inFlightBalanceEffects.delete(key);
+  }
+}
+
+async function loadBalanceSnapshot(on: string | null, allowedAccounts: string[] | null, catalogs: {
+  accounts: DbRow[];
+  projects: DbRow[];
+  people: DbRow[];
+  loans: DbRow[];
+}) {
+  const effectRows = await aggregateBalanceEffects(on, allowedAccounts);
 
   const accountMovement = new Map<string, number>();
   const personMovement = new Map<string, number>();

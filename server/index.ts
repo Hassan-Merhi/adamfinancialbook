@@ -19,6 +19,7 @@ import {
 } from './security-gate.js';
 import { dayReport } from './report.js';
 import { delegationGate } from './delegation.js';
+import { postingRouter } from './posting.js';
 import { performanceRouter } from './performance.js';
 import { fileLibraryRouter } from './file-library.js';
 import {
@@ -82,6 +83,9 @@ app.use('/api', (req, res, next) => {
 
 app.use('/api', protectedSecurityRouter);
 app.use('/api', delegationGate);
+// Financial posting is mounted before the legacy broad-book route so writes
+// never deserialize the entire ledger just to compute one entry's effects.
+app.use('/api', postingRouter);
 app.use('/api', performanceRouter);
 app.use('/api', fileLibraryRouter);
 
@@ -262,6 +266,8 @@ const entryInput = z.object({
   clientRef: z.string().max(80).nullish(),
 });
 
+// Legacy fallback retained for compatibility. postingRouter above owns this path
+// in normal operation and prevents the expensive full-ledger loads below.
 app.post('/api/entries', wrap(async (req, res) => {
   const input = entryInput.parse(req.body);
   const book = await loadBook();

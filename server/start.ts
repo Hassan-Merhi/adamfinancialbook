@@ -32,6 +32,13 @@ try {
   throw error;
 }
 
+// Prime the canonical current balance aggregate before the HTTP listener opens.
+// Subsequent requests validate the snapshot against the latest committed audit
+// id, so financial writes invalidate it without polling or a stale TTL window.
+const { warmCurrentBalanceEffects } = await import('./current-balance-cache.js');
+await warmCurrentBalanceEffects();
+logOperationalEvent('current-balance-cache.warmed', {});
+
 const [
   { delegationGate },
   { expenseReviewRouter },
@@ -49,6 +56,7 @@ const [
   { offlineAttachmentRouter },
   { accountManagementRouter },
   { currentOverviewRouter },
+  { optimizedSearchRouter },
 ] = await Promise.all([
   import('./delegation.js'),
   import('./expense-review.js'),
@@ -66,6 +74,7 @@ const [
   import('./offline-attachments.js'),
   import('./account-management.js'),
   import('./current-overview.js'),
+  import('./search-optimized.js'),
 ]);
 
 publicSecurityRouter.use(healthRouter);
@@ -84,9 +93,12 @@ publicSecurityRouter.use(liveSecuritySessionObserver);
 // above that gate only so they can attach before protected routes finish; failed
 // or unauthenticated responses never publish because their status is >= 400.
 protectedSecurityRouter.use(liveUpdatesRouter);
-// Current owner overviews can use active effects directly: corrections and voids
-// already supersede/deactivate old effects. Mount this before the legacy
-// performance router; delegated and historical requests deliberately fall through.
+// High-volume search needs to stop at the requested recent page instead of
+// sorting every historical text match. Mount this before the legacy performance
+// router so authenticated search requests use the bounded indexed path.
+protectedSecurityRouter.use(optimizedSearchRouter);
+// Current owner overviews use the versioned active-effect aggregate. Delegated
+// and historical requests deliberately fall through to their existing paths.
 protectedSecurityRouter.use(currentOverviewRouter);
 // Confirmation is a financial write too: intercept it before the legacy
 // delegation route so the balance re-check, ledger posting, transfer status,
