@@ -25,6 +25,7 @@ healthRouter.get('/health/ready', wrap(async (_req, res) => {
     backups: state.backups,
     latestBackupAt: state.latestBackupAt,
     backupAgeHours: state.backupAgeHours,
+    pool: state.pool,
     ...(state.detail ? { detail: state.detail } : {}),
   });
 }));
