@@ -95,25 +95,42 @@ async function certifyPullRefresh(page) {
 }
 
 async function certifyScrolledPullStaysNative(page) {
+  // The app shell intentionally fits some clean CI fixtures inside the viewport,
+  // so physical scrolling cannot always be created by adding content: the shell
+  // may own overflow. The production handler's contract is specifically based on
+  // window.scrollY. Override that read deterministically for this negative test
+  // instead of coupling the assertion to incidental fixture height/layout.
+  const canOverrideScrollY = await page.evaluate(() => {
+    const own = Object.getOwnPropertyDescriptor(window, 'scrollY');
+    const proto = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window), 'scrollY');
+    window.__phase3OriginalScrollYDescriptor = own ?? null;
+    window.__phase3HadOwnScrollY = Boolean(own);
+    try {
+      Object.defineProperty(window, 'scrollY', { configurable: true, get: () => 240 });
+      return window.scrollY === 240;
+    } catch {
+      if (!own && proto?.get) return false;
+      return false;
+    }
+  });
+  assert.equal(canOverrideScrollY, true, 'could not simulate a nonzero mobile scroll position');
+
   await page.evaluate(() => {
-    const spacer = document.createElement('div');
-    spacer.id = 'phase3-scroll-spacer';
-    spacer.style.height = '2200px';
-    spacer.setAttribute('aria-hidden', 'true');
-    document.body.appendChild(spacer);
-    scrollTo(0, 240);
     window.__phase3ScrolledPull = [];
     window.addEventListener('book:live-mutation', (event) => window.__phase3ScrolledPull.push(event.detail));
   });
-  assert.ok(await page.evaluate(() => scrollY > 0), 'could not create a nonzero mobile scroll position');
   await dispatchTouch(page, 'touchstart', 80);
   assert.equal(await dispatchTouch(page, 'touchmove', 260), false, 'pull-to-refresh hijacked a gesture away from scroll top');
   await dispatchTouch(page, 'touchend', 260);
   await page.waitForTimeout(300);
   assert.equal(await page.evaluate(() => window.__phase3ScrolledPull.length), 0, 'scrolled pull incorrectly triggered refresh');
+
   await page.evaluate(() => {
-    document.getElementById('phase3-scroll-spacer')?.remove();
-    scrollTo(0, 0);
+    const original = window.__phase3OriginalScrollYDescriptor;
+    if (window.__phase3HadOwnScrollY && original) Object.defineProperty(window, 'scrollY', original);
+    else delete window.scrollY;
+    delete window.__phase3OriginalScrollYDescriptor;
+    delete window.__phase3HadOwnScrollY;
   });
 }
 
