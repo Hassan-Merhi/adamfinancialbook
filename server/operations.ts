@@ -3,11 +3,13 @@ import { z } from 'zod';
 import { ownerOnly } from './auth.js';
 import { createEncryptedDatabaseBackup } from './backup-service.js';
 import { operationsStatus, recentOperationalEvents } from './observability.js';
-import { productionObservabilitySnapshot } from './production-observability.js';
+import { productionObservabilitySnapshot, startProductionObservabilityMonitor } from './production-observability.js';
 import { record } from './audit.js';
 
 const wrap = (fn: RequestHandler): RequestHandler =>
   (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+startProductionObservabilityMonitor();
 
 export const operationsRouter = Router();
 
