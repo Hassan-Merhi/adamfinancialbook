@@ -77,7 +77,7 @@ jobs:
           console.log(JSON.stringify(evidence));
           NODE
       - name: Retain exact-SHA final certification evidence
-        uses: actions/upload-artifact@043fb46e7f5080e8e1f3cc696e2d5fc9c1fe4c15
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: final-production-certification-${{ github.sha }}
           path: final-production-certification.json
