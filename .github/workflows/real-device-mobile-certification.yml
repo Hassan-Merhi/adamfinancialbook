@@ -199,7 +199,7 @@ jobs:
           PY
 
       - name: Retain certification evidence
-        uses: actions/upload-artifact@043fb46e7f5080e8e1f3cc696e2d5fc9c1fe4c15 # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: real-device-mobile-certification-${{ inputs.target_sha }}
           path: real-device-mobile-certification.json
