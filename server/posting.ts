@@ -86,7 +86,7 @@ export async function loadPostingCatalog(): Promise<Catalog> {
     query<DbRow>('SELECT id, from_business, to_business, opening FROM loans'),
   ]);
   return {
-    businesses,
+    businesses: businesses.map((b) => ({ id: String(b.id), name: String(b.name) })),
     accounts: accounts.map((a) => ({ id: a.id, name: a.name, businessId: a.business_id, opening: Number(a.opening) })),
     projects: projects.map((p) => ({ id: p.id, name: p.name, scope: p.scope, businessId: p.business_id })),
     receipts: receipts.map((r) => ({
