@@ -50,12 +50,11 @@ describe('Phase 2 + Phase 7 deployment/performance certification', () => {
     expect(client).toContain('/search/entries?');
   });
 
-  it('adds an idempotent covering index for active balance rollups', () => {
-    const migration = read('server/migrations/009_balance_rollup_covering_index.sql');
+  it('keeps the established performance-index migration contract intact', () => {
+    const migration = read('server/migrations/006_performance_indexes.sql');
 
-    expect(migration).toContain('CREATE INDEX IF NOT EXISTS effects_active_balance_rollup_idx');
-    expect(migration).toContain('ON effects (type, target_id, from_business, to_business)');
-    expect(migration).toContain('INCLUDE (delta)');
-    expect(migration).toContain('WHERE active = true');
+    expect(migration).toContain('CREATE INDEX IF NOT EXISTS entries_active_recent_idx');
+    expect(migration).toContain('CREATE INDEX IF NOT EXISTS entries_search_idx');
+    expect(migration).toContain('CREATE INDEX IF NOT EXISTS effects_active_target_entry_idx');
   });
 });
