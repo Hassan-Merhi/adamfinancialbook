@@ -9,7 +9,7 @@ describe('Phase 5 accounting chaos certification contract', () => {
   it('keeps the destructive accounting race scenarios', () => {
     const test = read('server/phase5-accounting-chaos.integration.test.ts');
     expect(test).toContain('deduplicates a 40-request financial retry storm');
-    expect(test).toContain('create → correct → correct → void');
+    expect(test).toContain('create → correct → locked second correction → void');
     expect(test).toContain('serializes concurrent corrections');
     expect(test).toContain('correction racing void');
     expect(test).toContain('rejects a stale offline spend');
