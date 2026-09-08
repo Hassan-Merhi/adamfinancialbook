@@ -1,0 +1,10 @@
+# Repository-wide ownership. On plans that support branch protection, require
+# CODEOWNER review on main so workflow/release/security changes cannot bypass review.
+* @Hassan-Merhi
+
+# Critical release and security controls.
+/.github/workflows/ @Hassan-Merhi
+/server/security* @Hassan-Merhi
+/server/backup* @Hassan-Merhi
+/server/restore* @Hassan-Merhi
+/server/migrations/ @Hassan-Merhi
