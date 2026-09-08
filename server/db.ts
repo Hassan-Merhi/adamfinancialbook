@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { randomBytes } from 'node:crypto';
 import { TLSSocket } from 'node:tls';
 import pg from 'pg';
-import { fireOperationalAlert } from './alerts.js';
+import { fireOperationalAlert, logOperationalEvent } from './alerts.js';
 
 // NUMERIC comes back as a string by default; this book only holds money at a
 // scale where a JS number is exact to the cent, so read them as numbers.
@@ -39,14 +39,11 @@ pool.on('error', (err) => {
   fireOperationalAlert('database.connection.dropped', { error: err.message }, 'critical');
 });
 
-/**
- * Asking for TLS is not the same as getting it, so we look at our own socket.
- */
+/** Asking for TLS is not the same as getting it, so we look at our own socket. */
 if (tls !== 'off') {
   const client = await pool.connect();
   const socket = (client as unknown as { connection?: { stream?: unknown } }).connection?.stream;
   client.release();
-
   if (socket && !(socket instanceof TLSSocket)) {
     await pool.end();
     throw new Error(
@@ -56,11 +53,33 @@ if (tls !== 'off') {
   if (!socket) console.warn('Could not confirm the database connection is encrypted.');
 }
 
+function queryLabel(text: string): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  const match = normalized.match(/^(SELECT|INSERT|UPDATE|DELETE|WITH)\b.*?\b(FROM|INTO|UPDATE)\s+([a-zA-Z0-9_]+)/i);
+  if (match) return `${match[1].toUpperCase()}:${match[3].toLowerCase()}`;
+  return normalized.split(' ').slice(0, 3).join(' ').slice(0, 80);
+}
+
 // Schema changes do not belong in this module. server/start.ts runs the ordered,
 // checksum-verified migration system before the HTTP server is imported.
 export async function query<T = any>(text: string, params: unknown[] = []): Promise<T[]> {
-  const res = await pool.query(text, params);
-  return res.rows as T[];
+  const started = process.hrtime.bigint();
+  try {
+    const res = await pool.query(text, params);
+    return res.rows as T[];
+  } finally {
+    const durationMs = Number(process.hrtime.bigint() - started) / 1_000_000;
+    const thresholdMs = Number(process.env.SLOW_SQL_MS ?? 750);
+    if (durationMs >= thresholdMs) {
+      logOperationalEvent('database.query.slow', {
+        query: queryLabel(text),
+        durationMs: Math.round(durationMs * 10) / 10,
+        poolTotal: pool.totalCount,
+        poolIdle: pool.idleCount,
+        poolWaiting: pool.waitingCount,
+      }, durationMs >= thresholdMs * 4 ? 'error' : 'warn');
+    }
+  }
 }
 
 export function newId(prefix: string): string {
