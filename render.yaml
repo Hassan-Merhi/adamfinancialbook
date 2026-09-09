@@ -2,6 +2,7 @@
 # The application database lives on Neon; Render owns the web process and operational cron jobs.
 # Nightly encrypted database backups are stored off-site by GitHub Actions using
 # short-lived OIDC identity; no SMTP transport or database credential is copied there.
+# Redeploy trigger after restoring Render repository access on 2026-09-09.
 services:
   - type: web
     name: adam-financial-book
