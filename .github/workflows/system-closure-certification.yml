@@ -1,0 +1,183 @@
+name: System Closure Certification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: system-closure-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: certify-system-closure-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Certify Phase 11 closure contract
+        run: npm run test:phase11-closure
+
+  closure:
+    name: certify-exact-sha-system-closure
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      EXPECTED_SHA: ${{ github.sha }}
+      REPOSITORY: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Require all exact-SHA release and production evidence
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.request
+          from datetime import datetime, timezone
+
+          repository = os.environ['REPOSITORY']
+          expected_sha = os.environ['EXPECTED_SHA']
+          token = os.environ['GH_TOKEN']
+          api = f'https://api.github.com/repos/{repository}'
+          required = {
+              'CI',
+              'Security',
+              'Main Governance',
+              'Production Deploy Certification',
+              'Encrypted Production Backup',
+              'Disaster Recovery Certification',
+              'Real Device Mobile Certification',
+              'Production Scale Certification',
+              'Accounting Chaos Certification',
+              'Performance Architecture Certification',
+              'Production Observability Certification',
+              'Final Production Certification',
+              'Production Acceptance Certification',
+          }
+          headers = {
+              'Authorization': f'Bearer {token}',
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+              'User-Agent': 'adam-financial-book-system-closure',
+          }
+
+          def call(path):
+              request = urllib.request.Request(api + path, method='GET', headers=headers)
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      raw = response.read().decode('utf-8')
+                      return json.loads(raw) if raw else None
+              except urllib.error.HTTPError as exc:
+                  body = exc.read().decode('utf-8', errors='replace')[:800]
+                  raise SystemExit(f'GitHub API GET {path} failed: {exc.code} {body}')
+
+          main = call('/branches/main')
+          current_main = main.get('commit', {}).get('sha') if isinstance(main, dict) else None
+          if current_main != expected_sha:
+              raise SystemExit(f'Refusing stale closure SHA {expected_sha}; current main is {current_main}.')
+
+          chosen = {}
+          for attempt in range(1, 161):
+              payload = call(f'/actions/runs?head_sha={expected_sha}&per_page=100')
+              runs = payload.get('workflow_runs', []) if isinstance(payload, dict) else []
+              chosen = {}
+              for name in required:
+                  matches = [run for run in runs if run.get('name') == name and run.get('head_sha') == expected_sha]
+                  if matches:
+                      matches.sort(key=lambda item: item.get('created_at', ''), reverse=True)
+                      chosen[name] = matches[0]
+
+              bad = {
+                  name: run.get('conclusion')
+                  for name, run in chosen.items()
+                  if run.get('status') == 'completed' and run.get('conclusion') not in (None, 'success')
+              }
+              if bad:
+                  raise SystemExit(f'Closure evidence failed for {expected_sha}: {bad}')
+
+              if required.issubset(chosen) and all(
+                  chosen[name].get('status') == 'completed' and chosen[name].get('conclusion') == 'success'
+                  for name in required
+              ):
+                  break
+
+              if attempt == 160:
+                  state = {
+                      name: {
+                          'status': chosen.get(name, {}).get('status'),
+                          'conclusion': chosen.get(name, {}).get('conclusion'),
+                          'runId': chosen.get(name, {}).get('id'),
+                      }
+                      for name in sorted(required)
+                  }
+                  raise SystemExit(f'Timed out waiting for closure evidence: {state}')
+              time.sleep(15)
+
+          def artifact(workflow_name, exact_name=None, prefix=None):
+              run = chosen[workflow_name]
+              payload = call(f"/actions/runs/{run['id']}/artifacts?per_page=100")
+              artifacts = payload.get('artifacts', []) if isinstance(payload, dict) else []
+              valid = []
+              for item in artifacts:
+                  name = item.get('name', '')
+                  if exact_name is not None and name != exact_name:
+                      continue
+                  if prefix is not None and not name.startswith(prefix):
+                      continue
+                  if item.get('expired') is not False:
+                      continue
+                  if item.get('workflow_run', {}).get('head_sha') != expected_sha:
+                      continue
+                  valid.append(item)
+              if not valid:
+                  raise SystemExit(f'Missing retained exact-SHA artifact for {workflow_name}.')
+              return valid[0]
+
+          evidence_artifacts = {
+              'backup': artifact('Encrypted Production Backup', prefix='adam-financial-book-backup-').get('id'),
+              'mobile': artifact('Real Device Mobile Certification', exact_name=f'real-device-mobile-certification-{expected_sha}').get('id'),
+              'finalProduction': artifact('Final Production Certification', exact_name=f'final-production-certification-{expected_sha}').get('id'),
+              'productionAcceptance': artifact('Production Acceptance Certification', exact_name=f'production-acceptance-certification-{expected_sha}').get('id'),
+          }
+          evidence = {
+              'schema': 1,
+              'event': 'system.closure.certified',
+              'score': '100/100',
+              'sha': expected_sha,
+              'certifiedAt': datetime.now(timezone.utc).isoformat(),
+              'requiredWorkflows': {name: chosen[name]['id'] for name in sorted(required)},
+              'retainedArtifacts': evidence_artifacts,
+              'boundaries': {
+                  'physicalMobileEvidenceRequired': True,
+                  'productionAcceptanceRequired': True,
+                  'financialMutationByClosureWorkflow': False,
+              },
+          }
+          with open('system-closure-certification.json', 'w', encoding='utf-8') as handle:
+              json.dump(evidence, handle, indent=2, sort_keys=True)
+          print(json.dumps(evidence))
+          PY
+
+      - name: Retain exact-SHA system closure evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: system-closure-certification-${{ github.sha }}
+          path: system-closure-certification.json
+          if-no-files-found: error
+          retention-days: 90
