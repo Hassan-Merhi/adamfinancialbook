@@ -82,9 +82,19 @@ export async function readiness(): Promise<ReadinessResult> {
         pool: poolState,
       };
     }
-    const backupOk = backup.backups === 'current' || backup.backups === 'bootstrap';
+
+    // Readiness answers one question: can this exact process safely receive
+    // traffic? Database connectivity and migration state are deployment-critical.
+    // Off-site backup freshness is intentionally reported alongside readiness but
+    // does NOT make the process unready. Making a stale backup return HTTP 503
+    // creates a deployment deadlock on platforms that health-check this endpoint:
+    // the new SHA never becomes live, so the exact-SHA backup workflow can never
+    // export/acknowledge the backup that would make the endpoint healthy again.
+    // Backup freshness remains a critical observability signal and is still a
+    // hard requirement in Production Acceptance / Stable Release certification.
+    const backupHealthy = backup.backups === 'current' || backup.backups === 'bootstrap';
     return {
-      ok: backupOk,
+      ok: true,
       database: 'ok',
       migrations: 'current',
       pendingMigrations: 0,
@@ -92,7 +102,7 @@ export async function readiness(): Promise<ReadinessResult> {
       latestMigration: status.latest,
       ...backup,
       pool: poolState,
-      ...(!backupOk ? { detail: `Off-site encrypted backup status is ${backup.backups}.` } : {}),
+      ...(!backupHealthy ? { detail: `Off-site encrypted backup status is ${backup.backups}; traffic is safe, release certification remains blocked.` } : {}),
     };
   } catch (error) {
     return {
