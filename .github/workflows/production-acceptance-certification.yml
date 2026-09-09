@@ -1,0 +1,176 @@
+name: Production Acceptance Certification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: certify-production-acceptance-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Certify Phase 10 production acceptance contract
+        run: npm run test:phase10-acceptance
+
+  production-acceptance:
+    name: certify-live-production-release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BASE_URL: https://adamfinancialbook.onrender.com
+      EXPECTED_RELEASE: ${{ github.sha }}
+    steps:
+      - name: Wait for exact release and verify non-mutating production acceptance
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import socket
+          import time
+          import urllib.error
+          import urllib.request
+          from datetime import datetime, timezone
+
+          base = os.environ['BASE_URL'].rstrip('/')
+          expected = os.environ['EXPECTED_RELEASE']
+
+          def get(path, tolerate_transport=False):
+              req = urllib.request.Request(
+                  base + path,
+                  method='GET',
+                  headers={
+                      'Accept': 'application/json',
+                      'Cache-Control': 'no-cache',
+                      'User-Agent': 'adam-financial-book-production-acceptance',
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as response:
+                      raw = response.read().decode('utf-8', errors='replace')
+                      return response.status, {k.lower(): v for k, v in response.headers.items()}, raw
+              except urllib.error.HTTPError as exc:
+                  raw = exc.read().decode('utf-8', errors='replace')
+                  return exc.code, {k.lower(): v for k, v in exc.headers.items()}, raw
+              except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
+                  if tolerate_transport:
+                      return 0, {}, f'transport error: {type(exc).__name__}: {exc}'
+                  raise SystemExit(f'Production acceptance transport failure for {path}: {type(exc).__name__}: {exc}')
+
+          observed = None
+          for attempt in range(1, 61):
+              status, headers, body = get('/api/health/ready', tolerate_transport=True)
+              try:
+                  payload = json.loads(body)
+              except Exception:
+                  payload = None
+              release = payload.get('release') if isinstance(payload, dict) else None
+              if status == 200 and release == expected:
+                  observed = (headers, payload)
+                  break
+              if attempt == 60:
+                  raise SystemExit(f'Production never reached exact release {expected}; last status={status}, release={release}, body={body[:500]}')
+              time.sleep(10)
+
+          headers, ready = observed
+          if 'no-store' not in headers.get('cache-control', '').lower():
+              raise SystemExit('Readiness response is missing Cache-Control: no-store.')
+          if ready.get('ok') is not True:
+              raise SystemExit(f'Readiness is not healthy: {ready}')
+          if ready.get('database') != 'ok':
+              raise SystemExit(f'Database readiness is not ok: {ready}')
+          if ready.get('migrations') != 'current' or ready.get('pendingMigrations') != 0:
+              raise SystemExit(f'Migrations are not current: {ready}')
+          if ready.get('currentMigration') != ready.get('latestMigration'):
+              raise SystemExit(f'Current/latest migration mismatch: {ready}')
+          if ready.get('backups') != 'current':
+              raise SystemExit(f'Production backup is not current: {ready}')
+          pool = ready.get('pool') or {}
+          if int(pool.get('waiting', -1)) != 0:
+              raise SystemExit(f'Database pool has waiting clients: {pool}')
+          if int(pool.get('total', 0)) > int(pool.get('max', 0)):
+              raise SystemExit(f'Database pool exceeds configured max: {pool}')
+
+          live_status, live_headers, live_body = get('/api/health/live')
+          try:
+              live = json.loads(live_body)
+          except Exception:
+              live = None
+          if live_status != 200 or not isinstance(live, dict) or live.get('ok') is not True:
+              raise SystemExit(f'Liveness check failed: status={live_status}, body={live_body[:500]}')
+          if 'no-store' not in live_headers.get('cache-control', '').lower():
+              raise SystemExit('Liveness response is missing Cache-Control: no-store.')
+
+          protected = {}
+          for path in ('/api/overview', '/api/operations/observability'):
+              status, _, body = get(path)
+              protected[path] = status
+              if status not in (401, 403):
+                  raise SystemExit(f'Protected production surface {path} unexpectedly returned {status}: {body[:300]}')
+
+          stable_samples = []
+          for _ in range(3):
+              status, _, body = get('/api/health/ready')
+              payload = json.loads(body)
+              sample = {
+                  'status': status,
+                  'ok': payload.get('ok'),
+                  'release': payload.get('release'),
+                  'database': payload.get('database'),
+                  'migrations': payload.get('migrations'),
+                  'backups': payload.get('backups'),
+                  'poolWaiting': (payload.get('pool') or {}).get('waiting'),
+              }
+              stable_samples.append(sample)
+              if status != 200 or sample['ok'] is not True or sample['release'] != expected or sample['poolWaiting'] != 0:
+                  raise SystemExit(f'Production stability sample failed: {sample}')
+              time.sleep(5)
+
+          evidence = {
+              'schema': 1,
+              'event': 'production-acceptance.certified',
+              'sha': expected,
+              'baseUrl': base,
+              'certifiedAt': datetime.now(timezone.utc).isoformat(),
+              'readiness': {
+                  'database': ready.get('database'),
+                  'migrations': ready.get('migrations'),
+                  'currentMigration': ready.get('currentMigration'),
+                  'latestMigration': ready.get('latestMigration'),
+                  'backups': ready.get('backups'),
+                  'backupAgeHours': ready.get('backupAgeHours'),
+                  'pool': ready.get('pool'),
+              },
+              'anonymousProtection': protected,
+              'stabilitySamples': stable_samples,
+          }
+          with open('production-acceptance-certification.json', 'w', encoding='utf-8') as handle:
+              json.dump(evidence, handle, indent=2, sort_keys=True)
+          print(json.dumps(evidence))
+          PY
+
+      - name: Retain exact-SHA production acceptance evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: production-acceptance-certification-${{ github.sha }}
+          path: production-acceptance-certification.json
+          if-no-files-found: error
+          retention-days: 90
