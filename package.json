@@ -27,6 +27,7 @@
     "test:phase8-observability": "vitest run server/phase8-observability-certification.test.ts",
     "test:phase9-final": "vitest run server/phase9-final-certification.test.ts",
     "test:phase10-acceptance": "vitest run server/phase10-production-acceptance.test.ts",
+    "test:phase11-closure": "vitest run server/phase11-system-closure.test.ts",
     "test:p1-mobile": "node scripts/p1-mobile-browser-certification.mjs",
     "test:p2-ui": "node scripts/p2-ui-certification.mjs",
     "test:p3-mobile": "node scripts/phase3-mobile-device-certification.mjs",
