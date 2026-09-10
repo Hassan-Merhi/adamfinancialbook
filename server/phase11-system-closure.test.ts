@@ -6,12 +6,12 @@ const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), 'utf8');
 
 describe('Phase 11 system closure certification', () => {
-  it('keeps a standalone exact-SHA closure workflow', () => {
+  it('keeps a standalone exact-SHA closure workflow as an explicit release gate', () => {
     const workflow = read('.github/workflows/system-closure-certification.yml');
 
     expect(workflow).toContain('name: System Closure Certification');
-    expect(workflow).toContain('branches: [main]');
-    expect(workflow).toContain("github.event_name == 'push'");
+    expect(workflow).toContain('workflow_dispatch:');
+    expect(workflow).toContain("github.event_name == 'workflow_dispatch'");
     expect(workflow).toContain("github.ref == 'refs/heads/main'");
     expect(workflow).toContain("current_main != expected_sha");
     expect(workflow).toContain("'Main Governance'");
@@ -27,6 +27,14 @@ describe('Phase 11 system closure certification', () => {
     expect(workflow).toContain('timeout-minutes: 45');
     expect(workflow).toContain('system-closure-certification-${{ github.sha }}');
     expect(workflow).toMatch(/uses:\s*actions\/upload-artifact@[a-f0-9]{40}/);
+  });
+
+  it('does not auto-run full closure on a normal main push', () => {
+    const workflow = read('.github/workflows/system-closure-certification.yml');
+
+    expect(workflow).not.toContain('push:\n    branches: [main]');
+    expect(workflow).toContain('pull_request:');
+    expect(workflow).toContain('workflow_dispatch:');
   });
 
   it('requires retained exact-SHA release evidence', () => {
@@ -57,5 +65,6 @@ describe('Phase 11 system closure certification', () => {
     expect(doc).toContain('physical Android');
     expect(doc).toContain('Production Acceptance Certification');
     expect(doc).toContain('no financial writes');
+    expect(doc).toContain('manually dispatched');
   });
 });
