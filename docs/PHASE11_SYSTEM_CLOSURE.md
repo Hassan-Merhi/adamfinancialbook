@@ -2,6 +2,8 @@
 
 Phase 11 is the final 100/100 closure layer for Adam Financial Book. It does not replace earlier certifications. It proves that one exact current `main` SHA has all required repository, security, accounting, recovery, performance, mobile, deployment, and production-acceptance evidence at the same time.
 
+The full closure is intentionally **manually dispatched**. A normal push to `main` must not attempt to certify Phase 11 because two of its required proofs are not automatic: the exact-release encrypted backup may need an explicit run for that SHA, and physical iPhone/Android evidence must come from a real-device certification. Keeping full closure manual prevents normal `main` checks from timing out while still preserving the stronger release gate.
+
 ## Required exact-SHA gates
 
 The closure workflow requires successful exact-SHA runs for CI, Security, Main Governance, Production Deploy Certification, Encrypted Production Backup, Disaster Recovery Certification, Real Device Mobile Certification, Production Scale Certification, Accounting Chaos Certification, Performance Architecture Certification, Production Observability Certification, Final Production Certification, and Production Acceptance Certification.
